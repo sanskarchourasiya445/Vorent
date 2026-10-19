@@ -670,5 +670,235 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
       expect(allowedRes.reservation).toBeDefined();
       expect(allowedRes.reservation.amountMinor).toBe(6000);
     });
+
+    it("Step 11 [REAL-PG]: confirms that revoked or expired approvals cannot authorize checkout", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
+
+      const defaultOwner = await ensureDefaultUser(db);
+      const testPolicyId = randomUUID();
+      createdPolicyIds.push(testPolicyId);
+
+      await db.insert(policies).values({
+        id: testPolicyId,
+        ownerId: defaultOwner,
+        name: `Test Revoked/Expired Policy ${Date.now()}`,
+        sourceMandate: "Test mandate",
+      });
+
+      const pHash = computePolicyHash(validPolicy);
+      const [pv] = await db.insert(policyVersions).values({
+        id: randomUUID(),
+        policyId: testPolicyId,
+        ownerId: defaultOwner,
+        versionNumber: 1,
+        sourceMandateSnapshot: "Test mandate",
+        intentSpec: validIntent,
+        policyDocument: validPolicy,
+        policySchemaVersion: "1.0",
+        canonicalizationVersion: "1.0",
+        policyHash: pHash,
+        confirmationState: "CONFIRMED",
+      }).returning();
+      if (!pv) throw new Error("Failed to insert policy version");
+
+      const [tr] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "test_domain",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 10,
+        resultSummary: {},
+      }).returning();
+      if (!tr) throw new Error("Failed to insert test run");
+      createdRunIds.push(tr.id);
+
+      // 1. Test Revoked Approval
+      const [revokedApp] = await db.insert(approvals).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+        qualifyingTestRunId: tr.id,
+        scope: {},
+        spendLimitMinor: 10000,
+        currency: "USD",
+        expiresAt: new Date(Date.now() + 3600 * 1000),
+        revokedAt: new Date(),
+      }).returning();
+      if (!revokedApp) throw new Error("Failed to insert revoked approval");
+      createdApprovalIds.push(revokedApp.id);
+
+      // Nonce issuance via HTTP must be rejected with 400 REVOKED_APPROVAL
+      const nonceRevokedRes = await server.inject({
+        method: "POST",
+        url: "/api/checkout/nonces",
+        payload: {
+          approvalId: revokedApp.id,
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          ttlSeconds: 300,
+        },
+      });
+      expect(nonceRevokedRes.statusCode).toBe(400);
+      expect(nonceRevokedRes.json().error.code).toBe("REVOKED_APPROVAL");
+
+      // Direct submission against revoked approval must throw REVOKED_APPROVAL
+      const dummyNonceId = randomUUID();
+      await expect(
+        submitCheckoutProposal(db, {
+          ownerId: defaultOwner,
+          approvalId: revokedApp.id,
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          nonceId: dummyNonceId,
+          cart: { currency: "USD", items: [] },
+          evidenceSnapshot: {},
+        })
+      ).rejects.toThrowError(/REVOKED_APPROVAL/);
+
+      // 2. Test Expired Approval
+      const [expiredApp] = await db.insert(approvals).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+        qualifyingTestRunId: tr.id,
+        scope: {},
+        spendLimitMinor: 10000,
+        currency: "USD",
+        expiresAt: new Date(Date.now() - 3600 * 1000), // expired 1 hour ago
+        revokedAt: null,
+      }).returning();
+      if (!expiredApp) throw new Error("Failed to insert expired approval");
+      createdApprovalIds.push(expiredApp.id);
+
+      const nonceExpiredRes = await server.inject({
+        method: "POST",
+        url: "/api/checkout/nonces",
+        payload: {
+          approvalId: expiredApp.id,
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          ttlSeconds: 300,
+        },
+      });
+      expect(nonceExpiredRes.statusCode).toBe(400);
+      expect(nonceExpiredRes.json().error.code).toBe("EXPIRED_APPROVAL");
+
+      await expect(
+        submitCheckoutProposal(db, {
+          ownerId: defaultOwner,
+          approvalId: expiredApp.id,
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          nonceId: dummyNonceId,
+          cart: { currency: "USD", items: [] },
+          evidenceSnapshot: {},
+        })
+      ).rejects.toThrowError(/EXPIRED_APPROVAL/);
+    });
+
+    it("Step 12 [REAL-PG]: verifies transaction rollback on failure preserves unconsumed nonce and zero reservations", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
+
+      const defaultOwner = await ensureDefaultUser(db);
+      const testPolicyId = randomUUID();
+      createdPolicyIds.push(testPolicyId);
+
+      await db.insert(policies).values({
+        id: testPolicyId,
+        ownerId: defaultOwner,
+        name: `Test Rollback Policy ${Date.now()}`,
+        sourceMandate: "Test mandate",
+      });
+
+      const pHash = computePolicyHash(validPolicy);
+      const [pv] = await db.insert(policyVersions).values({
+        id: randomUUID(),
+        policyId: testPolicyId,
+        ownerId: defaultOwner,
+        versionNumber: 1,
+        sourceMandateSnapshot: "Test mandate",
+        intentSpec: validIntent,
+        policyDocument: validPolicy,
+        policySchemaVersion: "1.0",
+        canonicalizationVersion: "1.0",
+        policyHash: pHash,
+        confirmationState: "CONFIRMED",
+      }).returning();
+      if (!pv) throw new Error("Failed to insert policy version");
+
+      const [tr] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "test_domain",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 10,
+        resultSummary: {},
+      }).returning();
+      if (!tr) throw new Error("Failed to insert test run");
+      createdRunIds.push(tr.id);
+
+      const [app] = await db.insert(approvals).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+        qualifyingTestRunId: tr.id,
+        scope: {},
+        spendLimitMinor: 10000,
+        currency: "USD",
+        expiresAt: new Date(Date.now() + 3600 * 1000),
+      }).returning();
+      if (!app) throw new Error("Failed to insert approval");
+      createdApprovalIds.push(app.id);
+
+      const nonce = await issueCheckoutNonce(db, {
+        ownerId: defaultOwner,
+        approvalId: app.id,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+        ttlSeconds: 300,
+      });
+
+      // Submit with mismatched currency ("EUR" instead of "USD") to trigger rollback inside transaction
+      await expect(
+        submitCheckoutProposal(db, {
+          ownerId: defaultOwner,
+          approvalId: app.id,
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          nonceId: nonce.id,
+          cart: { currency: "EUR", items: [{ sku: "X", title: "Item", category: "Books", unitPriceMinor: 1000, quantity: 1 }] },
+          evidenceSnapshot: {},
+        })
+      ).rejects.toThrowError(/CURRENCY_MISMATCH/);
+
+      // Verify that after transaction rollback, the nonce was NOT consumed
+      const [persistedNonce] = await db.select().from(checkoutNonces).where(eq(checkoutNonces.id, nonce.id));
+      expect(persistedNonce).toBeDefined();
+      expect(persistedNonce?.consumedAt).toBeNull();
+
+      // Verify no proposal or reservation was inserted
+      const proposals = await db.select().from(checkoutProposals).where(eq(checkoutProposals.consumedNonceId, nonce.id));
+      expect(proposals.length).toBe(0);
+
+      const reservations = await db.select().from(spendReservations).where(eq(spendReservations.approvalId, app.id));
+      expect(reservations.length).toBe(0);
+    });
   });
 });
