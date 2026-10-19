@@ -1,7 +1,9 @@
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyError } from "fastify";
 import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
+import { randomUUID } from "node:crypto";
 import { healthRoutes, type HealthRoutesOptions } from "./routes/health.js";
+import { verificationRoutes } from "./routes/verification.js";
 import { env } from "./config/env.js";
 import { pool } from "./db/index.js";
 
@@ -30,6 +32,44 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
     logger: loggerConfig,
   });
 
+  // Standardized error handler: Sanitizes all unhandled framework & runtime errors into contract envelope
+  app.setErrorHandler((error: FastifyError, request, reply) => {
+    const requestId =
+      (typeof request.headers["x-request-id"] === "string" && request.headers["x-request-id"].trim()) ||
+      request.id ||
+      `req_${randomUUID()}`;
+    reply.header("x-request-id", requestId);
+
+    const statusCode =
+      typeof error?.statusCode === "number" && error.statusCode >= 400 && error.statusCode < 600
+        ? error.statusCode
+        : 500;
+
+    let errorCode = "INTERNAL_ERROR";
+    let message = "An internal server error occurred.";
+
+    if (statusCode === 400) {
+      errorCode = "BAD_REQUEST";
+      message = error?.message || "Invalid request payload.";
+    } else if (statusCode === 404) {
+      errorCode = "NOT_FOUND";
+      message = error?.message || "Resource not found.";
+    } else if (statusCode === 405) {
+      errorCode = "METHOD_NOT_ALLOWED";
+      message = error?.message || "Method not allowed.";
+    } else {
+      request.log.error({ err: error, requestId }, "Unhandled server error");
+    }
+
+    return reply.status(statusCode).send({
+      error: {
+        code: errorCode,
+        message,
+      },
+      requestId,
+    });
+  });
+
   // Register security & utility plugins
   await app.register(sensible);
   await app.register(cors, {
@@ -39,6 +79,8 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
 
   // Register routes
   await app.register(healthRoutes, { checkDb: options.checkDb });
+  await app.register(verificationRoutes, { prefix: "/api/verification" });
+
 
   // Root welcome route
   app.get("/", async () => {

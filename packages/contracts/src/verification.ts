@@ -207,3 +207,48 @@ export const VerificationRequestSchema = z.object({
 });
 
 export type VerificationRequest = z.infer<typeof VerificationRequestSchema>;
+
+// 12. Search Dimensions
+export const SearchDimensionValues = [
+  "PRICE_BOUNDARIES",
+  "CATEGORY_EVASION",
+  "CURRENCY_MUTATION",
+  "EVIDENCE_FRESHNESS",
+  "QUANTITY_SPLITS",
+] as const;
+
+export const SearchDimensionZodSchema = z.enum(SearchDimensionValues);
+export type SearchDimension = z.infer<typeof SearchDimensionZodSchema>;
+
+// 13. Preset-Referenced Verification Request
+export const PresetVerificationRequestSchema = z.object({
+  policyVersionId: z.string().min(1, "policyVersionId is required"),
+  policyHash: z.string().optional(),
+  dimensions: z.array(SearchDimensionZodSchema).min(1, "Must declare at least one search dimension").optional(),
+  candidateBudget: z.number().int().positive().max(10000).optional(),
+  maxCandidates: z.number().int().positive().max(10000).optional(),
+  timeoutMs: z.number().int().positive().max(60000).optional(),
+  stopOnFirstFinding: z.boolean().optional(),
+});
+
+export type PresetVerificationRequest = z.infer<typeof PresetVerificationRequestSchema>;
+
+// 14. API Request Union
+export const ApiVerificationRunRequestSchema = z.union([
+  VerificationRequestSchema,
+  PresetVerificationRequestSchema,
+]);
+
+export type ApiVerificationRunRequest = z.infer<typeof ApiVerificationRunRequestSchema>;
+
+// 15. Structured Error Response Envelope
+export const ApiErrorResponseSchema = z.object({
+  error: z.object({
+    code: z.string().min(1),
+    message: z.string().min(1),
+  }),
+  requestId: z.string().min(1),
+});
+
+export type ApiErrorResponse = z.infer<typeof ApiErrorResponseSchema>;
+

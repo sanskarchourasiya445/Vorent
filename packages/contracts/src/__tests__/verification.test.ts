@@ -6,6 +6,9 @@ import {
   VerificationFindingSchema,
   VerificationReportSchema,
   VerificationRequestSchema,
+  PresetVerificationRequestSchema,
+  ApiVerificationRunRequestSchema,
+  ApiErrorResponseSchema,
   type ConfirmedIntent,
   type SearchSpaceDefinition,
 } from "../index.js";
@@ -137,4 +140,61 @@ describe("Phase 2 Verification Contracts (@warrant/contracts)", () => {
     const parsed = VerificationRequestSchema.safeParse(request);
     expect(parsed.success).toBe(true);
   });
+
+  it("9. validates PresetVerificationRequestSchema", () => {
+    const validPreset = {
+      policyVersionId: "pol_v1_books_hardware",
+      dimensions: ["PRICE_BOUNDARIES", "QUANTITY_SPLITS"],
+      candidateBudget: 150,
+      timeoutMs: 3000,
+    };
+
+    const parsed = PresetVerificationRequestSchema.safeParse(validPreset);
+    expect(parsed.success).toBe(true);
+
+    const invalidEmpty = {
+      policyVersionId: "",
+    };
+    expect(PresetVerificationRequestSchema.safeParse(invalidEmpty).success).toBe(false);
+  });
+
+  it("10. validates ApiVerificationRunRequestSchema union with both full and preset requests", () => {
+    const fullRequest = {
+      policy: { schemaVersion: "1.0", currency: "USD" },
+      intent: validIntent,
+      searchSpace: validSearchSpace,
+    };
+    expect(ApiVerificationRunRequestSchema.safeParse(fullRequest).success).toBe(true);
+
+    const presetRequest = {
+      policyVersionId: "pol_v1_books_hardware",
+      candidateBudget: 50,
+    };
+    expect(ApiVerificationRunRequestSchema.safeParse(presetRequest).success).toBe(true);
+
+    const invalidRequest = {
+      randomField: 123,
+    };
+    expect(ApiVerificationRunRequestSchema.safeParse(invalidRequest).success).toBe(false);
+  });
+
+  it("11. validates ApiErrorResponseSchema envelope", () => {
+    const errorPayload = {
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "Invalid input schema",
+      },
+      requestId: "req_test_123",
+    };
+
+    const parsed = ApiErrorResponseSchema.safeParse(errorPayload);
+    expect(parsed.success).toBe(true);
+
+    const invalidError = {
+      error: "Just a string",
+      requestId: "req_test_123",
+    };
+    expect(ApiErrorResponseSchema.safeParse(invalidError).success).toBe(false);
+  });
 });
+
