@@ -7,3 +7,4 @@ export * from "./evaluation.js";
 export * from "./verification.js";
 export * from "./persistence.js";
 export * from "./checkout.js";
+export * from "./approvals.js";

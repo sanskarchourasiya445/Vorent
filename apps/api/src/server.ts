@@ -5,6 +5,8 @@ import { randomUUID } from "node:crypto";
 import { healthRoutes, type HealthRoutesOptions } from "./routes/health.js";
 import { verificationRoutes } from "./routes/verification.js";
 import { policyRoutes } from "./routes/policies.js";
+import { approvalRoutes } from "./routes/approvals.js";
+import { checkoutRoutes } from "./routes/checkout.js";
 import { env } from "./config/env.js";
 import { pool } from "./db/index.js";
 
@@ -83,6 +85,10 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
   await app.register(verificationRoutes, { prefix: "/api/verification" });
   await app.register(policyRoutes, { prefix: "/api/policies" });
   await app.register(policyRoutes, { prefix: "/api/v1/policies" });
+  await app.register(approvalRoutes, { prefix: "/api/approvals" });
+  await app.register(approvalRoutes, { prefix: "/api/v1/approvals" });
+  await app.register(checkoutRoutes, { prefix: "/api/checkout" });
+  await app.register(checkoutRoutes, { prefix: "/api/v1/checkout" });
 
 
   // Root welcome route
