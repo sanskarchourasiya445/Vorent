@@ -181,7 +181,7 @@ export const checkoutProposals = pgTable(
     approvalId: uuid("approval_id").notNull().references(() => approvals.id),
     policyVersionId: uuid("policy_version_id").notNull().references(() => policyVersions.id),
     policyHash: char("policy_hash", { length: 64 }).notNull(),
-    consumedNonceId: uuid("consumed_nonce_id").notNull().references(() => checkoutNonces.id),
+    consumedNonceId: uuid("consumed_nonce_id").notNull().unique().references(() => checkoutNonces.id),
     cartHash: char("cart_hash", { length: 64 }).notNull(),
     proposedCart: jsonb("proposed_cart").notNull(),
     normalizedCart: jsonb("normalized_cart").notNull(),

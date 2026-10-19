@@ -230,6 +230,14 @@ describe("Phase 4: Database Persistence & Policy Version History", () => {
       expect(sqlContent).toContain('"status" text NOT NULL');
     });
 
+    it("migration 0001 SQL file exists and adds unique constraint on checkout_proposals.consumed_nonce_id", () => {
+      const migration0001Path = resolve(process.cwd(), "drizzle/migrations/0001_unique_consumed_nonce.sql");
+      expect(existsSync(migration0001Path)).toBe(true);
+
+      const sqlContent = readFileSync(migration0001Path, "utf-8");
+      expect(sqlContent).toContain('ALTER TABLE "checkout_proposals" ADD CONSTRAINT "checkout_proposals_consumed_nonce_id_unique" UNIQUE("consumed_nonce_id");');
+    });
+
     it("computes deterministic 64-character SHA-256 policy hash", () => {
       const hash1 = computePolicyHash(validPolicy);
       const hash2 = computePolicyHash({ ...validPolicy });

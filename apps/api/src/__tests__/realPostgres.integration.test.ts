@@ -1,10 +1,27 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { resolve } from "node:path";
+import { randomUUID, createHash } from "node:crypto";
 import { pool, db } from "../db/index.js";
 import { buildServer } from "../server.js";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { eq } from "drizzle-orm";
-import { policies, policyVersions, testRuns, findings } from "../db/schema.js";
+import {
+  policies,
+  policyVersions,
+  testRuns,
+  findings,
+  approvals,
+  checkoutNonces,
+  checkoutProposals,
+  spendReservations,
+} from "../db/schema.js";
+import { ensureDefaultUser } from "../db/repositories/policyRepository.js";
+import {
+  issueCheckoutNonce,
+  submitCheckoutProposal,
+} from "../db/repositories/checkoutProposalRepository.js";
+import { computePolicyHash } from "@warrant/domain";
+import { ReasonCode } from "@warrant/contracts";
 import type { FastifyInstance } from "fastify";
 import type { PolicyDocument, ConfirmedIntent, SearchSpaceDefinition } from "@warrant/contracts";
 
@@ -13,6 +30,7 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
   let server: FastifyInstance;
   const createdPolicyIds: string[] = [];
   const createdRunIds: string[] = [];
+  const createdApprovalIds: string[] = [];
 
   beforeAll(async () => {
     // Probe real PostgreSQL connection safely
@@ -42,6 +60,16 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
   afterAll(async () => {
     if (isDbLive) {
       // Clean up isolated test records safely
+      for (const appId of createdApprovalIds) {
+        try {
+          await db.delete(spendReservations).where(eq(spendReservations.approvalId, appId));
+          await db.delete(checkoutProposals).where(eq(checkoutProposals.approvalId, appId));
+          await db.delete(checkoutNonces).where(eq(checkoutNonces.approvalId, appId));
+          await db.delete(approvals).where(eq(approvals.id, appId));
+        } catch {
+          // ignore cleanup errors on teardown
+        }
+      }
       for (const runId of createdRunIds) {
         try {
           await db.delete(findings).where(eq(findings.testRunId, runId));
@@ -275,6 +303,372 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
         const allPresets = data.policies.every((p: any) => p.isPreset === true || Boolean(p.presetId));
         expect(allPresets).toBe(true);
       }
+    });
+  });
+
+  describe("Phase 4.2 Nonce Replay Defense & Concurrent Spend Serialization (Real PostgreSQL)", () => {
+    it("Step 8 [REAL-PG]: rejects nonce replay when same nonce is submitted twice to real PostgreSQL", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
+
+      // 1. Setup policy, version, and approval in real database
+      const defaultOwner = await ensureDefaultUser(db);
+      const testPolicyId = randomUUID();
+      createdPolicyIds.push(testPolicyId);
+
+      await db.insert(policies).values({
+        id: testPolicyId,
+        ownerId: defaultOwner,
+        name: `Test Nonce Replay Policy ${Date.now()}`,
+        sourceMandate: "Test mandate for nonce replay",
+      });
+
+      const pHash = computePolicyHash(validPolicy);
+      const [pv] = await db.insert(policyVersions).values({
+        id: randomUUID(),
+        policyId: testPolicyId,
+        ownerId: defaultOwner,
+        versionNumber: 1,
+        sourceMandateSnapshot: "Test mandate",
+        intentSpec: validIntent,
+        policyDocument: validPolicy,
+        policySchemaVersion: "1.0",
+        canonicalizationVersion: "1.0",
+        policyHash: pHash,
+        confirmationState: "CONFIRMED",
+      }).returning();
+      if (!pv) throw new Error("Failed to insert policy version");
+
+      // Create qualifying test run for approval FK
+      const [tr] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "test_domain",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 10,
+        resultSummary: {},
+      }).returning();
+      if (!tr) throw new Error("Failed to insert test run");
+      createdRunIds.push(tr.id);
+
+      const [app] = await db.insert(approvals).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+        qualifyingTestRunId: tr.id,
+        scope: { allowAll: true },
+        spendLimitMinor: 10000,
+        currency: "USD",
+        expiresAt: new Date(Date.now() + 3600 * 1000),
+      }).returning();
+      if (!app) throw new Error("Failed to insert approval");
+      createdApprovalIds.push(app.id);
+
+      // 2. Issue a real nonce
+      const nonce = await issueCheckoutNonce(db, {
+        ownerId: defaultOwner,
+        approvalId: app.id,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+        ttlSeconds: 300,
+      });
+
+      const testCart = {
+        currency: "USD",
+        items: [
+          {
+            sku: "SKU-TEST-1",
+            title: "Test Book",
+            category: "Books",
+            unitPriceMinor: 2500,
+            quantity: 1,
+          },
+        ],
+      };
+
+      const testEvidence = {
+        quotesVerified: true,
+        evidenceComplete: true,
+        stale: false,
+      };
+
+      // 3. First submission succeeds and creates reservation
+      const firstResult = await submitCheckoutProposal(db, {
+        ownerId: defaultOwner,
+        approvalId: app.id,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+        nonceId: nonce.id,
+        cart: testCart,
+        evidenceSnapshot: testEvidence,
+      });
+
+      expect(firstResult.decision).toBe("ALLOW");
+      expect(firstResult.reservation).toBeDefined();
+      expect(firstResult.reservation.state).toBe("ORDER_CREATION_PENDING");
+
+      // 4. Second submission with the SAME nonce MUST fail with NonceReplayError
+      await expect(
+        submitCheckoutProposal(db, {
+          ownerId: defaultOwner,
+          approvalId: app.id,
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          nonceId: nonce.id,
+          cart: testCart,
+          evidenceSnapshot: testEvidence,
+        })
+      ).rejects.toThrowError(/NONCE_REPLAYED/);
+    });
+
+    it("Step 9 [REAL-PG]: database engine enforces unique constraint on checkout_proposals.consumed_nonce_id", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
+
+      const defaultOwner = await ensureDefaultUser(db);
+      const testPolicyId = randomUUID();
+      createdPolicyIds.push(testPolicyId);
+
+      await db.insert(policies).values({
+        id: testPolicyId,
+        ownerId: defaultOwner,
+        name: `Test Unique Constraint Policy ${Date.now()}`,
+        sourceMandate: "Test mandate",
+      });
+
+      const pHash = computePolicyHash(validPolicy);
+      const [pv] = await db.insert(policyVersions).values({
+        id: randomUUID(),
+        policyId: testPolicyId,
+        ownerId: defaultOwner,
+        versionNumber: 1,
+        sourceMandateSnapshot: "Test mandate",
+        intentSpec: validIntent,
+        policyDocument: validPolicy,
+        policySchemaVersion: "1.0",
+        canonicalizationVersion: "1.0",
+        policyHash: pHash,
+        confirmationState: "CONFIRMED",
+      }).returning();
+      if (!pv) throw new Error("Failed to insert policy version");
+
+      const [tr] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "test_domain",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 10,
+        resultSummary: {},
+      }).returning();
+      if (!tr) throw new Error("Failed to insert test run");
+      createdRunIds.push(tr.id);
+
+      const [app] = await db.insert(approvals).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+        qualifyingTestRunId: tr.id,
+        scope: { allowAll: true },
+        spendLimitMinor: 10000,
+        currency: "USD",
+        expiresAt: new Date(Date.now() + 3600 * 1000),
+      }).returning();
+      if (!app) throw new Error("Failed to insert approval");
+      createdApprovalIds.push(app.id);
+
+      const nonce = await issueCheckoutNonce(db, {
+        ownerId: defaultOwner,
+        approvalId: app.id,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+      });
+
+      const cartHash = createHash("sha256").update("cart1").digest("hex");
+
+      // Insert first proposal referencing consumed_nonce_id
+      await db.insert(checkoutProposals).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        approvalId: app.id,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+        consumedNonceId: nonce.id,
+        cartHash,
+        proposedCart: { currency: "USD", items: [] },
+        normalizedCart: { currency: "USD", items: [] },
+        evidenceSnapshot: {},
+        decision: "ALLOW",
+        reasonCodes: ["ALL_RULES_PASSED"],
+        ruleTrace: [],
+        evaluatedAt: new Date(),
+      });
+
+      // Attempt second direct insert with same consumed_nonce_id; PostgreSQL must throw 23505 unique constraint violation
+      let errorThrown: any = null;
+      try {
+        await db.insert(checkoutProposals).values({
+          id: randomUUID(),
+          ownerId: defaultOwner,
+          approvalId: app.id,
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          consumedNonceId: nonce.id, // duplicate consumed nonce!
+          cartHash,
+          proposedCart: { currency: "USD", items: [] },
+          normalizedCart: { currency: "USD", items: [] },
+          evidenceSnapshot: {},
+          decision: "ALLOW",
+          reasonCodes: ["ALL_RULES_PASSED"],
+          ruleTrace: [],
+          evaluatedAt: new Date(),
+        });
+      } catch (err: any) {
+        errorThrown = err;
+      }
+
+      expect(errorThrown).toBeDefined();
+      expect(errorThrown.code).toBe("23505"); // PostgreSQL unique_violation code
+    });
+
+    it("Step 10 [REAL-PG]: serializes concurrent proposals on approval row lock preventing overspend race condition", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
+
+      const defaultOwner = await ensureDefaultUser(db);
+      const testPolicyId = randomUUID();
+      createdPolicyIds.push(testPolicyId);
+
+      await db.insert(policies).values({
+        id: testPolicyId,
+        ownerId: defaultOwner,
+        name: `Test Concurrent Spend Policy ${Date.now()}`,
+        sourceMandate: "Test mandate",
+      });
+
+      const pHash = computePolicyHash(validPolicy);
+      const [pv] = await db.insert(policyVersions).values({
+        id: randomUUID(),
+        policyId: testPolicyId,
+        ownerId: defaultOwner,
+        versionNumber: 1,
+        sourceMandateSnapshot: "Test mandate",
+        intentSpec: validIntent,
+        policyDocument: validPolicy,
+        policySchemaVersion: "1.0",
+        canonicalizationVersion: "1.0",
+        policyHash: pHash,
+        confirmationState: "CONFIRMED",
+      }).returning();
+      if (!pv) throw new Error("Failed to insert policy version");
+
+      const [tr] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "test_domain",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 10,
+        resultSummary: {},
+      }).returning();
+      if (!tr) throw new Error("Failed to insert test run");
+      createdRunIds.push(tr.id);
+
+      // Approval limit is $100.00 (10000 minor)
+      const [app] = await db.insert(approvals).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+        qualifyingTestRunId: tr.id,
+        scope: { allowAll: true },
+        spendLimitMinor: 10000,
+        currency: "USD",
+        expiresAt: new Date(Date.now() + 3600 * 1000),
+      }).returning();
+      if (!app) throw new Error("Failed to insert approval");
+      createdApprovalIds.push(app.id);
+
+      // Issue two valid distinct nonces
+      const nonceA = await issueCheckoutNonce(db, {
+        ownerId: defaultOwner,
+        approvalId: app.id,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+      });
+
+      const nonceB = await issueCheckoutNonce(db, {
+        ownerId: defaultOwner,
+        approvalId: app.id,
+        policyVersionId: pv.id,
+        policyHash: pHash,
+      });
+
+      // Both carts are $60.00 (6000 minor).
+      // Alone: 6000 <= 10000 (ALLOW).
+      // Combined: 6000 + 6000 = 12000 > 10000 (DENY).
+      const cartA = {
+        currency: "USD",
+        items: [{ sku: "A", title: "Cart A Item", category: "Books", unitPriceMinor: 6000, quantity: 1 }],
+      };
+      const cartB = {
+        currency: "USD",
+        items: [{ sku: "B", title: "Cart B Item", category: "Books", unitPriceMinor: 6000, quantity: 1 }],
+      };
+      const testEvidence = { quotesVerified: true, evidenceComplete: true, stale: false };
+
+      // Dispatch both proposals simultaneously across parallel promises
+      const [resA, resB] = await Promise.all([
+        submitCheckoutProposal(db, {
+          ownerId: defaultOwner,
+          approvalId: app.id,
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          nonceId: nonceA.id,
+          cart: cartA,
+          evidenceSnapshot: testEvidence,
+        }),
+        submitCheckoutProposal(db, {
+          ownerId: defaultOwner,
+          approvalId: app.id,
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          nonceId: nonceB.id,
+          cart: cartB,
+          evidenceSnapshot: testEvidence,
+        }),
+      ]);
+
+      const decisions = [resA.decision, resB.decision].sort();
+      // Exactly one ALLOW and one DENY
+      expect(decisions).toEqual(["ALLOW", "DENY"]);
+
+      // The denied one has ReasonCode.LIFETIME_SPEND_LIMIT_EXCEEDED
+      const deniedRes = resA.decision === "DENY" ? resA : resB;
+      const allowedRes = resA.decision === "ALLOW" ? resA : resB;
+
+      expect(deniedRes.reasonCodes).toContain(ReasonCode.LIFETIME_SPEND_LIMIT_EXCEEDED);
+      expect(deniedRes.reservation).toBeNull();
+      expect(allowedRes.reservation).toBeDefined();
+      expect(allowedRes.reservation.amountMinor).toBe(6000);
     });
   });
 });
