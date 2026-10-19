@@ -158,6 +158,17 @@ export async function listPolicies(db: any, _ownerId?: string): Promise<PolicySu
       });
     }
 
+    // Combine with preset summaries for any preset not yet in DB
+    const presetSummaries = getPresetSummaries();
+    for (const preset of presetSummaries) {
+      const alreadyPresent = summaries.some(
+        (s) => s.id === preset.id || s.presetId === preset.id || s.name === preset.name
+      );
+      if (!alreadyPresent) {
+        summaries.push(preset);
+      }
+    }
+
     return summaries;
   } catch {
     // If DB is unavailable, return built-in presets formatted as PolicySummary
