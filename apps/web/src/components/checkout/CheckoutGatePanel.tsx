@@ -1,7 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { CheckoutProposalItem, CheckoutGateResult } from "../../types/checkout";
+import type { ApprovalListState } from "../../types/approval";
 import { submitCheckoutProposal, requestCheckoutNonce } from "../../api/checkoutService";
+import { fetchApprovals } from "../../api/approvalService";
 import { DecisionResultCard } from "../features/DecisionResultCard";
+import { PaymentOrderPipelineCard } from "./PaymentOrderPipelineCard";
+import { createPaymentOrder, PaymentOrderError } from "../../api/paymentOrderService";
+import type { PayPalOrderPresentationState } from "../../types/paymentOrder";
 import { AVAILABLE_POLICIES } from "../../api/verificationService";
 import {
   ShieldCheck,
@@ -9,10 +14,10 @@ import {
   Send,
   AlertCircle,
   RefreshCw,
-  Clock,
   Layers,
-  CheckCircle2,
   Lock,
+  Database,
+  FileCheck,
 } from "lucide-react";
 
 interface PresetScenario {
@@ -87,14 +92,48 @@ export function CheckoutGatePanel() {
   const [merchantName, setMerchantName] = useState("Acme Dev Supplies Ltd.");
   const [useOfflineSimulation, setUseOfflineSimulation] = useState(false);
 
+  // Real approvals state
+  const [approvalsState, setApprovalsState] = useState<ApprovalListState>({ state: "LOADING" });
+  const [selectedApprovalId, setSelectedApprovalId] = useState<string>("");
+  const [useManualApproval, setUseManualApproval] = useState<boolean>(false);
+  const [manualApprovalId, setManualApprovalId] = useState<string>("");
+  const [manualPolicyId, setManualPolicyId] = useState<string>(AVAILABLE_POLICIES[0]?.id || "");
+
   // Evaluation state
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evalResult, setEvalResult] = useState<CheckoutGateResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [consumedNonce, setConsumedNonce] = useState<string | null>(null);
 
-  const selectedPolicy = AVAILABLE_POLICIES[0];
+  // PayPal Sandbox Order creation state
+  const [paypalOrderState, setPaypalOrderState] = useState<PayPalOrderPresentationState | null>(null);
+  const [isCreatingPayPalOrder, setIsCreatingPayPalOrder] = useState(false);
+
   const cartTotalMinor = items.reduce((sum, item) => sum + item.unitPriceMinor * item.quantity, 0);
+
+  const loadApprovals = useCallback(async () => {
+    setApprovalsState({ state: "LOADING" });
+    const result = await fetchApprovals();
+    setApprovalsState(result);
+
+    if (result.state === "READY" && result.data.length > 0) {
+      // Pick first active, non-expired approval
+      const now = Date.now();
+      const active = result.data.find(
+        (a) => a.status === "ACTIVE" && new Date(a.expiresAt).getTime() > now,
+      );
+      if (active) {
+        setSelectedApprovalId(active.id);
+        setUseManualApproval(false);
+      } else {
+        setSelectedApprovalId(result.data[0].id);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadApprovals();
+  }, [loadApprovals]);
 
   const handleScenarioChange = (scenarioId: string) => {
     setSelectedScenarioId(scenarioId);
@@ -104,29 +143,73 @@ export function CheckoutGatePanel() {
     }
   };
 
+  // Derive authoritative approval record
+  const selectedApproval =
+    approvalsState.state === "READY"
+      ? approvalsState.data.find((a) => a.id === selectedApprovalId) || null
+      : null;
+
+  const isSelectedApprovalValid =
+    Boolean(selectedApproval) &&
+    selectedApproval?.status === "ACTIVE" &&
+    new Date(selectedApproval.expiresAt).getTime() > Date.now();
+
+  const effectiveApprovalId = useManualApproval
+    ? manualApprovalId.trim()
+    : (selectedApproval?.id || "");
+
+  const effectivePolicyVersionId = useManualApproval
+    ? manualPolicyId
+    : (selectedApproval?.policyVersionId || "");
+
+  const effectivePolicyHash = useManualApproval
+    ? (AVAILABLE_POLICIES.find((p) => p.id === manualPolicyId)?.hash || "")
+    : (selectedApproval?.policyHash || "");
+
+  const effectiveCurrency = useManualApproval
+    ? "USD"
+    : (selectedApproval?.currency || "USD");
+
+  const isLiveConfigValid =
+    useOfflineSimulation ||
+    (Boolean(effectiveApprovalId) &&
+      Boolean(effectivePolicyVersionId) &&
+      Boolean(effectivePolicyHash) &&
+      (useManualApproval || isSelectedApprovalValid));
+
   const handleEvaluate = async () => {
+    if (!isLiveConfigValid) return;
+    if (isCreatingPayPalOrder) return;
+    if (paypalOrderState?.isAmbiguous) {
+      setErrorMessage(
+        "A previous payment order is in an ambiguous reconciliation hold. Discarding or re-evaluating without resolving the hold could lead to duplicate orders. Please resolve the order outcome before submitting a new proposal.",
+      );
+      return;
+    }
+
     setIsEvaluating(true);
     setErrorMessage(null);
     setEvalResult(null);
+    setPaypalOrderState(null);
 
     try {
       let nonce: string | undefined;
       if (!useOfflineSimulation) {
         nonce = await requestCheckoutNonce(
-          "11111111-1111-1111-1111-111111111111",
-          selectedPolicy.id.length === 36 ? selectedPolicy.id : "22222222-2222-2222-2222-222222222222",
-          selectedPolicy.hash,
+          effectiveApprovalId,
+          effectivePolicyVersionId,
+          effectivePolicyHash,
         );
         setConsumedNonce(nonce);
       }
 
       const result = await submitCheckoutProposal({
-        approvalId: "appr_v1_books_hardware",
-        policyVersionId: selectedPolicy.id,
-        policyHash: selectedPolicy.hash,
+        approvalId: effectiveApprovalId,
+        policyVersionId: effectivePolicyVersionId,
+        policyHash: effectivePolicyHash,
         merchantName,
         items,
-        currency: "USD",
+        currency: effectiveCurrency,
         nonce,
         useOfflineSimulation,
       });
@@ -139,19 +222,93 @@ export function CheckoutGatePanel() {
     }
   };
 
+  const handleCreatePayPalOrder = async () => {
+    if (isCreatingPayPalOrder) return;
+    if (
+      !evalResult ||
+      evalResult.decision !== "ALLOW" ||
+      !evalResult.proposalId ||
+      !evalResult.reservationId
+    ) {
+      return;
+    }
+
+    if (evalResult.isDemoSimulation) {
+      setPaypalOrderState({
+        error:
+          "Offline Simulation: PayPal Sandbox payment orders require active PostgreSQL persistence and live Warrant gate authorization.",
+        isCreating: false,
+      });
+      return;
+    }
+
+    setIsCreatingPayPalOrder(true);
+    setPaypalOrderState((prev) => ({
+      ...(prev || {}),
+      isCreating: true,
+      error: undefined,
+      isAmbiguous: false,
+    }));
+
+    try {
+      const response = await createPaymentOrder({
+        proposalId: evalResult.proposalId,
+        reservationId: evalResult.reservationId,
+      });
+
+      setPaypalOrderState({
+        orderId: response.order.id,
+        paypalOrderId: response.paypalOrderId,
+        provider: response.order.provider,
+        status: response.order.status,
+        reservationState: response.reservationState,
+        approvalUrl: response.approvalUrl,
+        isCreating: false,
+      });
+    } catch (err) {
+      if (err instanceof PaymentOrderError) {
+        setPaypalOrderState({
+          error: err.message,
+          errorCode: err.code,
+          isAmbiguous: err.isAmbiguous,
+          isCreating: false,
+        });
+      } else {
+        setPaypalOrderState({
+          error: err instanceof Error ? err.message : "Failed to create PayPal Sandbox order.",
+          isCreating: false,
+        });
+      }
+    } finally {
+      setIsCreatingPayPalOrder(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto" role="region" aria-label="Checkout Gate Workstation">
       {/* Header */}
-      <div className="border-b border-border pb-4">
-        <div className="flex items-center space-x-2">
-          <ShieldCheck className="w-6 h-6 text-accent" aria-hidden="true" />
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-ink">
-            Checkout Authorization Gate
-          </h1>
+      <div className="border-b border-border pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center space-x-2">
+            <ShieldCheck className="w-6 h-6 text-accent" aria-hidden="true" />
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-ink">
+              Checkout Authorization Gate
+            </h1>
+          </div>
+          <p className="text-xs sm:text-sm text-muted mt-1">
+            Enforces server-side purchase authorization against approved policy rules before any payment operation.
+          </p>
         </div>
-        <p className="text-xs sm:text-sm text-muted mt-1">
-          Enforces server-side purchase authorization against approved policy rules before any payment operation.
-        </p>
+
+        <button
+          type="button"
+          onClick={() => void loadApprovals()}
+          disabled={approvalsState.state === "LOADING"}
+          className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold bg-canvas hover:bg-border/60 text-ink border border-border transition-colors disabled:opacity-50 shrink-0 self-start sm:self-auto"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${approvalsState.state === "LOADING" ? "animate-spin" : ""}`} />
+          <span>Refresh Approvals</span>
+        </button>
       </div>
 
       {/* Configuration & Proposal Grid */}
@@ -159,6 +316,154 @@ export function CheckoutGatePanel() {
         {/* Left Column: Proposed Cart & Nonce Configuration */}
         <div className="lg:col-span-7 space-y-4">
           <div className="p-5 rounded-panel border border-border bg-surface space-y-4 shadow-sm">
+            {/* Bound Approval Selector */}
+            <div className="space-y-2 border-b border-border pb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <FileCheck className="w-4 h-4 text-accent" />
+                  <span className="text-xs font-semibold uppercase tracking-wider text-ink">
+                    Authoritative Approval Checkpoint
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUseManualApproval(!useManualApproval)}
+                  className="text-[11px] text-accent hover:underline font-medium"
+                >
+                  {useManualApproval ? "← Select From Ledger" : "Enter Approval ID →"}
+                </button>
+              </div>
+
+              {approvalsState.state === "LOADING" && (
+                <div className="p-2.5 rounded border border-border bg-canvas text-xs text-muted flex items-center space-x-2">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-accent" />
+                  <span>Loading active approvals from server...</span>
+                </div>
+              )}
+
+              {approvalsState.state === "UNAVAILABLE" && !useManualApproval && (
+                <div className="p-3 rounded border border-amber-300 bg-amber-50 text-amber-950 text-xs space-y-1">
+                  <div className="flex items-center space-x-1.5 font-semibold text-amber-900">
+                    <Database className="w-3.5 h-3.5 text-amber-700" />
+                    <span>PostgreSQL Standby Mode</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    Live approvals cannot be queried from the database. Please specify an approval ID manually or use labeled offline simulation.
+                  </p>
+                </div>
+              )}
+
+              {!useManualApproval && approvalsState.state === "READY" && (
+                <div className="space-y-2">
+                  {approvalsState.data.length === 0 ? (
+                    <div className="p-3 rounded border border-dashed border-border bg-canvas text-xs text-muted text-center space-y-1">
+                      <p>No approvals exist in the database ledger.</p>
+                      <button
+                        type="button"
+                        onClick={() => setUseManualApproval(true)}
+                        className="text-xs text-accent underline font-semibold"
+                      >
+                        Enter Approval ID Manually
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <select
+                        value={selectedApprovalId}
+                        onChange={(e) => setSelectedApprovalId(e.target.value)}
+                        className="w-full rounded border border-border bg-canvas px-3 py-1.5 text-xs text-ink font-mono"
+                      >
+                        {approvalsState.data.map((a) => {
+                          const isExpired = new Date(a.expiresAt).getTime() <= Date.now();
+                          const statusTag = a.status === "ACTIVE" && !isExpired ? "ACTIVE" : isExpired ? "EXPIRED" : a.status;
+                          return (
+                            <option key={a.id} value={a.id}>
+                              [{statusTag}] {a.policyName || a.policyVersionId} | Rem: ${(((a.spendLimitMinor - a.consumedSpendMinor)) / 100).toFixed(2)} {a.currency} ({a.id.slice(0, 8)}...)
+                            </option>
+                          );
+                        })}
+                      </select>
+
+                      {selectedApproval && (
+                        <div
+                          className={`p-3 rounded border text-xs space-y-1.5 ${
+                            isSelectedApprovalValid
+                              ? "border-emerald-300 bg-emerald-50/60 text-emerald-950"
+                              : "border-amber-300 bg-amber-50/60 text-amber-950"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between font-semibold">
+                            <span>Status: {selectedApproval.status}</span>
+                            <span>
+                              Available Spend: $
+                              {(
+                                (selectedApproval.spendLimitMinor - selectedApproval.consumedSpendMinor) /
+                                100
+                              ).toFixed(2)}{" "}
+                              {selectedApproval.currency}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-muted space-y-0.5">
+                            <div>
+                              Policy Version: <span className="font-mono text-ink">{selectedApproval.policyVersionId}</span>
+                            </div>
+                            <div className="truncate">
+                              Policy Hash: <span className="font-mono text-ink">{selectedApproval.policyHash}</span>
+                            </div>
+                          </div>
+                          {!isSelectedApprovalValid && (
+                            <p className="text-[11px] text-red-800 font-semibold pt-1">
+                              ⚠️ This approval is {selectedApproval.status === "ACTIVE" ? "EXPIRED" : selectedApproval.status}. Gate evaluation will be blocked by backend.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {useManualApproval && (
+                <div className="p-3 rounded border border-border bg-canvas space-y-2 text-xs">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-muted uppercase mb-1">
+                      Approval ID (UUID)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 11111111-1111-1111-1111-111111111111"
+                      value={manualApprovalId}
+                      onChange={(e) => setManualApprovalId(e.target.value)}
+                      className="w-full rounded border border-border bg-surface px-3 py-1.5 text-xs text-ink font-mono"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-muted uppercase mb-1">
+                      Bound Policy Version
+                    </label>
+                    <select
+                      value={manualPolicyId}
+                      onChange={(e) => setManualPolicyId(e.target.value)}
+                      className="w-full rounded border border-border bg-surface px-3 py-1.5 text-xs text-ink"
+                    >
+                      {AVAILABLE_POLICIES.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.id})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {effectivePolicyHash && (
+                    <div className="text-[10px] text-muted font-mono truncate">
+                      Derived Hash: {effectivePolicyHash}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Cart Header */}
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div className="flex items-center space-x-2">
                 <ShoppingCart className="w-4 h-4 text-accent" />
@@ -240,7 +545,7 @@ export function CheckoutGatePanel() {
               </p>
               {consumedNonce && (
                 <div className="font-mono text-[10px] text-accent truncate">
-                  Consumed: {consumedNonce.slice(0, 16)}...
+                  Consumed Nonce: {consumedNonce.slice(0, 16)}...
                 </div>
               )}
             </div>
@@ -262,10 +567,33 @@ export function CheckoutGatePanel() {
                 </span>
               </div>
 
+              {!isLiveConfigValid && !useOfflineSimulation && (
+                <div className="p-2.5 rounded bg-amber-50 border border-amber-300 text-xs text-amber-950 flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <p className="text-[11px] leading-relaxed">
+                    Select a valid active approval checkpoint above before submitting to the live gate, or check "Use Offline Simulation".
+                  </p>
+                </div>
+              )}
+
+              {paypalOrderState?.isAmbiguous && (
+                <div className="p-2.5 rounded bg-amber-50 border border-amber-300 text-xs text-amber-950 flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <p className="text-[11px] leading-relaxed">
+                    A payment order is under an ambiguous reconciliation hold. Gate re-evaluation is locked to prevent duplicate spend.
+                  </p>
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={() => void handleEvaluate()}
-                disabled={isEvaluating}
+                disabled={
+                  isEvaluating ||
+                  !isLiveConfigValid ||
+                  isCreatingPayPalOrder ||
+                  Boolean(paypalOrderState?.isAmbiguous)
+                }
                 className="w-full inline-flex items-center justify-center space-x-2 py-2 rounded font-semibold text-xs bg-accent text-white hover:bg-accent/90 transition-colors shadow-sm disabled:opacity-50"
               >
                 {isEvaluating ? (
@@ -308,94 +636,29 @@ export function CheckoutGatePanel() {
                 isDemoFixture={evalResult.isDemoSimulation}
               />
 
-              {/* Spend Reservation Feedback on ALLOW */}
-              {evalResult.decision === "ALLOW" && (
-                <div
-                  className={`p-4 rounded border text-xs space-y-2 ${
-                    evalResult.isDemoSimulation
-                      ? "bg-amber-50 border-amber-300 text-amber-950"
-                      : "bg-emerald-50 border-emerald-300 text-emerald-950"
-                  }`}
-                >
-                  <div className="flex items-center space-x-2 font-semibold">
-                    <CheckCircle2
-                      className={`w-4 h-4 ${
-                        evalResult.isDemoSimulation ? "text-amber-700" : "text-emerald-700"
-                      }`}
-                    />
-                    <span>
-                      {evalResult.isDemoSimulation
-                        ? "Simulated Reservation Preview (Unpersisted)"
-                        : "Spend Reservation Confirmed by Backend"}
-                    </span>
-                  </div>
-                  <div className="text-[11px] space-y-1">
-                    {evalResult.reservationId && (
-                      <div>
-                        Reservation ID:{" "}
-                        <strong className="font-mono">{evalResult.reservationId}</strong>
-                      </div>
-                    )}
-                    <div>
-                      Reservation State:{" "}
-                      <strong className="font-mono">
-                        {evalResult.reservationState || "ORDER_CREATION_PENDING"}
-                      </strong>
-                    </div>
-                    <div>
-                      Reserved Amount:{" "}
-                      <strong className="font-mono">
-                        ${(evalResult.cartTotalMinor / 100).toFixed(2)} {evalResult.currency}
-                      </strong>
-                    </div>
-                    <div className="flex items-center space-x-1 text-[10px] pt-1 text-muted">
-                      <Clock className="w-3 h-3 text-muted shrink-0" />
-                      <span>Reservation TTL: 15 minutes (buyer-approval window).</span>
-                    </div>
-                  </div>
-
-                  <div
-                    className={`pt-2 border-t text-[10px] leading-relaxed ${
-                      evalResult.isDemoSimulation
-                        ? "border-amber-200 text-amber-900"
-                        : "border-emerald-200 text-emerald-900"
-                    }`}
-                  >
-                    {evalResult.isDemoSimulation ? (
-                      <strong>
-                        Simulation Notice: Local calculation only. No reservation record was persisted
-                        to PostgreSQL.
-                      </strong>
-                    ) : (
-                      <>
-                        <strong>Payment Boundary Notice:</strong> PayPal Sandbox order creation and
-                        capture integration are scheduled for Phase 6/7. No live funds or payment
-                        orders were executed.
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Policy Boundary Feedback on DENY */}
-              {evalResult.decision === "DENY" && (
-                <div className="p-4 rounded bg-red-50 border border-red-200 text-xs text-red-950 space-y-1.5">
-                  <div className="flex items-center space-x-2 font-semibold text-red-900">
-                    <AlertCircle className="w-4 h-4 text-red-700" />
-                    <span>Purchase Blocked by Authorization Gate</span>
-                  </div>
-                  <p className="text-[11px] text-red-900 leading-relaxed">
-                    The proposed cart was rejected by server-side policy evaluation rules. Payment order creation is fail-closed and cannot proceed.
-                  </p>
-                </div>
-              )}
+              {/* Payment Order Execution Pipeline Card (Stages 1-4) */}
+              <PaymentOrderPipelineCard
+                decision={evalResult.decision}
+                primaryReasonCode={evalResult.primaryReasonCode}
+                reservationId={evalResult.reservationId}
+                reservationState={evalResult.reservationState}
+                amountMinor={evalResult.cartTotalMinor}
+                currency={evalResult.currency}
+                isDemoSimulation={evalResult.isDemoSimulation}
+                paypalOrderState={paypalOrderState || undefined}
+                onCreatePayPalOrder={
+                  evalResult.decision === "ALLOW" && evalResult.reservationId
+                    ? () => void handleCreatePayPalOrder()
+                    : undefined
+                }
+              />
             </div>
           ) : (
-            <div className="p-8 rounded-panel border border-border bg-surface text-center space-y-2 text-xs text-muted">
-              <Layers className="w-8 h-8 mx-auto text-muted/60" />
-              <div className="font-semibold text-ink">Authorization Gate in Standby</div>
-              <p className="max-w-xs mx-auto text-[11px] leading-relaxed">
-                Configure your cart proposal and click "Submit to Authorization Gate" to view the authoritative decision and spend reservation.
+            <div className="p-8 text-center border border-dashed border-border rounded-panel bg-surface space-y-3">
+              <Layers className="w-8 h-8 text-muted mx-auto" />
+              <h3 className="font-semibold text-sm text-ink">Gate Evaluation Ready</h3>
+              <p className="text-xs text-muted max-w-xs mx-auto">
+                Submit the cart manifest to evaluate compliance against the approved policy rules and issue a single-use spend reservation.
               </p>
             </div>
           )}

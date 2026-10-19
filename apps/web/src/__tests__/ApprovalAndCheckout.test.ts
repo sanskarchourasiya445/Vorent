@@ -266,5 +266,131 @@ describe("Approval Checkpoints and Checkout Gate Suite", () => {
     expect(html).toContain("Single-Use Cryptographic Nonce");
     expect(html).toContain("Submit to Authorization Gate");
     expect(html).toContain("Use Offline Simulation");
+    expect(html).toContain("Authoritative Approval Checkpoint");
+  });
+
+  it("13. CheckoutGatePanel requires valid active approval before enabling live gate submission", () => {
+    const html = renderToStaticMarkup(React.createElement(CheckoutGatePanel));
+    // Live gate button should be disabled when no approval is loaded
+    expect(html).toContain("Select a valid active approval checkpoint above");
+  });
+
+  it("14. requestCheckoutNonce binds exact approvalId, policyVersionId, and policyHash", async () => {
+    const originalFetch = globalThis.fetch;
+    let sentPayload: any = null;
+
+    globalThis.fetch = async (_url, init) => {
+      sentPayload = JSON.parse(init?.body as string);
+      return new Response(JSON.stringify({ nonceId: "nonce_test_xyz" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    try {
+      const nonce = await requestCheckoutNonce(
+        "appr_12345678",
+        "pol_v1_books_hardware",
+        "a4f912b7e53c4d89a290bc9812efaa43217d8900fe5b81a91e5d7a810b45cd2e",
+      );
+      expect(nonce).toBe("nonce_test_xyz");
+      expect(sentPayload.approvalId).toBe("appr_12345678");
+      expect(sentPayload.policyVersionId).toBe("pol_v1_books_hardware");
+      expect(sentPayload.policyHash).toBe(
+        "a4f912b7e53c4d89a290bc9812efaa43217d8900fe5b81a91e5d7a810b45cd2e",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("15. ApprovalPanel creation validates UUID format for manual qualifying run ID", () => {
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    expect(UUID_REGEX.test("550e8400-e29b-41d4-a716-446655440000")).toBe(true);
+    expect(UUID_REGEX.test("not-a-uuid")).toBe(false);
+    expect(UUID_REGEX.test("run_preflight_001")).toBe(false);
+  });
+
+  it("16. fetchApprovals parses backend error JSON message cleanly on HTTP 500", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ error: { message: "Internal ledger query timed out" } }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+
+    try {
+      const result = await fetchApprovals();
+      expect(result.state).toBe("ERROR");
+      if (result.state === "ERROR") {
+        expect(result.message).toContain("Internal ledger query timed out");
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("17. submitCheckoutProposal live API mode transmits cart and binds authoritative reservation on ALLOW", async () => {
+    const originalFetch = globalThis.fetch;
+    let transmittedBody: any = null;
+
+    globalThis.fetch = async (_url, init) => {
+      transmittedBody = JSON.parse(init?.body as string);
+      return new Response(
+        JSON.stringify({
+          proposal: {
+            id: "prop_live_789",
+            approvalId: "appr_live_123",
+            decision: "ALLOW",
+            reasonCodes: [ReasonCode.ALL_RULES_PASSED],
+            cartTotalMinor: 4500,
+            currency: "USD",
+            policyVersionId: "pol_v1_books_hardware",
+            policyHash: "a4f912b7e53c4d89a290bc9812efaa43217d8900fe5b81a91e5d7a810b45cd2e",
+            evaluatedAt: "2026-10-19T12:00:00Z",
+          },
+          reservation: {
+            id: "res_live_456",
+            state: "ACTIVE",
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    };
+
+    try {
+      const result = await submitCheckoutProposal({
+        approvalId: "appr_live_123",
+        policyVersionId: "pol_v1_books_hardware",
+        policyHash: "a4f912b7e53c4d89a290bc9812efaa43217d8900fe5b81a91e5d7a810b45cd2e",
+        merchantName: "Acme Dev Books",
+        items: [
+          {
+            id: "sku_book_01",
+            name: "Designing Data-Intensive Applications",
+            category: "Reference Books",
+            unitPriceMinor: 4500,
+            quantity: 1,
+          },
+        ],
+        currency: "USD",
+        nonceId: "nonce_abc_123",
+        useOfflineSimulation: false,
+      });
+
+      expect(transmittedBody.approvalId).toBe("appr_live_123");
+      expect(transmittedBody.nonceId).toBe("nonce_abc_123");
+      expect(transmittedBody.cart.items).toHaveLength(1);
+      expect(result.decision).toBe("ALLOW");
+      expect(result.isLiveApi).toBe(true);
+      expect(result.isDemoSimulation).toBe(false);
+      expect(result.reservationId).toBe("res_live_456");
+      expect(result.proposalId).toBe("prop_live_789");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

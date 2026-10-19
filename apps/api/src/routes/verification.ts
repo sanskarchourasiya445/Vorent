@@ -13,7 +13,11 @@ import {
 } from "@warrant/contracts";
 import { verifyPolicy } from "@warrant/domain";
 import { db } from "../db/index.js";
-import { getPolicyVersion, ensureDefaultUser } from "../db/repositories/policyRepository.js";
+import {
+  getPolicyVersion,
+  ensureDefaultUser,
+  resolveOrCreatePresetVersion,
+} from "../db/repositories/policyRepository.js";
 import {
   saveVerificationRun,
   listVerificationRuns,
@@ -45,7 +49,7 @@ export const POLICY_PRESETS: Record<string, PolicyPreset> = {
     id: "pol_v1_books_hardware",
     name: "Engineering Hardware & Technical Books Policy",
     version: "1.0.0",
-    hash: "a4f912b7e53c4d89a290bc9812efaa43217d8900fe5b81a91e5d7a810b45cd2e",
+    hash: "93258bd2e0e10160490d8d690e79028c1886f96de0806b749e1822619a3cbbb5",
     policy: {
       schemaVersion: "1.0",
       currency: "USD",
@@ -71,7 +75,7 @@ export const POLICY_PRESETS: Record<string, PolicyPreset> = {
     id: "pol_v2_strict_peripherals",
     name: "Strict Ergonomic Peripherals Mandate",
     version: "2.1.0-draft",
-    hash: "8e71fa480cb12da970392bc13d5a42099fbc9018e4726d1b8207f901abcf8912",
+    hash: "b327a266d96b8461924c4baa78afd43f46669a1be5e5aacf419eab57c0a30f07",
     policy: {
       schemaVersion: "1.0",
       currency: "USD",
@@ -97,7 +101,7 @@ export const POLICY_PRESETS: Record<string, PolicyPreset> = {
     id: "pol_seeded_defect_unbounded_cart",
     name: "Defective Policy: Whole-Cart Spending Limit Omitted",
     version: "1.0.0-flawed",
-    hash: "b7e4521098acdf512345678901234567890abcdef1234567890abcdef1234567",
+    hash: "1d4ea3fac4f62cae288f43ec6ae466b757081ab1be31039e9f84d26c9f47183f",
     policy: {
       schemaVersion: "1.0",
       currency: "USD",
@@ -352,17 +356,36 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
     if (persistRun || (request.query as any)?.persist === "true") {
       try {
         const ownerId = await ensureDefaultUser(db);
+        let targetPolicyVersionId = verificationRequest.config?.policyVersionId || "unknown";
+        let targetPolicyHash = verificationRequest.config?.policyHash || validated.policyHash;
+
+        // If targetPolicyVersionId is a preset ID or not a valid UUID, resolve to its persisted DB UUID
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetPolicyVersionId);
+        if (!isUuid || POLICY_PRESETS[targetPolicyVersionId]) {
+          const resolved = await resolveOrCreatePresetVersion(db, targetPolicyVersionId, ownerId);
+          if (resolved) {
+            targetPolicyVersionId = resolved.id;
+            targetPolicyHash = resolved.policyHash;
+          }
+        }
+
+        const reportToSave = {
+          ...validated,
+          policyVersionId: targetPolicyVersionId,
+          policyHash: targetPolicyHash,
+        };
+
         const savedRun = await saveVerificationRun(db, {
           ownerId,
-          policyVersionId: verificationRequest.config?.policyVersionId || "unknown",
-          policyHash: verificationRequest.config?.policyHash,
+          policyVersionId: targetPolicyVersionId,
+          policyHash: targetPolicyHash,
           request: verificationRequest,
-          report: validated,
+          report: reportToSave,
         });
 
         return reply.status(201).send({
           run: savedRun,
-          report: validated,
+          report: reportToSave,
         });
       } catch (err: unknown) {
         request.log.error({ err, requestId }, "Failed to persist verification run to database");

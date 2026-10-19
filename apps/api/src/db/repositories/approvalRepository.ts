@@ -99,144 +99,156 @@ export async function createApproval(
   input: CreateApprovalRequest,
   ownerId: string
 ): Promise<ApprovalRecord> {
-  // 1. Verify qualifying test run exists
-  const testRunsList = await db
-    .select()
-    .from(testRuns)
-    .where(eq(testRuns.id, input.qualifyingTestRunId));
+  const runInTx = typeof db.transaction === "function" ? (cb: any) => db.transaction(cb) : (cb: any) => cb(db);
+  return await runInTx(async (tx: any) => {
+    // 1. Verify qualifying test run exists
+    const testRunsList = await tx
+      .select()
+      .from(testRuns)
+      .where(eq(testRuns.id, input.qualifyingTestRunId));
 
-  const run = testRunsList[0];
-  if (!run) {
-    throw new CheckoutError(
-      "QUALIFYING_RUN_NOT_FOUND",
-      `Qualifying test run ${input.qualifyingTestRunId} not found`
+    const run = testRunsList[0];
+    if (!run) {
+      throw new CheckoutError(
+        "QUALIFYING_RUN_NOT_FOUND",
+        `Qualifying test run ${input.qualifyingTestRunId} not found`
+      );
+    }
+
+    if (run.status !== "COMPLETED") {
+      throw new CheckoutError(
+        "TEST_RUN_NOT_COMPLETED",
+        `Qualifying test run must be in COMPLETED status (current: ${run.status})`
+      );
+    }
+
+    if (run.policyVersionId !== input.policyVersionId) {
+      throw new CheckoutError(
+        "POLICY_VERSION_MISMATCH",
+        `Qualifying test run policyVersionId (${run.policyVersionId}) does not match requested version (${input.policyVersionId})`
+      );
+    }
+
+    // 2. Verify policy version exists and hash matches
+    const policyVersionsList = await tx
+      .select({
+        id: policyVersions.id,
+        policyId: policyVersions.policyId,
+        policyHash: policyVersions.policyHash,
+        policyName: policies.name,
+      })
+      .from(policyVersions)
+      .leftJoin(policies, eq(policyVersions.policyId, policies.id))
+      .where(eq(policyVersions.id, input.policyVersionId));
+
+    const pv = policyVersionsList[0];
+    if (!pv) {
+      throw new CheckoutError(
+        "POLICY_VERSION_NOT_FOUND",
+        `Policy version ${input.policyVersionId} not found`
+      );
+    }
+
+    if (pv.policyHash !== input.policyHash) {
+      throw new CheckoutError(
+        "POLICY_HASH_MISMATCH",
+        `Policy hash mismatch for version ${input.policyVersionId}`
+      );
+    }
+
+    // 3. Verify findings under Decision D-014
+    const findingsList = await tx
+      .select()
+      .from(findings)
+      .where(eq(findings.testRunId, input.qualifyingTestRunId));
+
+    // First: CRITICAL and HIGH findings can NEVER be ACCEPTED_RISK in MVP
+    const criticalOrHighAcceptedRisk = findingsList.filter(
+      (f: any) =>
+        (f.severity === "CRITICAL" || f.severity === "HIGH") &&
+        f.status === "ACCEPTED_RISK"
     );
-  }
-
-  if (run.status !== "COMPLETED") {
-    throw new CheckoutError(
-      "TEST_RUN_NOT_COMPLETED",
-      `Qualifying test run must be in COMPLETED status (current: ${run.status})`
-    );
-  }
-
-  if (run.policyVersionId !== input.policyVersionId) {
-    throw new CheckoutError(
-      "POLICY_VERSION_MISMATCH",
-      `Qualifying test run policyVersionId (${run.policyVersionId}) does not match requested version (${input.policyVersionId})`
-    );
-  }
-
-  // 2. Verify policy version exists and hash matches
-  const policyVersionsList = await db
-    .select({
-      id: policyVersions.id,
-      policyId: policyVersions.policyId,
-      policyHash: policyVersions.policyHash,
-      policyName: policies.name,
-    })
-    .from(policyVersions)
-    .leftJoin(policies, eq(policyVersions.policyId, policies.id))
-    .where(eq(policyVersions.id, input.policyVersionId));
-
-  const pv = policyVersionsList[0];
-  if (!pv) {
-    throw new CheckoutError(
-      "POLICY_VERSION_NOT_FOUND",
-      `Policy version ${input.policyVersionId} not found`
-    );
-  }
-
-  if (pv.policyHash !== input.policyHash) {
-    throw new CheckoutError(
-      "POLICY_HASH_MISMATCH",
-      `Policy hash mismatch for version ${input.policyVersionId}`
-    );
-  }
-
-  // 3. Verify findings under Decision D-014
-  const findingsList = await db
-    .select()
-    .from(findings)
-    .where(eq(findings.testRunId, input.qualifyingTestRunId));
-
-  // Check CRITICAL and HIGH findings
-  const unresolvedCriticalOrHigh = findingsList.filter(
-    (f: any) =>
-      (f.severity === "CRITICAL" || f.severity === "HIGH") &&
-      f.status !== "RESOLVED"
-  );
-
-  if (unresolvedCriticalOrHigh.length > 0) {
-    throw new CheckoutError(
-      "UNRESOLVED_CRITICAL_HIGH_FINDINGS",
-      `Approval blocked by ${unresolvedCriticalOrHigh.length} unresolved CRITICAL or HIGH finding(s) (Decision D-014)`
-    );
-  }
-
-  // Check MEDIUM and LOW findings & ACCEPTED_RISK rationale
-  for (const f of findingsList) {
-    if (f.severity === "MEDIUM" || f.severity === "LOW") {
-      if (f.status === "OPEN") {
-        throw new CheckoutError(
-          "UNRESOLVED_FINDINGS",
-          `MEDIUM and LOW findings must be RESOLVED or marked ACCEPTED_RISK with owner rationale (Decision D-014). Finding ${f.id} is OPEN.`
-        );
-      }
-      if (f.status === "ACCEPTED_RISK") {
-        if (!f.resolutionNote || f.resolutionNote.trim().length === 0) {
-          throw new CheckoutError(
-            "ACCEPTED_RISK_MISSING_RATIONALE",
-            `ACCEPTED_RISK findings require a non-empty resolution note / rationale (Decision D-014). Finding ${f.id} has no rationale.`
-          );
-        }
-      }
-    } else if (f.status === "ACCEPTED_RISK") {
+    if (criticalOrHighAcceptedRisk.length > 0) {
+      const f = criticalOrHighAcceptedRisk[0];
       throw new CheckoutError(
         "CRITICAL_HIGH_CANNOT_BE_ACCEPTED_RISK",
         `CRITICAL and HIGH findings cannot be accepted as risk in MVP (Decision D-014). Finding ${f.id} is ${f.severity}.`
       );
     }
-  }
 
-  // 4. Calculate expiration and insert approval
-  const expiresInHours = input.expiresInHours ?? 24;
-  const expiresAt = new Date(Date.now() + expiresInHours * 3600 * 1000);
-  const approvalId = randomUUID();
-  const now = new Date();
+    // Check CRITICAL and HIGH findings must be RESOLVED
+    const unresolvedCriticalOrHigh = findingsList.filter(
+      (f: any) =>
+        (f.severity === "CRITICAL" || f.severity === "HIGH") &&
+        f.status !== "RESOLVED"
+    );
 
-  const [created] = await db
-    .insert(approvals)
-    .values({
-      id: approvalId,
-      ownerId,
-      policyVersionId: input.policyVersionId,
-      policyHash: input.policyHash,
-      qualifyingTestRunId: input.qualifyingTestRunId,
-      scope: {},
-      spendLimitMinor: input.spendLimitMinor,
-      currency: input.currency,
-      expiresAt,
+    if (unresolvedCriticalOrHigh.length > 0) {
+      throw new CheckoutError(
+        "UNRESOLVED_CRITICAL_HIGH_FINDINGS",
+        `Approval blocked by ${unresolvedCriticalOrHigh.length} unresolved CRITICAL or HIGH finding(s) (Decision D-014)`
+      );
+    }
+
+    // Check MEDIUM and LOW findings & ACCEPTED_RISK rationale
+    for (const f of findingsList) {
+      if (f.severity === "MEDIUM" || f.severity === "LOW") {
+        if (f.status === "OPEN") {
+          throw new CheckoutError(
+            "UNRESOLVED_FINDINGS",
+            `MEDIUM and LOW findings must be RESOLVED or marked ACCEPTED_RISK with owner rationale (Decision D-014). Finding ${f.id} is OPEN.`
+          );
+        }
+        if (f.status === "ACCEPTED_RISK") {
+          if (!f.resolutionNote || f.resolutionNote.trim().length === 0) {
+            throw new CheckoutError(
+              "ACCEPTED_RISK_MISSING_RATIONALE",
+              `ACCEPTED_RISK findings require a non-empty resolution note / rationale (Decision D-014). Finding ${f.id} has no rationale.`
+            );
+          }
+        }
+      }
+    }
+
+    // 4. Calculate expiration and insert approval
+    const expiresInHours = input.expiresInHours ?? 24;
+    const expiresAt = new Date(Date.now() + expiresInHours * 3600 * 1000);
+    const approvalId = randomUUID();
+    const now = new Date();
+
+    const [created] = await tx
+      .insert(approvals)
+      .values({
+        id: approvalId,
+        ownerId,
+        policyVersionId: input.policyVersionId,
+        policyHash: input.policyHash,
+        qualifyingTestRunId: input.qualifyingTestRunId,
+        scope: {},
+        spendLimitMinor: input.spendLimitMinor,
+        currency: input.currency,
+        expiresAt,
+        revokedAt: null,
+        createdAt: now,
+      })
+      .returning();
+
+    return {
+      id: created.id,
+      ownerId: created.ownerId,
+      policyVersionId: created.policyVersionId,
+      policyHash: created.policyHash,
+      policyName: pv.policyName ?? undefined,
+      qualifyingTestRunId: created.qualifyingTestRunId,
+      spendLimitMinor: Number(created.spendLimitMinor),
+      consumedSpendMinor: 0,
+      currency: created.currency,
+      expiresAt: created.expiresAt instanceof Date ? created.expiresAt.toISOString() : created.expiresAt,
       revokedAt: null,
-      createdAt: now,
-    })
-    .returning();
-
-  return {
-    id: created.id,
-    ownerId: created.ownerId,
-    policyVersionId: created.policyVersionId,
-    policyHash: created.policyHash,
-    policyName: pv.policyName ?? undefined,
-    qualifyingTestRunId: created.qualifyingTestRunId,
-    spendLimitMinor: Number(created.spendLimitMinor),
-    consumedSpendMinor: 0,
-    currency: created.currency,
-    expiresAt: created.expiresAt instanceof Date ? created.expiresAt.toISOString() : created.expiresAt,
-    revokedAt: null,
-    createdAt: created.createdAt instanceof Date ? created.createdAt.toISOString() : created.createdAt,
-    status: "ACTIVE",
-  };
+      createdAt: created.createdAt instanceof Date ? created.createdAt.toISOString() : created.createdAt,
+      status: "ACTIVE",
+    };
+  });
 }
 
 /**

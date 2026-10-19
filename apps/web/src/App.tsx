@@ -15,9 +15,11 @@ import type { HealthLiveResponse, HealthReadyResponse } from "@warrant/contracts
 import { VerificationStudio } from "./components/verification/VerificationStudio";
 import { ApprovalPanel } from "./components/approval/ApprovalPanel";
 import { CheckoutGatePanel } from "./components/checkout/CheckoutGatePanel";
+import { PolicyChangeImpactPanel } from "./components/policy/PolicyChangeImpactPanel";
 
 export function App() {
   const [activeWorkstation, setActiveWorkstation] = useState<string>("verification");
+  const [selectedVerificationPolicy, setSelectedVerificationPolicy] = useState<string>("pol_v1_books_hardware");
   const [liveData, setLiveData] = useState<HealthLiveResponse | null>(null);
   const [readyData, setReadyData] = useState<HealthReadyResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -100,7 +102,7 @@ export function App() {
               { id: "overview", label: "System Overview", badge: "" },
               { id: "mandate", label: "Mandate Editor", badge: "" },
               { id: "intent", label: "Intent Examples", badge: "" },
-              { id: "policy-versions", label: "Policy Versions", badge: "" },
+              { id: "policy-versions", label: "Policy Versions", badge: "Active" },
               { id: "approval", label: "Approval Checkpoints", badge: "" },
               { id: "checkout", label: "Checkout Gate", badge: "" },
               { id: "transactions", label: "Transactions", badge: "" },
@@ -140,7 +142,17 @@ export function App() {
         {/* Central Content */}
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
           {activeWorkstation === "verification" || activeWorkstation === "findings" ? (
-            <VerificationStudio />
+            <VerificationStudio initialPolicyId={selectedVerificationPolicy} />
+          ) : activeWorkstation === "policy-versions" ? (
+            <PolicyChangeImpactPanel
+              initialBasePolicyId="pol_v1_books_hardware"
+              initialTargetPolicyId="pol_seeded_defect_unbounded_cart"
+              onNavigateToVerification={(policyId) => {
+                setSelectedVerificationPolicy(policyId);
+                setActiveWorkstation("verification");
+              }}
+              onNavigateToApproval={() => setActiveWorkstation("approval")}
+            />
           ) : activeWorkstation === "approval" ? (
             <ApprovalPanel />
           ) : activeWorkstation === "checkout" ? (

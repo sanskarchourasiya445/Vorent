@@ -614,6 +614,126 @@ describe("Phase 4: Database Persistence & Policy Version History", () => {
       expect(body.totalCandidatesExplored).toBeGreaterThan(0);
     });
 
+    it("POST /api/verification/runs persists verification run for built-in preset with valid UUID and matching hash", async () => {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/verification/runs",
+        payload: {
+          policyVersionId: "pol_v1_books_hardware",
+        },
+      });
+
+      expect(response.statusCode).toBe(201);
+      const body = response.json();
+      expect(body.run).toBeDefined();
+      expect(body.run.policyVersionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      expect(body.run.policyHash).toBe("93258bd2e0e10160490d8d690e79028c1886f96de0806b749e1822619a3cbbb5");
+      expect(body.report).toBeDefined();
+      expect(body.report.status).toBe("COMPLETED");
+      expect(body.report.policyVersionId).toBe(body.run.policyVersionId);
+      expect(body.report.policyHash).toBe(body.run.policyHash);
+    });
+
+    it("repeated verification runs for preset resolve to the same canonical policy version without creating duplicate preset rows", async () => {
+      const res1 = await server.inject({
+        method: "POST",
+        url: "/api/verification/runs",
+        payload: {
+          policyVersionId: "pol_v1_books_hardware",
+        },
+      });
+      expect(res1.statusCode).toBe(201);
+      const versionId1 = res1.json().run.policyVersionId;
+
+      const res2 = await server.inject({
+        method: "POST",
+        url: "/api/verification/runs",
+        payload: {
+          policyVersionId: "pol_v1_books_hardware",
+        },
+      });
+      expect(res2.statusCode).toBe(201);
+      const versionId2 = res2.json().run.policyVersionId;
+
+      expect(versionId2).toBe(versionId1);
+
+      // Verify policy list has exactly one entry for this preset name
+      const listRes = await server.inject({
+        method: "GET",
+        url: "/api/policies",
+      });
+      expect(listRes.statusCode).toBe(200);
+      const matching = listRes.json().policies.filter((p: any) => p.name === "Engineering Hardware & Technical Books Policy");
+      expect(matching.length).toBe(1);
+    }, 15000);
+
+    it("concurrent initialization of an unpersisted preset resolves to identical policy version and canonical hash without duplicate rows", async () => {
+      // Dispatch concurrent verification runs for unpersisted preset pol_v2_strict_peripherals simultaneously
+      const [res1, res2] = await Promise.all([
+        server.inject({
+          method: "POST",
+          url: "/api/verification/runs",
+          payload: {
+            policyVersionId: "pol_v2_strict_peripherals",
+          },
+        }),
+        server.inject({
+          method: "POST",
+          url: "/api/verification/runs",
+          payload: {
+            policyVersionId: "pol_v2_strict_peripherals",
+          },
+        }),
+      ]);
+
+      expect(res1.statusCode).toBe(201);
+      expect(res2.statusCode).toBe(201);
+
+      const body1 = res1.json();
+      const body2 = res2.json();
+
+      expect(body1.run.policyVersionId).toBe(body2.run.policyVersionId);
+      expect(body1.run.policyHash).toBe("b327a266d96b8461924c4baa78afd43f46669a1be5e5aacf419eab57c0a30f07");
+      expect(body2.run.policyHash).toBe("b327a266d96b8461924c4baa78afd43f46669a1be5e5aacf419eab57c0a30f07");
+
+      // Verify policy list has exactly one entry for this preset
+      const listRes = await server.inject({
+        method: "GET",
+        url: "/api/policies",
+      });
+      expect(listRes.statusCode).toBe(200);
+      const matching = listRes.json().policies.filter((p: any) => p.name === "Strict Ergonomic Peripherals Mandate");
+      expect(matching.length).toBe(1);
+    }, 15000);
+
+    it("POST /api/verification/runs rejects unknown preset IDs safely with 404 POLICY_NOT_FOUND", async () => {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/verification/runs",
+        payload: {
+          policyVersionId: "pol_unknown_preset_999",
+        },
+      });
+
+      expect(response.statusCode).toBe(404);
+      const body = response.json();
+      expect(body.error.code).toBe("POLICY_NOT_FOUND");
+    });
+
+    it("POST /api/verification/runs rejects invalid payload safely with 400 VALIDATION_ERROR", async () => {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/verification/runs",
+        payload: {
+          invalidProperty: "malformed",
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = response.json();
+      expect(body.error.code).toBe("VALIDATION_ERROR");
+    });
+
     it("GET /api/verification/runs/:id returns structured error envelope when run not found or database unavailable", async () => {
       const response = await server.inject({
         method: "GET",

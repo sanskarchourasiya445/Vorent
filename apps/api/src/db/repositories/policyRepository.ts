@@ -38,31 +38,98 @@ export async function ensureDefaultUser(db: any): Promise<string> {
 }
 
 /**
- * Seeds built-in policy presets into the database idempotently.
- * Never inserts duplicates on repeated startup.
+ * Helper to query an existing preset version from the database.
  */
-export async function seedPresets(db: any, ownerId: string): Promise<void> {
-  for (const presetKey of Object.keys(POLICY_PRESETS)) {
-    const preset = POLICY_PRESETS[presetKey];
-    if (!preset) continue;
+async function findExistingPresetVersion(
+  targetDb: any,
+  preset: any,
+): Promise<PolicyVersionRecord | null> {
+  const existingPolicies = await targetDb
+    .select({
+      id: policies.id,
+      currentVersionId: policies.currentVersionId,
+    })
+    .from(policies)
+    .where(eq(policies.name, preset.name))
+    .limit(1);
 
-    // Check if preset already exists by name for this owner
-    const existing = await db
-      .select({ id: policies.id })
-      .from(policies)
-      .where(eq(policies.name, preset.name))
+  if (existingPolicies.length > 0 && existingPolicies[0]?.currentVersionId) {
+    const existingVersion = await targetDb
+      .select()
+      .from(policyVersions)
+      .where(eq(policyVersions.id, existingPolicies[0].currentVersionId))
       .limit(1);
 
-    if (existing.length > 0) {
-      continue; // Preset already seeded
+    if (existingVersion.length > 0) {
+      const v = existingVersion[0];
+      return PolicyVersionRecordSchema.parse({
+        id: v.id,
+        policyId: v.policyId,
+        ownerId: v.ownerId,
+        name: preset.name,
+        versionNumber: v.versionNumber,
+        sourceMandateSnapshot: v.sourceMandateSnapshot,
+        intentSpec: v.intentSpec,
+        policyDocument: v.policyDocument,
+        policySchemaVersion: v.policySchemaVersion,
+        canonicalizationVersion: v.canonicalizationVersion,
+        policyHash: v.policyHash,
+        confirmationState: v.confirmationState,
+        createdAt: v.createdAt instanceof Date ? v.createdAt.toISOString() : new Date(v.createdAt).toISOString(),
+        isPreset: true,
+        presetId: preset.id,
+      });
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Idempotently resolves a built-in preset ID to a persisted policy_version row in PostgreSQL.
+ * If the preset version already exists in the database, returns the existing record.
+ * If not, inserts the policy and initial version 1 record bound to ownerId safely under
+ * a PostgreSQL transactional advisory lock to prevent concurrent initialization races.
+ */
+export async function resolveOrCreatePresetVersion(
+  db: any,
+  presetId: string,
+  ownerId: string,
+): Promise<PolicyVersionRecord | null> {
+  const preset = POLICY_PRESETS[presetId] || Object.values(POLICY_PRESETS).find((p) => p.id === presetId);
+  if (!preset) return null;
+
+  // 1. Fast-path check: If preset already exists, return immediately without locking
+  const existing = await findExistingPresetVersion(db, preset);
+  if (existing) {
+    return existing;
+  }
+
+  // 2. Concurrency-safe initialization inside transaction with PostgreSQL advisory lock
+  return await db.transaction(async (tx: any) => {
+    // Acquire PostgreSQL transactional advisory lock scoped to this preset ID
+    try {
+      if (typeof tx.execute === "function") {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${'warrant:preset:' + preset.id}))`
+        );
+      }
+    } catch {
+      // Non-PostgreSQL or in-memory test doubles that don't support pg_advisory_xact_lock
     }
 
+    // Double-checked locking: re-check if another concurrent transaction initialized the preset while waiting for the lock
+    const existingUnderLock = await findExistingPresetVersion(tx, preset);
+    if (existingUnderLock) {
+      return existingUnderLock;
+    }
+
+    // 3. Insert policy and version 1 idempotently
     const policyId = randomUUID();
     const versionId = randomUUID();
-    const policyHash = computePolicyHash(preset.policy);
+    const policyHash = preset.hash || computePolicyHash(preset.policy);
 
-    // 1. Create policy row
-    await db.insert(policies).values({
+    await tx.insert(policies).values({
       id: policyId,
       ownerId,
       name: preset.name,
@@ -70,8 +137,7 @@ export async function seedPresets(db: any, ownerId: string): Promise<void> {
       currentVersionId: versionId,
     });
 
-    // 2. Create version 1 row
-    await db.insert(policyVersions).values({
+    await tx.insert(policyVersions).values({
       id: versionId,
       policyId,
       ownerId,
@@ -84,6 +150,34 @@ export async function seedPresets(db: any, ownerId: string): Promise<void> {
       policyHash,
       confirmationState: "CONFIRMED",
     });
+
+    return PolicyVersionRecordSchema.parse({
+      id: versionId,
+      policyId,
+      ownerId,
+      name: preset.name,
+      versionNumber: 1,
+      sourceMandateSnapshot: preset.intent.name,
+      intentSpec: preset.intent,
+      policyDocument: preset.policy,
+      policySchemaVersion: preset.policy.schemaVersion ?? "1.0",
+      canonicalizationVersion: "1.0.0",
+      policyHash,
+      confirmationState: "CONFIRMED",
+      createdAt: new Date().toISOString(),
+      isPreset: true,
+      presetId: preset.id,
+    });
+  });
+}
+
+/**
+ * Seeds built-in policy presets into the database idempotently.
+ * Never inserts duplicates on repeated startup.
+ */
+export async function seedPresets(db: any, ownerId: string): Promise<void> {
+  for (const presetKey of Object.keys(POLICY_PRESETS)) {
+    await resolveOrCreatePresetVersion(db, presetKey, ownerId);
   }
 }
 
@@ -131,6 +225,25 @@ export async function listPolicies(db: any, _ownerId?: string): Promise<PolicySu
         }
       }
 
+      // If policyHash is not resolved via currentVersionId, fall back to latest version for this policy
+      if (!policyHash) {
+        const latestV = await db
+          .select({
+            id: policyVersions.id,
+            versionNumber: policyVersions.versionNumber,
+            policyHash: policyVersions.policyHash,
+          })
+          .from(policyVersions)
+          .where(eq(policyVersions.policyId, p.id))
+          .orderBy(desc(policyVersions.versionNumber))
+          .limit(1);
+
+        if (latestV.length > 0) {
+          versionNumber = latestV[0].versionNumber;
+          policyHash = latestV[0].policyHash;
+        }
+      }
+
       const countRes = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(policyVersions)
@@ -142,6 +255,9 @@ export async function listPolicies(db: any, _ownerId?: string): Promise<PolicySu
 
       // Check if this policy matches a preset
       const matchedPreset = Object.values(POLICY_PRESETS).find((pr) => pr.name === p.name);
+      if (!policyHash && matchedPreset) {
+        policyHash = matchedPreset.hash;
+      }
 
       summaries.push({
         id: p.id,
@@ -149,7 +265,7 @@ export async function listPolicies(db: any, _ownerId?: string): Promise<PolicySu
         sourceMandate: p.sourceMandate,
         currentVersionId: p.currentVersionId,
         currentVersionNumber: versionNumber,
-        policyHash,
+        policyHash: policyHash || undefined,
         isPreset: Boolean(matchedPreset),
         presetId: matchedPreset?.id,
         versionCount,

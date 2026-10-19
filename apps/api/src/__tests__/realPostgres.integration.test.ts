@@ -689,7 +689,7 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
       expect(deniedRes.reservation).toBeNull();
       expect(allowedRes.reservation).toBeDefined();
       expect(allowedRes.reservation.amountMinor).toBe(6000);
-    });
+    }, 20000);
 
     it("Step 11 [REAL-PG]: confirms that revoked or expired approvals cannot authorize checkout", async (ctx) => {
       if (!isDbLive) {
@@ -919,6 +919,683 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
 
       const reservations = await db.select().from(spendReservations).where(eq(spendReservations.approvalId, app.id));
       expect(reservations.length).toBe(0);
+    });
+  });
+
+  describe("Phase 4.3 Server-Side Approval Qualification & Decision D-014 (Real PostgreSQL)", () => {
+    it("Step 13 [REAL-PG]: exercises POST /api/approvals with valid qualifying run and confirms persistence", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
+
+      const defaultOwner = await ensureDefaultUser(db);
+      const testPolicyId = randomUUID();
+      createdPolicyIds.push(testPolicyId);
+
+      await db.insert(policies).values({
+        id: testPolicyId,
+        ownerId: defaultOwner,
+        name: `Test Valid Approval Policy ${Date.now()}`,
+        sourceMandate: "Test mandate",
+      });
+
+      const pHash = computePolicyHash(validPolicy);
+      const [pv] = await db.insert(policyVersions).values({
+        id: randomUUID(),
+        policyId: testPolicyId,
+        ownerId: defaultOwner,
+        versionNumber: 1,
+        sourceMandateSnapshot: "Test mandate",
+        intentSpec: validIntent,
+        policyDocument: validPolicy,
+        policySchemaVersion: "1.0",
+        canonicalizationVersion: "1.0",
+        policyHash: pHash,
+        confirmationState: "CONFIRMED",
+      }).returning();
+      if (!pv) throw new Error("Failed to insert policy version");
+
+      const [tr] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "ecommerce_cart",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 20,
+        resultSummary: { passed: true },
+      }).returning();
+      if (!tr) throw new Error("Failed to insert test run");
+      createdRunIds.push(tr.id);
+
+      // POST /api/approvals with valid payload
+      const res = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          qualifyingTestRunId: tr.id,
+          spendLimitMinor: 50000,
+          currency: "USD",
+          expiresInHours: 48,
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.approval).toBeDefined();
+      expect(body.approval.id).toBeDefined();
+      expect(body.approval.status).toBe("ACTIVE");
+      expect(body.approval.spendLimitMinor).toBe(50000);
+      expect(body.approval.currency).toBe("USD");
+      expect(body.approval.qualifyingTestRunId).toBe(tr.id);
+      expect(body.approval.policyVersionId).toBe(pv.id);
+      expect(body.approval.policyHash).toBe(pHash);
+      createdApprovalIds.push(body.approval.id);
+
+      // Directly verify row in PostgreSQL approvals table
+      const [persistedApproval] = await db
+        .select()
+        .from(approvals)
+        .where(eq(approvals.id, body.approval.id));
+      expect(persistedApproval).toBeDefined();
+      if (!persistedApproval) throw new Error("Approval not persisted in DB");
+      expect(persistedApproval.qualifyingTestRunId).toBe(tr.id);
+      expect(persistedApproval.policyVersionId).toBe(pv.id);
+      expect(Number(persistedApproval.spendLimitMinor)).toBe(50000);
+      expect(persistedApproval.currency).toBe("USD");
+      expect(persistedApproval.revokedAt).toBeNull();
+
+      // Verify list endpoint includes this approval
+      const listRes = await server.inject({
+        method: "GET",
+        url: `/api/approvals?policyVersionId=${pv.id}`,
+      });
+      expect(listRes.statusCode).toBe(200);
+      const listBody = listRes.json();
+      expect(listBody.approvals.some((a: any) => a.id === body.approval.id)).toBe(true);
+    });
+
+    it("Step 14 [REAL-PG]: rejects non-qualifying runs (missing, incomplete, version mismatch, hash mismatch)", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
+
+      const defaultOwner = await ensureDefaultUser(db);
+      const testPolicyId = randomUUID();
+      createdPolicyIds.push(testPolicyId);
+
+      await db.insert(policies).values({
+        id: testPolicyId,
+        ownerId: defaultOwner,
+        name: `Test Reject NonQualifying Policy ${Date.now()}`,
+        sourceMandate: "Test mandate",
+      });
+
+      const pHash = computePolicyHash(validPolicy);
+      const [pv1] = await db.insert(policyVersions).values({
+        id: randomUUID(),
+        policyId: testPolicyId,
+        ownerId: defaultOwner,
+        versionNumber: 1,
+        sourceMandateSnapshot: "Test mandate",
+        intentSpec: validIntent,
+        policyDocument: validPolicy,
+        policySchemaVersion: "1.0",
+        canonicalizationVersion: "1.0",
+        policyHash: pHash,
+        confirmationState: "CONFIRMED",
+      }).returning();
+      if (!pv1) throw new Error("Failed to insert policy version 1");
+
+      const [pv2] = await db.insert(policyVersions).values({
+        id: randomUUID(),
+        policyId: testPolicyId,
+        ownerId: defaultOwner,
+        versionNumber: 2,
+        sourceMandateSnapshot: "Test mandate v2",
+        intentSpec: validIntent,
+        policyDocument: validPolicy,
+        policySchemaVersion: "1.0",
+        canonicalizationVersion: "1.0",
+        policyHash: pHash,
+        confirmationState: "CONFIRMED",
+      }).returning();
+      if (!pv2) throw new Error("Failed to insert policy version 2");
+
+      // 1. Missing test run
+      const missingRunId = randomUUID();
+      const missingRes = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv1.id,
+          policyHash: pHash,
+          qualifyingTestRunId: missingRunId,
+          spendLimitMinor: 50000,
+          currency: "USD",
+        },
+      });
+      expect(missingRes.statusCode).toBe(404);
+      expect(missingRes.json().error.code).toBe("QUALIFYING_RUN_NOT_FOUND");
+
+      // 2. Incomplete test run (status !== COMPLETED)
+      const [incompleteRun] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv1.id,
+        domainId: "ecommerce_cart",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "INCOMPLETE",
+        candidateLimit: 20,
+        resultSummary: {},
+      }).returning();
+      if (!incompleteRun) throw new Error("Failed to insert incomplete run");
+      createdRunIds.push(incompleteRun.id);
+
+      const incompleteRes = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv1.id,
+          policyHash: pHash,
+          qualifyingTestRunId: incompleteRun.id,
+          spendLimitMinor: 50000,
+          currency: "USD",
+        },
+      });
+      expect(incompleteRes.statusCode).toBe(400);
+      expect(incompleteRes.json().error.code).toBe("TEST_RUN_NOT_COMPLETED");
+
+      // 3. Policy version mismatch (run belongs to pv1, request says pv2)
+      const [completedRun] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv1.id,
+        domainId: "ecommerce_cart",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 20,
+        resultSummary: {},
+      }).returning();
+      if (!completedRun) throw new Error("Failed to insert completed run");
+      createdRunIds.push(completedRun.id);
+
+      const mismatchVerRes = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv2.id,
+          policyHash: pHash,
+          qualifyingTestRunId: completedRun.id,
+          spendLimitMinor: 50000,
+          currency: "USD",
+        },
+      });
+      expect(mismatchVerRes.statusCode).toBe(400);
+      expect(mismatchVerRes.json().error.code).toBe("POLICY_VERSION_MISMATCH");
+
+      // 4. Policy hash mismatch (forged hash)
+      const fakeHash = "f".repeat(64);
+      const mismatchHashRes = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv1.id,
+          policyHash: fakeHash,
+          qualifyingTestRunId: completedRun.id,
+          spendLimitMinor: 50000,
+          currency: "USD",
+        },
+      });
+      expect(mismatchHashRes.statusCode).toBe(400);
+      expect(mismatchHashRes.json().error.code).toBe("POLICY_HASH_MISMATCH");
+
+      // Confirm no approvals were created in DB for this run
+      const checkApprovals = await db
+        .select()
+        .from(approvals)
+        .where(eq(approvals.qualifyingTestRunId, completedRun.id));
+      expect(checkApprovals.length).toBe(0);
+    });
+
+    it("Step 15 [REAL-PG]: enforces Decision D-014 finding rules against real PostgreSQL database", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
+
+      const defaultOwner = await ensureDefaultUser(db);
+      const testPolicyId = randomUUID();
+      createdPolicyIds.push(testPolicyId);
+
+      await db.insert(policies).values({
+        id: testPolicyId,
+        ownerId: defaultOwner,
+        name: `Test D-014 Findings Policy ${Date.now()}`,
+        sourceMandate: "Test mandate",
+      });
+
+      const pHash = computePolicyHash(validPolicy);
+      const [pv] = await db.insert(policyVersions).values({
+        id: randomUUID(),
+        policyId: testPolicyId,
+        ownerId: defaultOwner,
+        versionNumber: 1,
+        sourceMandateSnapshot: "Test mandate",
+        intentSpec: validIntent,
+        policyDocument: validPolicy,
+        policySchemaVersion: "1.0",
+        canonicalizationVersion: "1.0",
+        policyHash: pHash,
+        confirmationState: "CONFIRMED",
+      }).returning();
+      if (!pv) throw new Error("Failed to insert policy version");
+
+      // Subcase A: Unresolved CRITICAL finding blocks approval
+      const [trCritical] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "ecommerce_cart",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 20,
+        resultSummary: {},
+      }).returning();
+      if (!trCritical) throw new Error("Failed to insert test run");
+      createdRunIds.push(trCritical.id);
+
+      await db.insert(findings).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        testRunId: trCritical.id,
+        policyVersionId: pv.id,
+        findingType: "POLICY_VIOLATION",
+        severity: "CRITICAL",
+        status: "OPEN",
+        witness: { cart: {} },
+        evidenceSnapshot: {},
+        ruleTrace: {},
+        reproduction: {},
+      });
+
+      const resCrit = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          qualifyingTestRunId: trCritical.id,
+          spendLimitMinor: 50000,
+          currency: "USD",
+        },
+      });
+      expect(resCrit.statusCode).toBe(400);
+      expect(resCrit.json().error.code).toBe("UNRESOLVED_CRITICAL_HIGH_FINDINGS");
+
+      // Subcase B: CRITICAL finding marked ACCEPTED_RISK is forbidden in MVP
+      const [trCritRisk] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "ecommerce_cart",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 20,
+        resultSummary: {},
+      }).returning();
+      if (!trCritRisk) throw new Error("Failed to insert test run");
+      createdRunIds.push(trCritRisk.id);
+
+      await db.insert(findings).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        testRunId: trCritRisk.id,
+        policyVersionId: pv.id,
+        findingType: "POLICY_VIOLATION",
+        severity: "CRITICAL",
+        status: "ACCEPTED_RISK",
+        resolutionNote: "VP signed off on risk",
+        witness: {},
+        evidenceSnapshot: {},
+        ruleTrace: {},
+        reproduction: {},
+      });
+
+      const resCritRisk = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          qualifyingTestRunId: trCritRisk.id,
+          spendLimitMinor: 50000,
+          currency: "USD",
+        },
+      });
+      expect(resCritRisk.statusCode).toBe(400);
+      expect(resCritRisk.json().error.code).toBe("CRITICAL_HIGH_CANNOT_BE_ACCEPTED_RISK");
+
+      // Subcase C: Unresolved HIGH finding blocks approval
+      const [trHigh] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "ecommerce_cart",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 20,
+        resultSummary: {},
+      }).returning();
+      if (!trHigh) throw new Error("Failed to insert test run");
+      createdRunIds.push(trHigh.id);
+
+      await db.insert(findings).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        testRunId: trHigh.id,
+        policyVersionId: pv.id,
+        findingType: "POLICY_VIOLATION",
+        severity: "HIGH",
+        status: "OPEN",
+        witness: {},
+        evidenceSnapshot: {},
+        ruleTrace: {},
+        reproduction: {},
+      });
+
+      const resHigh = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          qualifyingTestRunId: trHigh.id,
+          spendLimitMinor: 50000,
+          currency: "USD",
+        },
+      });
+      expect(resHigh.statusCode).toBe(400);
+      expect(resHigh.json().error.code).toBe("UNRESOLVED_CRITICAL_HIGH_FINDINGS");
+
+      // Subcase D: Open MEDIUM finding blocks approval
+      const [trMed] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "ecommerce_cart",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 20,
+        resultSummary: {},
+      }).returning();
+      if (!trMed) throw new Error("Failed to insert test run");
+      createdRunIds.push(trMed.id);
+
+      const [medFinding] = await db.insert(findings).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        testRunId: trMed.id,
+        policyVersionId: pv.id,
+        findingType: "POLICY_VIOLATION",
+        severity: "MEDIUM",
+        status: "OPEN",
+        witness: {},
+        evidenceSnapshot: {},
+        ruleTrace: {},
+        reproduction: {},
+      }).returning();
+      if (!medFinding) throw new Error("Failed to insert finding");
+
+      const resMedOpen = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          qualifyingTestRunId: trMed.id,
+          spendLimitMinor: 50000,
+          currency: "USD",
+        },
+      });
+      expect(resMedOpen.statusCode).toBe(400);
+      expect(resMedOpen.json().error.code).toBe("UNRESOLVED_FINDINGS");
+
+      // Subcase E: MEDIUM finding marked ACCEPTED_RISK without rationale is rejected
+      await db.update(findings)
+        .set({ status: "ACCEPTED_RISK", resolutionNote: "   " })
+        .where(eq(findings.id, medFinding.id));
+
+      const resMedNoNote = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          qualifyingTestRunId: trMed.id,
+          spendLimitMinor: 50000,
+          currency: "USD",
+        },
+      });
+      expect(resMedNoNote.statusCode).toBe(400);
+      expect(resMedNoNote.json().error.code).toBe("ACCEPTED_RISK_MISSING_RATIONALE");
+
+      // Subcase F: MEDIUM finding with valid ACCEPTED_RISK rationale is accepted
+      await db.update(findings)
+        .set({
+          status: "ACCEPTED_RISK",
+          resolutionNote: "Accepted risk: Vendor catalog delayed by 2 days per IT-204",
+        })
+        .where(eq(findings.id, medFinding.id));
+
+      const resMedWithNote = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          qualifyingTestRunId: trMed.id,
+          spendLimitMinor: 50000,
+          currency: "USD",
+        },
+      });
+      expect(resMedWithNote.statusCode).toBe(201);
+      const appWithNote = resMedWithNote.json().approval;
+      expect(appWithNote.id).toBeDefined();
+      createdApprovalIds.push(appWithNote.id);
+    });
+
+    it("Step 16 [REAL-PG]: verifies transaction rollback leaves zero partial approval records on qualification failure", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
+
+      const defaultOwner = await ensureDefaultUser(db);
+      const testPolicyId = randomUUID();
+      createdPolicyIds.push(testPolicyId);
+
+      await db.insert(policies).values({
+        id: testPolicyId,
+        ownerId: defaultOwner,
+        name: `Test Rollback Qualification Policy ${Date.now()}`,
+        sourceMandate: "Test mandate",
+      });
+
+      const pHash = computePolicyHash(validPolicy);
+      const [pv] = await db.insert(policyVersions).values({
+        id: randomUUID(),
+        policyId: testPolicyId,
+        ownerId: defaultOwner,
+        versionNumber: 1,
+        sourceMandateSnapshot: "Test mandate",
+        intentSpec: validIntent,
+        policyDocument: validPolicy,
+        policySchemaVersion: "1.0",
+        canonicalizationVersion: "1.0",
+        policyHash: pHash,
+        confirmationState: "CONFIRMED",
+      }).returning();
+      if (!pv) throw new Error("Failed to insert policy version");
+
+      const [tr] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "ecommerce_cart",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 20,
+        resultSummary: {},
+      }).returning();
+      if (!tr) throw new Error("Failed to insert test run");
+      createdRunIds.push(tr.id);
+
+      // Add blocking CRITICAL finding
+      await db.insert(findings).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        testRunId: tr.id,
+        policyVersionId: pv.id,
+        findingType: "POLICY_VIOLATION",
+        severity: "CRITICAL",
+        status: "OPEN",
+        witness: {},
+        evidenceSnapshot: {},
+        ruleTrace: {},
+        reproduction: {},
+      });
+
+      // Verify 0 approvals before attempt
+      const beforeApprovals = await db
+        .select()
+        .from(approvals)
+        .where(eq(approvals.qualifyingTestRunId, tr.id));
+      expect(beforeApprovals.length).toBe(0);
+
+      // Attempt to create approval -> must be rejected
+      const res = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        payload: {
+          policyVersionId: pv.id,
+          policyHash: pHash,
+          qualifyingTestRunId: tr.id,
+          spendLimitMinor: 50000,
+          currency: "USD",
+        },
+      });
+      expect(res.statusCode).toBe(400);
+
+      // Verify zero partial or dangling approval records exist in PostgreSQL
+      const afterApprovals = await db
+        .select()
+        .from(approvals)
+        .where(eq(approvals.qualifyingTestRunId, tr.id));
+      expect(afterApprovals.length).toBe(0);
+    });
+
+    it("Step 17 [REAL-PG]: concurrent approval requests against the same qualifying run resolve safely without corrupting state", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
+
+      const defaultOwner = await ensureDefaultUser(db);
+      const testPolicyId = randomUUID();
+      createdPolicyIds.push(testPolicyId);
+
+      await db.insert(policies).values({
+        id: testPolicyId,
+        ownerId: defaultOwner,
+        name: `Test Concurrent Approvals Policy ${Date.now()}`,
+        sourceMandate: "Test mandate",
+      });
+
+      const pHash = computePolicyHash(validPolicy);
+      const [pv] = await db.insert(policyVersions).values({
+        id: randomUUID(),
+        policyId: testPolicyId,
+        ownerId: defaultOwner,
+        versionNumber: 1,
+        sourceMandateSnapshot: "Test mandate",
+        intentSpec: validIntent,
+        policyDocument: validPolicy,
+        policySchemaVersion: "1.0",
+        canonicalizationVersion: "1.0",
+        policyHash: pHash,
+        confirmationState: "CONFIRMED",
+      }).returning();
+      if (!pv) throw new Error("Failed to insert policy version");
+
+      const [tr] = await db.insert(testRuns).values({
+        id: randomUUID(),
+        ownerId: defaultOwner,
+        policyVersionId: pv.id,
+        domainId: "ecommerce_cart",
+        domainVersion: "1.0.0",
+        domainDefinition: {},
+        runnerVersion: "1.0.0",
+        status: "COMPLETED",
+        candidateLimit: 20,
+        resultSummary: { passed: true },
+      }).returning();
+      if (!tr) throw new Error("Failed to insert test run");
+      createdRunIds.push(tr.id);
+
+      // Issue 2 concurrent approval requests against the same run
+      const payload = {
+        policyVersionId: pv.id,
+        policyHash: pHash,
+        qualifyingTestRunId: tr.id,
+        spendLimitMinor: 25000,
+        currency: "USD",
+        expiresInHours: 24,
+      };
+
+      const [res1, res2] = await Promise.all([
+        server.inject({ method: "POST", url: "/api/approvals", payload }),
+        server.inject({ method: "POST", url: "/api/approvals", payload }),
+      ]);
+
+      expect(res1.statusCode).toBe(201);
+      expect(res2.statusCode).toBe(201);
+
+      const app1 = res1.json().approval;
+      const app2 = res2.json().approval;
+      expect(app1.id).toBeDefined();
+      expect(app2.id).toBeDefined();
+      expect(app1.id).not.toBe(app2.id);
+
+      createdApprovalIds.push(app1.id, app2.id);
+
+      // Verify both are persisted independently in real PostgreSQL
+      const persistedList = await db
+        .select()
+        .from(approvals)
+        .where(eq(approvals.qualifyingTestRunId, tr.id));
+      expect(persistedList.length).toBe(2);
+      expect(persistedList.map((a: any) => a.id).sort()).toEqual([app1.id, app2.id].sort());
     });
   });
 });

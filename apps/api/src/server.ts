@@ -7,10 +7,11 @@ import { verificationRoutes } from "./routes/verification.js";
 import { policyRoutes } from "./routes/policies.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { checkoutRoutes } from "./routes/checkout.js";
+import { paymentOrderRoutes, type PaymentOrderRoutesOptions } from "./routes/paymentOrders.js";
 import { env } from "./config/env.js";
 import { pool } from "./db/index.js";
 
-export interface ServerOptions extends HealthRoutesOptions {
+export interface ServerOptions extends HealthRoutesOptions, PaymentOrderRoutesOptions {
   logStream?: NodeJS.WritableStream;
 }
 
@@ -89,6 +90,8 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
   await app.register(approvalRoutes, { prefix: "/api/v1/approvals" });
   await app.register(checkoutRoutes, { prefix: "/api/checkout" });
   await app.register(checkoutRoutes, { prefix: "/api/v1/checkout" });
+  await app.register(paymentOrderRoutes, { prefix: "/api/payment-orders", paypalService: options.paypalService });
+  await app.register(paymentOrderRoutes, { prefix: "/api/v1/payment-orders", paypalService: options.paypalService });
 
 
   // Root welcome route
