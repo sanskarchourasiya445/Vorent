@@ -162,7 +162,7 @@ export function SavedRunsBrowser({ onLoadReport, isLoadingReport = false }: Save
                       {run.runId}
                     </span>
                     <span
-                      className={`inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold uppercase ${
+                      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
                         run.status === "COMPLETED"
                           ? "bg-emerald-100 text-emerald-950 border border-emerald-300"
                           : "bg-amber-100 text-amber-950 border border-amber-300"
@@ -220,7 +220,7 @@ export function SavedRunsBrowser({ onLoadReport, isLoadingReport = false }: Save
                     type="button"
                     onClick={() => void handleSelectRun(run.runId)}
                     disabled={isLoadingReport || isSelected}
-                    className="inline-flex items-center space-x-1 px-3 py-1.5 rounded text-xs font-semibold bg-accent text-white hover:bg-accent/90 disabled:opacity-50 transition-colors shadow-xs"
+                    className="inline-flex items-center space-x-1 px-3 py-1.5 rounded text-xs font-semibold bg-accent text-white hover:bg-accent/90 disabled:opacity-50 transition-colors shadow-sm"
                   >
                     <FileText className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>{isSelected ? "Loading..." : "Open Report"}</span>

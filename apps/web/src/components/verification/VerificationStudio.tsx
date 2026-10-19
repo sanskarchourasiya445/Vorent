@@ -145,6 +145,23 @@ export function VerificationStudio({ initialPolicyId }: VerificationStudioProps)
         </button>
       </div>
 
+      {/* Error banner for saved runs operations */}
+      {errorMessage && activeTab === "SAVED_RUNS" && (
+        <div className="p-3 rounded bg-red-50 border border-red-200 text-xs text-red-900 flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="w-4 h-4 text-red-700 shrink-0" aria-hidden="true" />
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setErrorMessage(null)}
+            className="text-muted hover:text-ink text-[11px] font-medium"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {activeTab === "SAVED_RUNS" ? (
         <SavedRunsBrowser
           onLoadReport={handleLoadSavedReport}
