@@ -435,5 +435,217 @@ describe("API Verification Routes (POST /api/verification/run)", () => {
     const body = response.json();
     expect(body.status).toBe("COMPLETED");
   });
+
+  // 14. Deterministic repeatable runs
+  it("14. produces strictly deterministic, reproducible results across repeated runs", async () => {
+    const payload: VerificationRequest = {
+      policy: validPolicy,
+      intent: validIntent,
+      searchSpace: {
+        domainVersion: "1.0.0",
+        categories: ["programming_book", "gift_card"],
+        pricePointsMinor: [3500, 6000, 7500],
+        quantities: [1, 2],
+        currencies: ["USD"],
+        maxItemsPerCart: 2,
+        evidenceVariations: ["COMPLETE", "MISSING"],
+      },
+      config: {
+        maxCandidates: 50,
+        policyVersionId: "pol_test_repeatable",
+        policyHash: "f".repeat(64),
+      },
+    };
+
+    const res1 = await server.inject({
+      method: "POST",
+      url: "/api/verification/run",
+      payload,
+    });
+    const res2 = await server.inject({
+      method: "POST",
+      url: "/api/verification/run",
+      payload,
+    });
+
+    expect(res1.statusCode).toBe(200);
+    expect(res2.statusCode).toBe(200);
+
+    const body1 = res1.json();
+    const body2 = res2.json();
+
+    expect(body1.totalCandidatesExplored).toBe(body2.totalCandidatesExplored);
+    expect(body1.findingCount).toBe(body2.findingCount);
+    expect(body1.unresolvedCount).toBe(body2.unresolvedCount);
+    expect(body1.stopReason).toBe(body2.stopReason);
+    expect(body1.exhausted).toBe(body2.exhausted);
+    expect(body1.status).toBe(body2.status);
+
+    // Fingerprints and order must match exactly
+    const fingerprints1 = body1.findings.map((f: { fingerprint: string }) => f.fingerprint);
+    const fingerprints2 = body2.findings.map((f: { fingerprint: string }) => f.fingerprint);
+    expect(fingerprints1).toEqual(fingerprints2);
+
+    const unresolvedIndices1 = body1.unresolvedCandidates.map((u: { candidateIndex: number }) => u.candidateIndex);
+    const unresolvedIndices2 = body2.unresolvedCandidates.map((u: { candidateIndex: number }) => u.candidateIndex);
+    expect(unresolvedIndices1).toEqual(unresolvedIndices2);
+  });
+
+  // 15. Defect discovery and repair lifecycle
+  it("15. verifies the full defect-and-repair lifecycle (seeded defect discovers counterexample, repaired policy eliminates it)", async () => {
+    // Stage 1: Defective policy permits whole-cart limit breach
+    const searchSpace: SearchSpaceDefinition = {
+      domainVersion: "1.0.0",
+      categories: ["Hardware"],
+      pricePointsMinor: [25000],
+      quantities: [2], // 2 * $250.00 = $500.00, exceeding intent limit of $400.00 (40000 minor)
+      currencies: ["USD"],
+      maxItemsPerCart: 1,
+      evidenceVariations: ["COMPLETE"],
+    };
+
+    const defectivePolicy: PolicyDocument = {
+      schemaVersion: "1.0",
+      currency: "USD",
+      maxItemPriceMinor: 25000,
+      // maxCartTotalMinor is missing!
+      allowedCategories: ["Hardware"],
+      prohibitedCategories: ["Gift Cards"],
+      requireEvidence: true,
+    };
+
+    const confirmedIntent: ConfirmedIntent = {
+      name: "Strict Hardware Cap Intent",
+      currency: "USD",
+      maxItemPriceMinor: 25000,
+      maxCartTotalMinor: 40000, // Mandates $400.00 cart limit
+      allowedCategories: ["Hardware"],
+      prohibitedCategories: ["Gift Cards"],
+      requireEvidence: true,
+    };
+
+    const defectResponse = await server.inject({
+      method: "POST",
+      url: "/api/verification/run",
+      payload: {
+        policy: defectivePolicy,
+        intent: confirmedIntent,
+        searchSpace,
+        config: { policyVersionId: "pol_defective" },
+      },
+    });
+
+    expect(defectResponse.statusCode).toBe(200);
+    const defectBody = defectResponse.json();
+    expect(defectBody.findingCount).toBe(1);
+    expect(defectBody.findings[0].expectedOutcome.reasonCode).toBe("CART_TOTAL_LIMIT_EXCEEDED");
+    expect(defectBody.findings[0].expectedOutcome.decision).toBe("DENY");
+    expect(defectBody.findings[0].actualOutcome.decision).toBe("ALLOW");
+
+    // Stage 2: Repaired policy includes maxCartTotalMinor: 40000
+    const repairedPolicy: PolicyDocument = {
+      ...defectivePolicy,
+      maxCartTotalMinor: 40000,
+    };
+
+    const repairResponse = await server.inject({
+      method: "POST",
+      url: "/api/verification/run",
+      payload: {
+        policy: repairedPolicy,
+        intent: confirmedIntent,
+        searchSpace,
+        config: { policyVersionId: "pol_repaired" },
+      },
+    });
+
+    expect(repairResponse.statusCode).toBe(200);
+    const repairBody = repairResponse.json();
+    expect(repairBody.findingCount).toBe(0);
+    expect(repairBody.status).toBe("COMPLETED");
+    expect(repairBody.exhausted).toBe(true);
+  });
+
+  // 16. Live TCP HTTP network test
+  it("16. executes live HTTP TCP verification run with Node fetch matching VerificationStudio contract", async () => {
+    const liveServer = await buildServer({
+      checkDb: async () => ({ configured: true, connected: true, latencyMs: 1 }),
+    });
+    await liveServer.listen({ port: 0, host: "127.0.0.1" });
+    const address = liveServer.server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+
+    try {
+      const frontendPayload = {
+        policyVersionId: "pol_v1_books_hardware",
+        dimensions: ["PRICE_BOUNDARIES", "CATEGORY_EVASION"],
+        candidateBudget: 25,
+      };
+
+      const response = await fetch(`http://127.0.0.1:${port}/api/verification/run`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": "client_req_frontend_live_001",
+        },
+        body: JSON.stringify(frontendPayload),
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("x-request-id")).toBe("client_req_frontend_live_001");
+
+      const rawBody: unknown = await response.json();
+      const parseResult = VerificationReportSchema.safeParse(rawBody);
+      expect(parseResult.success).toBe(true);
+      if (!parseResult.success) {
+        throw new Error(`Expected successful report parse: ${JSON.stringify(parseResult.error)}`);
+      }
+      const body = parseResult.data;
+      expect(body.policyVersionId).toBe("pol_v1_books_hardware");
+      expect(body.totalCandidatesExplored).toBeGreaterThan(0);
+      expect(body.totalCandidatesExplored).toBeLessThanOrEqual(25);
+    } finally {
+      await liveServer.close();
+    }
+  });
+
+  // 17. Honest evidence gap reporting during incomplete search
+  it("17. honestly reports evidence gaps as unresolved without claiming universal safety during incomplete search", async () => {
+    const payload: VerificationRequest = {
+      policy: validPolicy,
+      intent: validIntent,
+      searchSpace: {
+        domainVersion: "1.0.0",
+        categories: ["programming_book"],
+        pricePointsMinor: [2000, 3000, 4000, 5000],
+        quantities: [1, 2],
+        currencies: ["USD"],
+        maxItemsPerCart: 2,
+        evidenceVariations: ["MISSING", "COMPLETE"],
+      },
+      config: {
+        maxCandidates: 3, // Very small cap ensuring search cannot complete
+      },
+    };
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/verification/run",
+      payload,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+
+    expect(body.status).toBe("INCOMPLETE");
+    expect(body.exhausted).toBe(false);
+    expect(body.stopReason).toBe("CANDIDATE_CAP_REACHED");
+    expect(body.totalCandidatesExplored).toBe(3);
+    // Evidence gaps are preserved as unresolved candidates
+    expect(body.unresolvedCount).toBeGreaterThanOrEqual(1);
+    expect(body.unresolvedCandidates[0].unresolvedReason).toBe("CATALOG_EVIDENCE_GAP");
+    // Does NOT claim universal safety
+    expect(body.summary).toContain("Search space was not exhausted");
+  });
 });
 

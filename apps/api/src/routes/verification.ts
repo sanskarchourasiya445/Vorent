@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync, FastifyRequest } from "fastify";
+import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
 import { randomUUID } from "node:crypto";
 import {
   type ConfirmedIntent,
@@ -162,7 +162,7 @@ function extractRequestId(request: FastifyRequest): string {
 
 export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
   // Handler for verification run
-  const handleVerificationRun = async (request: FastifyRequest, reply: any) => {
+  const handleVerificationRun = async (request: FastifyRequest, reply: FastifyReply) => {
     const requestId = extractRequestId(request);
     reply.header("x-request-id", requestId);
 
