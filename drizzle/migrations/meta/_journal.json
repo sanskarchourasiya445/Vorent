@@ -15,6 +15,13 @@
       "when": 1792401340000,
       "tag": "0001_unique_consumed_nonce",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792426057896,
+      "tag": "0002_fancy_killmonger",
+      "breakpoints": true
     }
   ]
 }

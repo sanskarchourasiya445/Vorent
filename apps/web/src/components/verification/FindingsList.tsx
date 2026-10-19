@@ -156,6 +156,22 @@ export function FindingsList({
                       </span>
                     )}
 
+                    {finding.severity && (
+                      <span
+                        className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-bold uppercase border ${
+                          finding.severity === "CRITICAL"
+                            ? "bg-red-200 text-red-950 border-red-400"
+                            : finding.severity === "HIGH"
+                              ? "bg-red-100 text-red-900 border-red-300"
+                              : finding.severity === "MEDIUM"
+                                ? "bg-amber-100 text-amber-900 border-amber-300"
+                                : "bg-slate-100 text-slate-800 border-slate-300"
+                        }`}
+                      >
+                        {finding.severity}
+                      </span>
+                    )}
+
                     <h4 className="text-xs font-bold text-ink hover:text-accent transition-colors">
                       {finding.title}
                     </h4>

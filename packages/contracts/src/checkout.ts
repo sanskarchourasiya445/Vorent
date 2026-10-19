@@ -64,6 +64,16 @@ export const SpendReservationRecordSchema = z.object({
 export type SpendReservationRecord = z.infer<typeof SpendReservationRecordSchema>;
 
 /**
+ * Spend Reservation List Response Schema
+ */
+export const SpendReservationListResponseSchema = z.object({
+  reservations: z.array(SpendReservationRecordSchema),
+  total: z.number().int().nonnegative(),
+});
+
+export type SpendReservationListResponse = z.infer<typeof SpendReservationListResponseSchema>;
+
+/**
  * Checkout Proposal Record Schema
  */
 export const CheckoutProposalRecordSchema = z.object({

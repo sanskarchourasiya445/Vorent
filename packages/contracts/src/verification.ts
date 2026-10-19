@@ -252,3 +252,45 @@ export const ApiErrorResponseSchema = z.object({
 
 export type ApiErrorResponse = z.infer<typeof ApiErrorResponseSchema>;
 
+// 16. Finding Resolution & Triage Contracts
+export const ResolveFindingRequestSchema = z.object({
+  resolvedByVersionId: z.string().min(1, "resolvedByVersionId is required"),
+  resolutionNote: z.string().min(1, "resolutionNote is required"),
+});
+
+export type ResolveFindingRequest = z.infer<typeof ResolveFindingRequestSchema>;
+
+export const AcceptRiskRequestSchema = z.object({
+  rationale: z.string().min(1, "rationale is required"),
+});
+
+export type AcceptRiskRequest = z.infer<typeof AcceptRiskRequestSchema>;
+
+export const FindingRecordSchema = z.object({
+  id: z.string(),
+  ownerId: z.string(),
+  testRunId: z.string(),
+  policyVersionId: z.string(),
+  findingType: z.string(),
+  severity: FindingSeverityZodSchema,
+  status: FindingResolutionStatusZodSchema,
+  witness: CartSchema,
+  evidenceSnapshot: z.record(z.unknown()).default({}),
+  ruleTrace: z.array(z.unknown()).default([]),
+  reproduction: z.record(z.unknown()).default({}),
+  resolvedByVersionId: z.string().nullable().optional(),
+  resolutionNote: z.string().nullable().optional(),
+  createdAt: z.string(),
+  resolvedAt: z.string().nullable().optional(),
+});
+
+export type FindingRecord = z.infer<typeof FindingRecordSchema>;
+
+export const FindingListResponseSchema = z.object({
+  findings: z.array(FindingRecordSchema),
+  total: z.number().int().nonnegative(),
+});
+
+export type FindingListResponse = z.infer<typeof FindingListResponseSchema>;
+
+

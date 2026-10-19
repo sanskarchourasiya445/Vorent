@@ -88,7 +88,7 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
       }
     }
     await server.close();
-  });
+  }, 30000);
 
   const validPolicy: PolicyDocument = {
     schemaVersion: "1.0",
@@ -1421,7 +1421,7 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
       const appWithNote = resMedWithNote.json().approval;
       expect(appWithNote.id).toBeDefined();
       createdApprovalIds.push(appWithNote.id);
-    });
+    }, 15000);
 
     it("Step 16 [REAL-PG]: verifies transaction rollback leaves zero partial approval records on qualification failure", async (ctx) => {
       if (!isDbLive) {

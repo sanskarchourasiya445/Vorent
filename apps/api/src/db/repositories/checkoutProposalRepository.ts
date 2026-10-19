@@ -1,10 +1,12 @@
 import { randomUUID, randomBytes, createHash } from "node:crypto";
-import { eq, and, inArray, isNull } from "drizzle-orm";
+import { eq, and, inArray, isNull, desc } from "drizzle-orm";
 import {
   type Cart,
   type EvidenceSnapshot,
   ReasonCode,
   type Decision,
+  type ReservationState,
+  type SpendReservationRecord,
 } from "@warrant/contracts";
 import { evaluatePolicy } from "@warrant/domain";
 import {
@@ -262,10 +264,19 @@ export async function submitCheckoutProposal(
       );
     }
 
+    const evidence = { ...(input.evidenceSnapshot ?? {}) };
+    if (evidence.snapshotTimestamp) {
+      const snapTime = new Date(evidence.snapshotTimestamp).getTime();
+      const now = Date.now();
+      if (isNaN(snapTime) || now - snapTime > 3600000 || snapTime - now > 120000) {
+        evidence.stale = true;
+      }
+    }
+
     const evalResult = evaluatePolicy({
       policy: pv.policyDocument,
       cart: input.cart,
-      evidence: input.evidenceSnapshot,
+      evidence,
     });
 
     let finalDecision: Decision = evalResult.decision;
@@ -330,4 +341,49 @@ export async function submitCheckoutProposal(
       reasonCodes: finalReasonCodes,
     };
   });
+}
+
+/**
+ * Lists spend reservations with optional filtering by approvalId and state.
+ */
+export async function listSpendReservations(
+  db: any,
+  params?: {
+    ownerId?: string;
+    approvalId?: string;
+    state?: ReservationState;
+    limit?: number;
+  }
+): Promise<{ reservations: SpendReservationRecord[]; total: number }> {
+  const limit = Math.min(params?.limit ?? 50, 100);
+  const conditions = [];
+
+  if (params?.ownerId) conditions.push(eq(spendReservations.ownerId, params.ownerId));
+  if (params?.approvalId) conditions.push(eq(spendReservations.approvalId, params.approvalId));
+  if (params?.state) conditions.push(eq(spendReservations.state, params.state));
+
+  let query = db.select().from(spendReservations);
+  if (conditions.length > 0) {
+    query = query.where(conditions.length === 1 ? conditions[0] : and(...conditions));
+  }
+
+  const rows = await query.orderBy(desc(spendReservations.createdAt)).limit(limit);
+
+  const mapped: SpendReservationRecord[] = rows.map((r: any) => ({
+    id: r.id,
+    ownerId: r.ownerId,
+    approvalId: r.approvalId,
+    proposalId: r.proposalId,
+    amountMinor: Number(r.amountMinor),
+    currency: r.currency,
+    state: r.state as ReservationState,
+    expiresAt: r.expiresAt ? (r.expiresAt instanceof Date ? r.expiresAt.toISOString() : r.expiresAt) : null,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+    updatedAt: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : r.updatedAt,
+  }));
+
+  return {
+    reservations: mapped,
+    total: mapped.length,
+  };
 }

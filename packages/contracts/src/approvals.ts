@@ -18,6 +18,7 @@ export const ApprovalRecordSchema = z.object({
   qualifyingTestRunId: z.string().uuid(),
   spendLimitMinor: z.number().int().positive(),
   consumedSpendMinor: z.number().int().nonnegative().default(0),
+  remainingSpendMinor: z.number().int().optional(),
   currency: z.string().length(3),
   expiresAt: z.union([z.string().datetime(), z.date()]),
   revokedAt: z.union([z.string().datetime(), z.date()]).nullable().optional(),

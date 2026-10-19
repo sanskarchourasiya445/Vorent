@@ -202,55 +202,50 @@ export async function listPolicies(db: any, _ownerId?: string): Promise<PolicySu
       return getPresetSummaries();
     }
 
+    // Batch fetch all policy versions for all policies in one query to avoid N+1 query waterfall
+    let allVersions: any[] = [];
+    try {
+      allVersions = await db
+        .select({
+          id: policyVersions.id,
+          policyId: policyVersions.policyId,
+          versionNumber: policyVersions.versionNumber,
+          policyHash: policyVersions.policyHash,
+        })
+        .from(policyVersions);
+    } catch {
+      // Fallback if batch query fails
+    }
+
+    const versionById = new Map<string, { versionNumber: number; policyHash: string }>();
+    const versionsByPolicyId = new Map<string, { versionNumber: number; policyHash: string }[]>();
+
+    for (const v of allVersions) {
+      versionById.set(v.id, { versionNumber: v.versionNumber, policyHash: v.policyHash });
+      const list = versionsByPolicyId.get(v.policyId) || [];
+      list.push({ versionNumber: v.versionNumber, policyHash: v.policyHash });
+      versionsByPolicyId.set(v.policyId, list);
+    }
+
     const summaries: PolicySummary[] = [];
 
     for (const p of dbPolicies) {
       let versionNumber = 1;
       let policyHash = "";
-      let versionCount = 1;
+      const policyVList = versionsByPolicyId.get(p.id) || [];
+      const versionCount = policyVList.length > 0 ? policyVList.length : 1;
 
-      if (p.currentVersionId) {
-        const v = await db
-          .select({
-            versionNumber: policyVersions.versionNumber,
-            policyHash: policyVersions.policyHash,
-          })
-          .from(policyVersions)
-          .where(eq(policyVersions.id, p.currentVersionId))
-          .limit(1);
-
-        if (v.length > 0) {
-          versionNumber = v[0].versionNumber;
-          policyHash = v[0].policyHash;
+      if (p.currentVersionId && versionById.has(p.currentVersionId)) {
+        const v = versionById.get(p.currentVersionId)!;
+        versionNumber = v.versionNumber;
+        policyHash = v.policyHash;
+      } else if (policyVList.length > 0) {
+        const sorted = [...policyVList].sort((a, b) => b.versionNumber - a.versionNumber);
+        const latest = sorted[0];
+        if (latest) {
+          versionNumber = latest.versionNumber;
+          policyHash = latest.policyHash;
         }
-      }
-
-      // If policyHash is not resolved via currentVersionId, fall back to latest version for this policy
-      if (!policyHash) {
-        const latestV = await db
-          .select({
-            id: policyVersions.id,
-            versionNumber: policyVersions.versionNumber,
-            policyHash: policyVersions.policyHash,
-          })
-          .from(policyVersions)
-          .where(eq(policyVersions.policyId, p.id))
-          .orderBy(desc(policyVersions.versionNumber))
-          .limit(1);
-
-        if (latestV.length > 0) {
-          versionNumber = latestV[0].versionNumber;
-          policyHash = latestV[0].policyHash;
-        }
-      }
-
-      const countRes = await db
-        .select({ count: sql<number>`count(*)::int` })
-        .from(policyVersions)
-        .where(eq(policyVersions.policyId, p.id));
-
-      if (countRes.length > 0 && countRes[0]?.count) {
-        versionCount = countRes[0].count;
       }
 
       // Check if this policy matches a preset

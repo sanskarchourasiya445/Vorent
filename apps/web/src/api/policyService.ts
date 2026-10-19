@@ -1,8 +1,19 @@
-import type {
-  PolicySummary,
-  PolicyVersionRecord,
-  PolicyListResponse,
-  PolicyVersionListResponse,
+import {
+  type PolicySummary,
+  type PolicyVersionRecord,
+  type PolicyListResponse,
+  type PolicyVersionListResponse,
+  type CompileIntentRequest,
+  type CompileIntentResponse,
+  CompileIntentResponseSchema,
+  type ComputeDiffRequest,
+  type PolicyDiff,
+  PolicyDiffSchema,
+  type ProposeRepairRequest,
+  type ProposeRepairResponse,
+  ProposeRepairResponseSchema,
+  type CreatePolicyRequest,
+  type CreatePolicyVersionRequest,
 } from "@warrant/contracts";
 import type { PersistenceLoadState } from "../types/persistence";
 import { AVAILABLE_POLICIES } from "./verificationService";
@@ -230,4 +241,212 @@ export async function fetchPolicyVersions(
   }
 
   return [];
+}
+
+/**
+ * Compiles a natural-language purchase mandate into a structured policy candidate.
+ * Calls POST /api/policies/compile.
+ */
+export async function compileIntent(
+  request: CompileIntentRequest,
+): Promise<CompileIntentResponse> {
+  const url = `${API_BASE}/api/policies/compile`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    let message = `Compilation failed with HTTP ${res.status}`;
+    try {
+      const errJson = await res.json();
+      if (errJson && typeof errJson === "object") {
+        message = errJson.error?.message || errJson.message || message;
+      }
+    } catch {
+      // fallback
+    }
+    throw new Error(message);
+  }
+
+  const json = await res.json();
+  return CompileIntentResponseSchema.parse(json);
+}
+
+/**
+ * Computes a semantic field-level diff between two policy documents.
+ * Calls POST /api/policies/diff.
+ */
+export async function computeDiff(
+  request: ComputeDiffRequest,
+): Promise<PolicyDiff> {
+  const url = `${API_BASE}/api/policies/diff`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    let message = `Diff calculation failed with HTTP ${res.status}`;
+    try {
+      const errJson = await res.json();
+      if (errJson && typeof errJson === "object") {
+        message = errJson.error?.message || errJson.message || message;
+      }
+    } catch {
+      // fallback
+    }
+    throw new Error(message);
+  }
+
+  const json = await res.json();
+  return PolicyDiffSchema.parse(json);
+}
+
+/**
+ * Fetches semantic diff for an existing version against another or its predecessor.
+ * Calls GET /api/policies/:id/versions/:vid/diff.
+ */
+export async function fetchVersionDiff(
+  policyId: string,
+  versionId: string,
+  againstVersionId?: string,
+): Promise<PolicyDiff> {
+  const query = againstVersionId ? `?againstVersionId=${encodeURIComponent(againstVersionId)}` : "";
+  const url = `${API_BASE}/api/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(versionId)}/diff${query}`;
+
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!res.ok) {
+    let message = `Version diff failed with HTTP ${res.status}`;
+    try {
+      const errJson = await res.json();
+      if (errJson && typeof errJson === "object") {
+        message = errJson.error?.message || errJson.message || message;
+      }
+    } catch {
+      // fallback
+    }
+    throw new Error(message);
+  }
+
+  const json = await res.json();
+  return PolicyDiffSchema.parse(json);
+}
+
+/**
+ * Generates an automated policy repair proposal addressing verification findings.
+ * Calls POST /api/policies/propose-repair.
+ */
+export async function proposeRepair(
+  request: ProposeRepairRequest,
+): Promise<ProposeRepairResponse> {
+  const url = `${API_BASE}/api/policies/propose-repair`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    let message = `Repair proposal failed with HTTP ${res.status}`;
+    try {
+      const errJson = await res.json();
+      if (errJson && typeof errJson === "object") {
+        message = errJson.error?.message || errJson.message || message;
+      }
+    } catch {
+      // fallback
+    }
+    throw new Error(message);
+  }
+
+  const json = await res.json();
+  return ProposeRepairResponseSchema.parse(json);
+}
+
+/**
+ * Persists a new policy and its Version 1 record.
+ * Calls POST /api/policies.
+ */
+export async function createPolicy(
+  request: CreatePolicyRequest,
+): Promise<PolicyVersionRecord> {
+  const url = `${API_BASE}/api/policies`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    let message = `Policy creation failed with HTTP ${res.status}`;
+    try {
+      const errJson = await res.json();
+      if (errJson && typeof errJson === "object") {
+        message = errJson.error?.message || errJson.message || message;
+      }
+    } catch {
+      // fallback
+    }
+    throw new Error(message);
+  }
+
+  return (await res.json()) as PolicyVersionRecord;
+}
+
+/**
+ * Appends a new immutable version to an existing policy.
+ * Calls POST /api/policies/:id/versions.
+ */
+export async function createPolicyVersion(
+  policyId: string,
+  request: CreatePolicyVersionRequest,
+): Promise<PolicyVersionRecord> {
+  const url = `${API_BASE}/api/policies/${encodeURIComponent(policyId)}/versions`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    let message = `Version creation failed with HTTP ${res.status}`;
+    try {
+      const errJson = await res.json();
+      if (errJson && typeof errJson === "object") {
+        message = errJson.error?.message || errJson.message || message;
+      }
+    } catch {
+      // fallback
+    }
+    throw new Error(message);
+  }
+
+  return (await res.json()) as PolicyVersionRecord;
 }

@@ -35,7 +35,7 @@ export type CartItem = z.infer<typeof CartItemSchema>;
 export const CartSchema = z.object({
   currency: z.string().length(3, "Currency code must be 3 characters"),
   items: z.array(CartItemSchema),
-});
+}).passthrough();
 
 export type Cart = z.infer<typeof CartSchema>;
 

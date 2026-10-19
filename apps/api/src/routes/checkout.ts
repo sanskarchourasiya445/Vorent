@@ -5,6 +5,7 @@ import {
   CreateCheckoutNonceRequestSchema,
   SubmitCheckoutProposalRequestSchema,
   SubmitCheckoutProposalResponseSchema,
+  SpendReservationListResponseSchema,
 } from "@warrant/contracts";
 import { db } from "../db/index.js";
 import { approvals } from "../db/schema.js";
@@ -275,4 +276,50 @@ export const checkoutRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
   });
+
+  // 3. GET /reservations - List spend reservations
+  fastify.get(
+    "/reservations",
+    async (
+      request: FastifyRequest<{
+        Querystring: { approvalId?: string; state?: string; limit?: number };
+      }>,
+      reply: FastifyReply
+    ) => {
+      const requestId = extractRequestId(request);
+      reply.header("x-request-id", requestId);
+
+      try {
+        const ownerId = await policyRepo.ensureDefaultUser(db);
+        const { approvalId, state, limit } = request.query;
+
+        const result = await checkoutRepo.listSpendReservations(db, {
+          ownerId,
+          approvalId,
+          state: state as any,
+          limit: limit ? Number(limit) : undefined,
+        });
+
+        const validated = SpendReservationListResponseSchema.parse(result);
+        return reply.status(200).send(validated);
+      } catch (err: unknown) {
+        if (isDbConnectionError(err)) {
+          return reply.status(503).send({
+            error: {
+              code: "DATABASE_UNAVAILABLE",
+              message: "Database service is currently in standby.",
+            },
+            requestId,
+          });
+        }
+        return reply.status(500).send({
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "Failed to list spend reservations.",
+          },
+          requestId,
+        });
+      }
+    }
+  );
 };

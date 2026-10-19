@@ -229,6 +229,7 @@ export const paymentOrders = pgTable(
     providerOrderId: text("provider_order_id").unique(),
     idempotencyKey: text("idempotency_key").notNull().unique(),
     status: text("status").notNull(), // CREATED | PAYER_ACTION_REQUIRED | CAPTURE_PENDING | CAPTURED | FAILED | CANCELLED | UNKNOWN_REQUIRES_RECONCILIATION
+    payerId: text("payer_id"),
     captureId: text("capture_id"),
     amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
     currency: char("currency", { length: 3 }).notNull(),
@@ -257,3 +258,24 @@ export const auditEvents = pgTable(
     index("audit_events_owner_created_idx").on(table.ownerId, table.createdAt),
   ],
 );
+
+// 13. Webhook Events (Durable deduplication and replay safety)
+export const webhookEvents = pgTable(
+  "webhook_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    eventId: text("event_id").notNull().unique(),
+    eventType: text("event_type").notNull(),
+    resourceType: text("resource_type"),
+    resourceId: text("resource_id"),
+    status: text("status").notNull(), // PROCESSED | IGNORED | FAILED
+    payload: jsonb("payload").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("webhook_events_type_idx").on(table.eventType, table.createdAt),
+    index("webhook_events_resource_idx").on(table.resourceId),
+  ],
+);
+

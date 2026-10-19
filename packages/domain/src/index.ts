@@ -11,3 +11,7 @@ export * from "./search/candidateGenerator.js";
 export * from "./verification/fingerprint.js";
 export * from "./verification/policyHash.js";
 export * from "./verification/verifier.js";
+export * from "./compiler/intentCompiler.js";
+export * from "./repair/policyDiff.js";
+export * from "./repair/policyRepairer.js";
+

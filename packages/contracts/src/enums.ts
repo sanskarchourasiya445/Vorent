@@ -59,6 +59,7 @@ export type RunStatus = z.infer<typeof RunStatusZodSchema>;
 export const PaymentStatusValues = [
   "CREATED",
   "PAYER_ACTION_REQUIRED",
+  "APPROVED",
   "CAPTURE_PENDING",
   "CAPTURED",
   "FAILED",
@@ -70,6 +71,7 @@ export const PaymentStatusZodSchema = z.enum(PaymentStatusValues);
 export const PaymentStatusSchema = {
   CREATED: "CREATED",
   PAYER_ACTION_REQUIRED: "PAYER_ACTION_REQUIRED",
+  APPROVED: "APPROVED",
   CAPTURE_PENDING: "CAPTURE_PENDING",
   CAPTURED: "CAPTURED",
   FAILED: "FAILED",

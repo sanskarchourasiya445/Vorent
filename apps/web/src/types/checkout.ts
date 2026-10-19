@@ -18,6 +18,7 @@ export interface CheckoutProposalInput {
   nonce?: string;
   nonceId?: string;
   useOfflineSimulation?: boolean;
+  evidenceVariation?: "COMPLETE" | "STALE" | "MISSING";
 }
 
 export interface CheckoutGateResult {

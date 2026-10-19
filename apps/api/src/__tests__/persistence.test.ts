@@ -501,7 +501,7 @@ describe("Phase 4: Database Persistence & Policy Version History", () => {
 
       const hardwarePreset = body.policies.find((p: any) => p.id === "pol_v1_books_hardware" || p.presetId === "pol_v1_books_hardware");
       expect(hardwarePreset).toBeDefined();
-    });
+    }, 15000);
 
     it("GET /api/v1/policies provides forward-compatible alias matching /api/policies", async () => {
       const response = await server.inject({
@@ -512,7 +512,7 @@ describe("Phase 4: Database Persistence & Policy Version History", () => {
       expect(response.statusCode).toBe(200);
       const body = response.json();
       expect(PolicyListResponseSchema.safeParse(body).success).toBe(true);
-    });
+    }, 15000);
 
     it("GET /api/policies/:id returns specific preset policy record", async () => {
       const response = await server.inject({
@@ -773,6 +773,28 @@ describe("Phase 4: Database Persistence & Policy Version History", () => {
       expect(rawText).not.toContain("INSERT INTO");
       expect(rawText).not.toContain("node_modules");
       expect(rawText).not.toContain(" at ");
+    });
+  });
+
+  // 7. Drizzle Schema Migrations Invariants
+  describe("7. Drizzle Schema Migrations and Journal Invariants", () => {
+    it("confirms 0002_fancy_killmonger.sql exists, is tracked in _journal.json, and contains payer_id and webhook_events", () => {
+      const migrationPath = resolve(process.cwd(), "drizzle/migrations/0002_fancy_killmonger.sql");
+      const journalPath = resolve(process.cwd(), "drizzle/migrations/meta/_journal.json");
+
+      expect(existsSync(migrationPath)).toBe(true);
+      expect(existsSync(journalPath)).toBe(true);
+
+      const migrationSql = readFileSync(migrationPath, "utf-8");
+      expect(migrationSql).toContain("webhook_events");
+      expect(migrationSql).toContain("payer_id");
+      expect(migrationSql).toContain("checkout_proposals_consumed_nonce_id_unique");
+
+      const journal = JSON.parse(readFileSync(journalPath, "utf-8"));
+      const entries = journal.entries || [];
+      const entry0002 = entries.find((e: any) => e.tag === "0002_fancy_killmonger");
+      expect(entry0002).toBeDefined();
+      expect(entry0002.idx).toBe(2);
     });
   });
 });

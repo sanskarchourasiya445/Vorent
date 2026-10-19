@@ -22,6 +22,7 @@ import {
   saveVerificationRun,
   listVerificationRuns,
   getVerificationRun,
+  listFindings,
 } from "../db/repositories/verificationRunRepository.js";
 
 export const SERVER_BOUNDS = {
@@ -475,6 +476,40 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
         error: {
           code: "INTERNAL_ERROR",
           message: "An internal error occurred while retrieving verification run.",
+        },
+        requestId,
+      });
+    }
+  });
+
+  // GET /runs/:id/findings - List findings for a specific verification run
+  fastify.get("/runs/:id/findings", async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const requestId = extractRequestId(request);
+    reply.header("x-request-id", requestId);
+
+    const { id } = request.params;
+    try {
+      const findingsList = await listFindings(db, { testRunId: id });
+      return reply.status(200).send({
+        testRunId: id,
+        findings: findingsList,
+        total: findingsList.length,
+      });
+    } catch (err: unknown) {
+      if (isDbConnectionError(err)) {
+        return reply.status(503).send({
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "Persistence store is currently unavailable.",
+          },
+          requestId,
+        });
+      }
+      request.log.error({ err, requestId, id }, "Failed to list findings for run");
+      return reply.status(500).send({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "An internal error occurred while retrieving run findings.",
         },
         requestId,
       });

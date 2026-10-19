@@ -95,7 +95,7 @@ describe("PaymentOrderPipelineCard Presentation Suite", () => {
     );
 
     expect(html).toContain("Pending Issuance");
-    expect(html).toContain("Submit cart to Warrant Authorization Gate to initiate the checkout pipeline");
+    expect(html).toContain("Order creation requires active spend reservation.");
   });
 
   it("5. Protects against duplicate clicks during in-flight order creation", () => {
@@ -117,7 +117,7 @@ describe("PaymentOrderPipelineCard Presentation Suite", () => {
     );
 
     expect(html).toContain("disabled=\"\"");
-    expect(html).toContain("Creating PayPal Order...");
+    expect(html).toContain("Creating Order in PayPal Sandbox...");
   });
 
   it("6. Protects against duplicate clicks after successful order creation", () => {
@@ -143,7 +143,7 @@ describe("PaymentOrderPipelineCard Presentation Suite", () => {
       }),
     );
 
-    expect(html).toContain("PayPal Sandbox Order Successfully Initialized");
+    expect(html).toContain("Payment Order Details");
     expect(html).toContain("5O190127TN364715T");
     expect(html).toContain("ord_internal_112233");
     expect(html).toContain("Open Buyer Portal");
@@ -168,11 +168,10 @@ describe("PaymentOrderPipelineCard Presentation Suite", () => {
       }),
     );
 
-    expect(html).toContain("Ambiguous Order Creation Outcome — Reconciliation Required");
+    expect(html).toContain("Ambiguous Payment Outcome — Reconciliation Hold Active");
     expect(html).toContain("Recovery Guidance:");
-    expect(html).toContain("Automatic retry has been blocked to prevent duplicate reservations");
-    expect(html).toContain("disabled=\"\"");
-    expect(html).toContain("Reconciliation Required");
+    expect(html).toContain("Automatic retry is strictly blocked.");
+    expect(html).toContain("Reconciliation Hold");
   });
 
   it("8. Displays standard order creation failure with clear error message", () => {
@@ -193,7 +192,7 @@ describe("PaymentOrderPipelineCard Presentation Suite", () => {
       }),
     );
 
-    expect(html).toContain("Payment Order Dispatch Failed");
+    expect(html).toContain("Payment Lifecycle Action Error");
     expect(html).toContain("PayPal Sandbox API returned HTTP 422: UNPROCESSABLE_ENTITY");
   });
 

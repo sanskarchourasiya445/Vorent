@@ -271,4 +271,175 @@ describe("PayPalService (Unit & Mocked Contract Tests)", () => {
       }
     });
   });
+
+  describe("Retrieving Orders (getOrder)", () => {
+    it("retrieves and normalizes order details from PayPal", async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("/v1/oauth2/token")) {
+          return new Response(JSON.stringify({ access_token: "mock_token", expires_in: 3600 }), { status: 200 });
+        }
+        return new Response(
+          JSON.stringify({
+            id: "ORDER-123",
+            status: "APPROVED",
+            intent: "CAPTURE",
+            purchase_units: [
+              {
+                reference_id: "res-123",
+                amount: { currency_code: "USD", value: "45.00" },
+              },
+            ],
+            payer: { payer_id: "PAYER-ABC" },
+          }),
+          { status: 200 }
+        );
+      });
+
+      const service = new PayPalService(
+        { env: "sandbox", clientId: validClientId, clientSecret: validClientSecret, baseUrl: mockBaseUrl },
+        mockFetch
+      );
+
+      const order = await service.getOrder("ORDER-123");
+      expect(order.id).toBe("ORDER-123");
+      expect(order.status).toBe("APPROVED");
+      expect(order.payer?.payerId).toBe("PAYER-ABC");
+    });
+  });
+
+  describe("Order Capture (captureOrder)", () => {
+    it("captures order and returns capture ID and status", async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url.includes("/v1/oauth2/token")) {
+          return new Response(JSON.stringify({ access_token: "mock_token", expires_in: 3600 }), { status: 200 });
+        }
+        const headers = init?.headers as Record<string, string>;
+        expect(headers["PayPal-Request-Id"]).toBe("warrant:cap:123");
+
+        return new Response(
+          JSON.stringify({
+            id: "ORDER-123",
+            status: "COMPLETED",
+            purchase_units: [
+              {
+                payments: {
+                  captures: [
+                    {
+                      id: "CAP-789",
+                      status: "COMPLETED",
+                      amount: { currency_code: "USD", value: "45.00" },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 201 }
+        );
+      });
+
+      const service = new PayPalService(
+        { env: "sandbox", clientId: validClientId, clientSecret: validClientSecret, baseUrl: mockBaseUrl },
+        mockFetch
+      );
+
+      const capture = await service.captureOrder({
+        orderId: "ORDER-123",
+        idempotencyKey: "warrant:cap:123",
+      });
+
+      expect(capture.orderId).toBe("ORDER-123");
+      expect(capture.captureId).toBe("CAP-789");
+      expect(capture.captureStatus).toBe("COMPLETED");
+      expect(capture.amount.value).toBe("45.00");
+    });
+
+    it("flags capture timeout as an AMBIGUOUS network error", async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("/v1/oauth2/token")) {
+          return new Response(JSON.stringify({ access_token: "mock_token", expires_in: 3600 }), { status: 200 });
+        }
+        throw Object.assign(new Error("Capture timed out"), { name: "TimeoutError" });
+      });
+
+      const service = new PayPalService(
+        { env: "sandbox", clientId: validClientId, clientSecret: validClientSecret, baseUrl: mockBaseUrl },
+        mockFetch
+      );
+
+      await expect(
+        service.captureOrder({ orderId: "ORDER-123", idempotencyKey: "warrant:cap:123" })
+      ).rejects.toThrowError(PayPalNetworkError);
+    });
+  });
+
+  describe("Webhook Signature Verification (verifyWebhookSignature)", () => {
+    it("returns true when PayPal verification returns SUCCESS", async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("/v1/oauth2/token")) {
+          return new Response(JSON.stringify({ access_token: "mock_token", expires_in: 3600 }), { status: 200 });
+        }
+        return new Response(
+          JSON.stringify({ verification_status: "SUCCESS" }),
+          { status: 200 }
+        );
+      });
+
+      const service = new PayPalService(
+        {
+          env: "sandbox",
+          clientId: validClientId,
+          clientSecret: validClientSecret,
+          webhookId: "WH-CONFIG-123",
+          baseUrl: mockBaseUrl,
+        },
+        mockFetch
+      );
+
+      const isValid = await service.verifyWebhookSignature({
+        authAlgo: "SHA256withRSA",
+        certUrl: "https://api.sandbox.paypal.com/cert",
+        transmissionId: "trans-1",
+        transmissionSig: "sig-1",
+        transmissionTime: "2026-10-19T14:00:00Z",
+        webhookEvent: { id: "EVT-1", event_type: "CHECKOUT.ORDER.APPROVED" },
+      });
+
+      expect(isValid).toBe(true);
+    });
+
+    it("returns false when PayPal verification returns FAILURE", async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("/v1/oauth2/token")) {
+          return new Response(JSON.stringify({ access_token: "mock_token", expires_in: 3600 }), { status: 200 });
+        }
+        return new Response(
+          JSON.stringify({ verification_status: "FAILURE" }),
+          { status: 200 }
+        );
+      });
+
+      const service = new PayPalService(
+        {
+          env: "sandbox",
+          clientId: validClientId,
+          clientSecret: validClientSecret,
+          webhookId: "WH-CONFIG-123",
+          baseUrl: mockBaseUrl,
+        },
+        mockFetch
+      );
+
+      const isValid = await service.verifyWebhookSignature({
+        authAlgo: "SHA256withRSA",
+        certUrl: "https://api.sandbox.paypal.com/cert",
+        transmissionId: "trans-1",
+        transmissionSig: "sig-1",
+        transmissionTime: "2026-10-19T14:00:00Z",
+        webhookEvent: { id: "EVT-1", event_type: "CHECKOUT.ORDER.APPROVED" },
+      });
+
+      expect(isValid).toBe(false);
+    });
+  });
 });

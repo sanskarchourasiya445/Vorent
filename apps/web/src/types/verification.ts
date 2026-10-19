@@ -6,6 +6,9 @@ import type {
   PolicyDocument,
   ConfirmedIntent,
   StopReason,
+  FindingSeverity,
+  ViolationType,
+  FindingResolutionStatus,
 } from "@warrant/contracts";
 
 export type VerificationStatus =
@@ -59,6 +62,13 @@ export interface VerificationFinding {
   candidateCart: Cart;
   candidateEvidence?: EvidenceSnapshot;
   reproductionNotes: string[];
+  severity?: FindingSeverity;
+  violationType?: ViolationType | string;
+  resolutionStatus?: FindingResolutionStatus | string;
+  fingerprint?: string;
+  affectedRule?: string;
+  resolvedByVersionId?: string | null;
+  resolutionNote?: string | null;
 }
 
 export interface VerificationCoverage {

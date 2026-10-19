@@ -205,6 +205,11 @@ export function adaptVerificationReportToRunResult(
         `Violated: ${f.violationType}`,
         `Candidate Index: ${f.reproduction.candidateIndex}`,
       ],
+      severity: f.severity,
+      violationType: f.violationType,
+      resolutionStatus: f.resolutionStatus,
+      fingerprint: f.fingerprint,
+      affectedRule: f.violationType,
     });
   }
 
@@ -225,6 +230,9 @@ export function adaptVerificationReportToRunResult(
         candidateCart: u.candidateCart,
         candidateEvidence: u.evidence,
         reproductionNotes: [u.notes, `Reason: ${u.unresolvedReason}`],
+        severity: "LOW",
+        violationType: u.unresolvedReason,
+        resolutionStatus: "UNRESOLVED",
       });
     }
   }
@@ -272,6 +280,7 @@ export interface ExecuteRunOptions {
   simulateBudgetExhaustion?: boolean;
   simulateError?: boolean;
   timeoutMs?: number;
+  customPolicyOption?: PolicyOption;
 }
 
 /**
@@ -283,7 +292,9 @@ export async function executeVerificationRun(
   config: VerificationConfig,
   options?: ExecuteRunOptions,
 ): Promise<VerificationRunResult> {
-  const policyOption = AVAILABLE_POLICIES.find((p) => p.id === config.policyVersionId);
+  const policyOption =
+    options?.customPolicyOption ||
+    AVAILABLE_POLICIES.find((p) => p.id === config.policyVersionId);
   if (!policyOption) {
     throw new Error(`Target policy "${config.policyVersionId}" not found in available policy manifests.`);
   }

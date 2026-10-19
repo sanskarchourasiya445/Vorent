@@ -27,10 +27,25 @@ export interface PayPalOrderPresentationState {
   status?: PaymentStatus;
   reservationState?: ReservationState;
   approvalUrl?: string;
+  payerId?: string;
+  captureId?: string;
+  amountMinor?: number;
+  currency?: string;
+  createdAt?: string;
+  updatedAt?: string;
   error?: string;
   errorCode?: string;
   isAmbiguous?: boolean;
   isCreating?: boolean;
+  isConfirmingApproval?: boolean;
+  isCapturing?: boolean;
+  isCancelling?: boolean;
+  isReconciling?: boolean;
+  isRefreshing?: boolean;
+  nextAction?: "CAPTURE" | "NONE";
+  reconciliationNotes?: string;
+  cancellationSuccess?: boolean;
+  captureSuccess?: boolean;
 }
 
 export interface PaymentOrderPipelineCardProps {
@@ -43,5 +58,11 @@ export interface PaymentOrderPipelineCardProps {
   isDemoSimulation?: boolean;
   paypalOrderState?: PayPalOrderPresentationState;
   onCreatePayPalOrder?: () => void;
+  onConfirmBuyerApproval?: (payerId?: string) => Promise<void> | void;
+  onCapturePaymentOrder?: () => Promise<void> | void;
+  onCancelPaymentOrder?: (reason?: string) => Promise<void> | void;
+  onReconcilePaymentOrder?: () => Promise<void> | void;
+  onRefreshOrderDetails?: () => Promise<void> | void;
   className?: string;
 }
+

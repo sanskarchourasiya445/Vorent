@@ -5,7 +5,15 @@ import { submitCheckoutProposal, requestCheckoutNonce } from "../../api/checkout
 import { fetchApprovals } from "../../api/approvalService";
 import { DecisionResultCard } from "../features/DecisionResultCard";
 import { PaymentOrderPipelineCard } from "./PaymentOrderPipelineCard";
-import { createPaymentOrder, PaymentOrderError } from "../../api/paymentOrderService";
+import {
+  createPaymentOrder,
+  getPaymentOrder,
+  confirmBuyerApproval,
+  cancelPaymentOrder,
+  capturePaymentOrder,
+  reconcilePaymentOrder,
+  PaymentOrderError,
+} from "../../api/paymentOrderService";
 import type { PayPalOrderPresentationState } from "../../types/paymentOrder";
 import { AVAILABLE_POLICIES } from "../../api/verificationService";
 import {
@@ -108,6 +116,7 @@ export function CheckoutGatePanel() {
   // PayPal Sandbox Order creation state
   const [paypalOrderState, setPaypalOrderState] = useState<PayPalOrderPresentationState | null>(null);
   const [isCreatingPayPalOrder, setIsCreatingPayPalOrder] = useState(false);
+  const [evidenceVariation, setEvidenceVariation] = useState<"COMPLETE" | "STALE" | "MISSING">("COMPLETE");
 
   const cartTotalMinor = items.reduce((sum, item) => sum + item.unitPriceMinor * item.quantity, 0);
 
@@ -212,6 +221,7 @@ export function CheckoutGatePanel() {
         currency: effectiveCurrency,
         nonce,
         useOfflineSimulation,
+        evidenceVariation,
       });
 
       setEvalResult(result);
@@ -281,6 +291,229 @@ export function CheckoutGatePanel() {
       }
     } finally {
       setIsCreatingPayPalOrder(false);
+    }
+  };
+
+  const handleConfirmBuyerApproval = async (payerId?: string) => {
+    if (!paypalOrderState?.orderId && !paypalOrderState?.paypalOrderId) return;
+    if (paypalOrderState.isConfirmingApproval) return;
+
+    setPaypalOrderState((prev) => ({
+      ...(prev || {}),
+      isConfirmingApproval: true,
+      error: undefined,
+    }));
+
+    try {
+      const response = await confirmBuyerApproval({
+        orderId: paypalOrderState.orderId,
+        paypalOrderId: paypalOrderState.paypalOrderId,
+        payerId,
+      });
+
+      setPaypalOrderState((prev) => ({
+        ...(prev || {}),
+        orderId: response.order.id,
+        paypalOrderId: response.paypalOrderId,
+        status: response.order.status,
+        reservationState: response.reservationState,
+        payerId: response.order.payerId || payerId || prev?.payerId,
+        nextAction: response.nextAction,
+        isConfirmingApproval: false,
+        error: undefined,
+      }));
+    } catch (err) {
+      if (err instanceof PaymentOrderError) {
+        setPaypalOrderState((prev) => ({
+          ...(prev || {}),
+          error: err.message,
+          errorCode: err.code,
+          isAmbiguous: err.isAmbiguous,
+          isConfirmingApproval: false,
+        }));
+      } else {
+        setPaypalOrderState((prev) => ({
+          ...(prev || {}),
+          error: err instanceof Error ? err.message : "Failed to confirm buyer approval.",
+          isConfirmingApproval: false,
+        }));
+      }
+    }
+  };
+
+  const handleCapturePaymentOrder = async () => {
+    if (!paypalOrderState?.orderId && !paypalOrderState?.paypalOrderId) return;
+    if (paypalOrderState.isCapturing) return;
+
+    setPaypalOrderState((prev) => ({
+      ...(prev || {}),
+      isCapturing: true,
+      error: undefined,
+    }));
+
+    try {
+      const response = await capturePaymentOrder({
+        orderId: paypalOrderState.orderId,
+        paypalOrderId: paypalOrderState.paypalOrderId,
+      });
+
+      setPaypalOrderState((prev) => ({
+        ...(prev || {}),
+        orderId: response.order.id,
+        paypalOrderId: response.paypalOrderId,
+        status: response.status,
+        reservationState: response.reservationState,
+        captureId: response.captureId,
+        capturedAmountMinor: response.capturedAmountMinor,
+        captureSuccess: true,
+        isCapturing: false,
+        error: undefined,
+      }));
+    } catch (err) {
+      if (err instanceof PaymentOrderError) {
+        setPaypalOrderState((prev) => ({
+          ...(prev || {}),
+          error: err.message,
+          errorCode: err.code,
+          isAmbiguous: err.isAmbiguous,
+          isCapturing: false,
+        }));
+      } else {
+        setPaypalOrderState((prev) => ({
+          ...(prev || {}),
+          error: err instanceof Error ? err.message : "Failed to capture payment order.",
+          isCapturing: false,
+        }));
+      }
+    }
+  };
+
+  const handleCancelPaymentOrder = async (reason?: string) => {
+    if (!paypalOrderState?.orderId && !paypalOrderState?.paypalOrderId) return;
+    if (paypalOrderState.isCancelling) return;
+
+    setPaypalOrderState((prev) => ({
+      ...(prev || {}),
+      isCancelling: true,
+      error: undefined,
+    }));
+
+    try {
+      const response = await cancelPaymentOrder({
+        orderId: paypalOrderState.orderId,
+        paypalOrderId: paypalOrderState.paypalOrderId,
+        reason,
+      });
+
+      setPaypalOrderState((prev) => ({
+        ...(prev || {}),
+        orderId: response.order.id,
+        status: response.order.status,
+        reservationState: response.reservationState,
+        cancellationSuccess: response.cancelled,
+        isCancelling: false,
+        error: undefined,
+      }));
+    } catch (err) {
+      if (err instanceof PaymentOrderError) {
+        setPaypalOrderState((prev) => ({
+          ...(prev || {}),
+          error: err.message,
+          errorCode: err.code,
+          isAmbiguous: err.isAmbiguous,
+          isCancelling: false,
+        }));
+      } else {
+        setPaypalOrderState((prev) => ({
+          ...(prev || {}),
+          error: err instanceof Error ? err.message : "Failed to cancel payment order.",
+          isCancelling: false,
+        }));
+      }
+    }
+  };
+
+  const handleReconcilePaymentOrder = async () => {
+    if (!paypalOrderState?.orderId && !paypalOrderState?.paypalOrderId) return;
+    if (paypalOrderState.isReconciling) return;
+
+    setPaypalOrderState((prev) => ({
+      ...(prev || {}),
+      isReconciling: true,
+      error: undefined,
+    }));
+
+    try {
+      const response = await reconcilePaymentOrder({
+        orderId: paypalOrderState.orderId,
+        paypalOrderId: paypalOrderState.paypalOrderId,
+      });
+
+      setPaypalOrderState((prev) => ({
+        ...(prev || {}),
+        orderId: response.order.id,
+        paypalOrderId: response.order.providerOrderId || prev?.paypalOrderId,
+        status: response.order.status,
+        reservationState: response.reservationState,
+        captureId: response.order.captureId || prev?.captureId,
+        payerId: response.order.payerId || prev?.payerId,
+        reconciliationNotes: response.notes,
+        isAmbiguous: false,
+        isReconciling: false,
+        error: undefined,
+      }));
+    } catch (err) {
+      if (err instanceof PaymentOrderError) {
+        setPaypalOrderState((prev) => ({
+          ...(prev || {}),
+          error: err.message,
+          errorCode: err.code,
+          isAmbiguous: err.isAmbiguous,
+          isReconciling: false,
+        }));
+      } else {
+        setPaypalOrderState((prev) => ({
+          ...(prev || {}),
+          error: err instanceof Error ? err.message : "Failed to reconcile payment order.",
+          isReconciling: false,
+        }));
+      }
+    }
+  };
+
+  const handleRefreshOrderDetails = async () => {
+    if (!paypalOrderState?.orderId) return;
+
+    setPaypalOrderState((prev) => ({
+      ...(prev || {}),
+      isRefreshing: true,
+      error: undefined,
+    }));
+
+    try {
+      const order = await getPaymentOrder(paypalOrderState.orderId);
+      setPaypalOrderState((prev) => ({
+        ...(prev || {}),
+        orderId: order.id,
+        paypalOrderId: order.providerOrderId || prev?.paypalOrderId,
+        status: order.status,
+        captureId: order.captureId || prev?.captureId,
+        payerId: order.payerId || prev?.payerId,
+        amountMinor: order.amountMinor,
+        currency: order.currency,
+        createdAt:
+          typeof order.createdAt === "string" ? order.createdAt : order.createdAt.toISOString(),
+        updatedAt:
+          typeof order.updatedAt === "string" ? order.updatedAt : order.updatedAt.toISOString(),
+        isRefreshing: false,
+        error: undefined,
+      }));
+    } catch (err) {
+      setPaypalOrderState((prev) => ({
+        ...(prev || {}),
+        isRefreshing: false,
+        error: err instanceof Error ? err.message : "Failed to refresh order details.",
+      }));
     }
   };
 
@@ -510,6 +743,25 @@ export function CheckoutGatePanel() {
               />
             </div>
 
+            {/* Evidence & Categorization Quality Selector */}
+            <div>
+              <label className="block text-[11px] font-semibold text-muted uppercase mb-1">
+                Evidence & Categorization Quality
+              </label>
+              <select
+                value={evidenceVariation}
+                onChange={(e) => setEvidenceVariation(e.target.value as "COMPLETE" | "STALE" | "MISSING")}
+                className="w-full rounded border border-border bg-canvas px-3 py-1.5 text-xs text-ink"
+              >
+                <option value="COMPLETE">Verified &amp; Fresh Evidence (Categorized, Fresh Timestamp)</option>
+                <option value="STALE">Stale Evidence (14 Days Old — Evaluates to REVIEW)</option>
+                <option value="MISSING">Missing Critical Evidence (Low Confidence / Uncategorized — Evaluates to REVIEW)</option>
+              </select>
+              <p className="text-[11px] text-muted mt-1">
+                Decision D-003: Unreliable or missing critical evidence yields fail-closed REVIEW, preventing unauthorized order creation.
+              </p>
+            </div>
+
             {/* Cart Line Items */}
             <div className="space-y-2">
               <div className="text-[11px] font-semibold text-muted uppercase">Line Items</div>
@@ -651,6 +903,11 @@ export function CheckoutGatePanel() {
                     ? () => void handleCreatePayPalOrder()
                     : undefined
                 }
+                onConfirmBuyerApproval={handleConfirmBuyerApproval}
+                onCapturePaymentOrder={handleCapturePaymentOrder}
+                onCancelPaymentOrder={handleCancelPaymentOrder}
+                onReconcilePaymentOrder={handleReconcilePaymentOrder}
+                onRefreshOrderDetails={handleRefreshOrderDetails}
               />
             </div>
           ) : (

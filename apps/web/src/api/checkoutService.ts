@@ -91,7 +91,15 @@ export async function submitCheckoutProposal(
     let primaryReasonCode: string = ReasonCode.ALL_RULES_PASSED;
     const reasonCodes: string[] = [];
 
-    if (hasProhibited) {
+    if (input.evidenceVariation === "MISSING") {
+      decision = "REVIEW";
+      primaryReasonCode = ReasonCode.MISSING_CRITICAL_EVIDENCE;
+      reasonCodes.push(ReasonCode.MISSING_CRITICAL_EVIDENCE);
+    } else if (input.evidenceVariation === "STALE") {
+      decision = "REVIEW";
+      primaryReasonCode = ReasonCode.STALE_EVIDENCE;
+      reasonCodes.push(ReasonCode.STALE_EVIDENCE);
+    } else if (hasProhibited) {
       decision = "DENY";
       primaryReasonCode = ReasonCode.PROHIBITED_CATEGORY;
       reasonCodes.push(ReasonCode.PROHIBITED_CATEGORY);
@@ -131,6 +139,30 @@ export async function submitCheckoutProposal(
     `${API_BASE}/api/v1/checkout/proposals`,
   ];
 
+  // Construct evidence payload reflecting configured evidence quality
+  const evidenceSnapshot =
+    input.evidenceVariation === "MISSING"
+      ? {
+          timestamp: new Date().toISOString(),
+          merchantConfidence: 0.1,
+          itemCategorizations: {},
+        }
+      : input.evidenceVariation === "STALE"
+        ? {
+            timestamp: new Date(Date.now() - 14 * 86400000).toISOString(),
+            merchantConfidence: 0.9,
+            itemCategorizations: Object.fromEntries(
+              input.items.map((i) => [i.id, { category: i.category, confidence: 0.9 }]),
+            ),
+          }
+        : {
+            timestamp: new Date().toISOString(),
+            merchantConfidence: 1.0,
+            itemCategorizations: Object.fromEntries(
+              input.items.map((i) => [i.id, { category: i.category, confidence: 1.0 }]),
+            ),
+          };
+
   let response: Response | null = null;
   for (const url of candidateUrls) {
     const res = await fetch(url, {
@@ -154,13 +186,7 @@ export async function submitCheckoutProposal(
             quantity: i.quantity,
           })),
         },
-        evidenceSnapshot: {
-          timestamp: new Date().toISOString(),
-          merchantConfidence: 1.0,
-          itemCategorizations: Object.fromEntries(
-            input.items.map((i) => [i.id, { category: i.category, confidence: 1.0 }]),
-          ),
-        },
+        evidenceSnapshot,
       }),
     });
 

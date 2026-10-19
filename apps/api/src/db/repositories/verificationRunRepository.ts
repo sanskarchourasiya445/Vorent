@@ -1,10 +1,12 @@
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   type PersistedTestRunDetail,
   type PersistedTestRunSummary,
   type VerificationReport,
   type VerificationRequest,
+  type FindingRecord,
+  FindingRecordSchema,
   PersistedTestRunDetailSchema,
   PersistedTestRunSummarySchema,
 } from "@warrant/contracts";
@@ -63,7 +65,7 @@ export async function saveVerificationRun(
           policyVersionId: params.policyVersionId,
           findingType: finding.violationType,
           severity: finding.severity,
-          status: "OPEN",
+          status: "UNRESOLVED",
           witness: finding.candidateCart,
           evidenceSnapshot: finding.evidence ?? {},
           ruleTrace: finding.actualOutcome.ruleTrace ?? [],
@@ -169,6 +171,11 @@ export async function getVerificationRun(
   db: any,
   runId: string,
 ): Promise<PersistedTestRunDetail | null> {
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(runId);
+  if (!isUuid) {
+    return null;
+  }
+
   const rows = await db
     .select()
     .from(testRuns)
@@ -207,4 +214,173 @@ export async function getVerificationRun(
     finishedAt: r.finishedAt ? new Date(r.finishedAt).toISOString() : null,
     createdAt: new Date(r.createdAt).toISOString(),
   });
+}
+
+/**
+ * Lists findings with optional filters.
+ */
+export async function listFindings(
+  db: any,
+  params?: {
+    testRunId?: string;
+    policyVersionId?: string;
+    status?: string;
+    ownerId?: string;
+    limit?: number;
+  },
+): Promise<FindingRecord[]> {
+  const limit = Math.min(params?.limit ?? 50, 100);
+
+  const conditions = [];
+  if (params?.testRunId) conditions.push(eq(findings.testRunId, params.testRunId));
+  if (params?.policyVersionId) conditions.push(eq(findings.policyVersionId, params.policyVersionId));
+  if (params?.status) {
+    if (params.status === "UNRESOLVED") {
+      conditions.push(or(eq(findings.status, "UNRESOLVED"), eq(findings.status, "OPEN")));
+    } else {
+      conditions.push(eq(findings.status, params.status));
+    }
+  }
+  if (params?.ownerId) conditions.push(eq(findings.ownerId, params.ownerId));
+
+  let query = db.select().from(findings);
+  if (conditions.length > 0) {
+    query = query.where(conditions.length === 1 ? conditions[0] : and(...conditions));
+  }
+
+  const rows = await query.orderBy(desc(findings.createdAt)).limit(limit);
+
+  return rows.map((r: any) =>
+    FindingRecordSchema.parse({
+      id: r.id,
+      ownerId: r.ownerId,
+      testRunId: r.testRunId,
+      policyVersionId: r.policyVersionId,
+      findingType: r.findingType,
+      severity: r.severity,
+      status: r.status === "OPEN" ? "UNRESOLVED" : r.status,
+      witness: r.witness,
+      evidenceSnapshot: r.evidenceSnapshot ?? {},
+      ruleTrace: r.ruleTrace ?? [],
+      reproduction: r.reproduction ?? {},
+      resolvedByVersionId: r.resolvedByVersionId,
+      resolutionNote: r.resolutionNote,
+      createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : new Date(r.createdAt).toISOString(),
+      resolvedAt: r.resolvedAt ? (r.resolvedAt instanceof Date ? r.resolvedAt.toISOString() : new Date(r.resolvedAt).toISOString()) : null,
+    }),
+  );
+}
+
+/**
+ * Retrieves a single finding by ID.
+ */
+export async function getFinding(
+  db: any,
+  findingId: string,
+): Promise<FindingRecord | null> {
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(findingId);
+  if (!isUuid) {
+    return null;
+  }
+
+  const rows = await db
+    .select()
+    .from(findings)
+    .where(eq(findings.id, findingId))
+    .limit(1);
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const r = rows[0];
+  return FindingRecordSchema.parse({
+    id: r.id,
+    ownerId: r.ownerId,
+    testRunId: r.testRunId,
+    policyVersionId: r.policyVersionId,
+    findingType: r.findingType,
+    severity: r.severity,
+    status: r.status === "OPEN" ? "UNRESOLVED" : r.status,
+    witness: r.witness,
+    evidenceSnapshot: r.evidenceSnapshot ?? {},
+    ruleTrace: r.ruleTrace ?? [],
+    reproduction: r.reproduction ?? {},
+    resolvedByVersionId: r.resolvedByVersionId,
+    resolutionNote: r.resolutionNote,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : new Date(r.createdAt).toISOString(),
+    resolvedAt: r.resolvedAt ? (r.resolvedAt instanceof Date ? r.resolvedAt.toISOString() : new Date(r.resolvedAt).toISOString()) : null,
+  });
+}
+
+/**
+ * Resolves a finding by linking it to a repairing policy version.
+ */
+export async function resolveFinding(
+  db: any,
+  findingId: string,
+  resolvedByVersionId: string,
+  resolutionNote: string,
+): Promise<FindingRecord> {
+  const existing = await getFinding(db, findingId);
+  if (!existing) {
+    throw new Error(`Finding '${findingId}' was not found.`);
+  }
+
+  const now = new Date();
+  await db
+    .update(findings)
+    .set({
+      status: "RESOLVED",
+      resolvedByVersionId,
+      resolutionNote,
+      resolvedAt: now,
+    })
+    .where(eq(findings.id, findingId));
+
+  const updated = await getFinding(db, findingId);
+  if (!updated) {
+    throw new Error(`Failed to reload resolved finding '${findingId}'.`);
+  }
+  return updated;
+}
+
+/**
+ * Accepts risk for a finding with mandatory owner rationale.
+ * Strictly enforces Decision D-014:
+ * CRITICAL and HIGH findings cannot be accepted as risk in MVP. Only MEDIUM and LOW are allowed.
+ */
+export async function acceptRiskFinding(
+  db: any,
+  findingId: string,
+  rationale: string,
+): Promise<FindingRecord> {
+  const existing = await getFinding(db, findingId);
+  if (!existing) {
+    throw new Error(`Finding '${findingId}' was not found.`);
+  }
+
+  if (existing.severity === "CRITICAL" || existing.severity === "HIGH") {
+    throw new Error(`Decision D-014 invariant violation: ${existing.severity} findings cannot be accepted as risk. A policy repair is required.`);
+  }
+
+  if (!rationale || rationale.trim().length === 0) {
+    throw new Error("A non-empty rationale is mandatory when accepting risk for a finding.");
+  }
+
+  const now = new Date();
+  await db
+    .update(findings)
+    .set({
+      status: "ACCEPTED_RISK",
+      resolutionNote: rationale.trim(),
+      resolvedAt: now,
+    })
+    .where(eq(findings.id, findingId));
+
+  const updated = await getFinding(db, findingId);
+  if (!updated) {
+    throw new Error(`Failed to reload risk-accepted finding '${findingId}'.`);
+  }
+  return updated;
 }

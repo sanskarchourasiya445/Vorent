@@ -9,6 +9,7 @@ export interface ApprovalRecord {
   qualifyingTestRunId: string;
   spendLimitMinor: number;
   consumedSpendMinor: number;
+  remainingSpendMinor?: number;
   currency: string;
   expiresAt: string;
   revokedAt?: string | null;

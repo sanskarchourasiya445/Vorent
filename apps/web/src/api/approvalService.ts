@@ -95,6 +95,7 @@ export async function fetchApprovals(): Promise<ApprovalListState> {
         qualifyingTestRunId: a.qualifyingTestRunId || "",
         spendLimitMinor: a.spendLimitMinor ?? 0,
         consumedSpendMinor: a.consumedSpendMinor ?? 0,
+        remainingSpendMinor: typeof a.remainingSpendMinor === "number" ? a.remainingSpendMinor : undefined,
         currency: a.currency || "USD",
         expiresAt: a.expiresAt || new Date().toISOString(),
         revokedAt: a.revokedAt,
