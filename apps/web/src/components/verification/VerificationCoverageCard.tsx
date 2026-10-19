@@ -15,7 +15,11 @@ interface VerificationCoverageCardProps {
   coverage?: VerificationCoverage;
   counterexampleCount: number;
   unresolvedCount: number;
+  isLiveApi?: boolean;
   isDemoFixture?: boolean;
+  stopReason?: string;
+  summary?: string;
+  runId?: string;
   errorMessage?: string;
 }
 
@@ -24,7 +28,11 @@ export function VerificationCoverageCard({
   coverage,
   counterexampleCount,
   unresolvedCount,
+  isLiveApi = false,
   isDemoFixture = false,
+  stopReason,
+  summary,
+  runId,
   errorMessage,
 }: VerificationCoverageCardProps) {
   const getStatusBadge = () => {
@@ -114,9 +122,17 @@ export function VerificationCoverageCard({
       {/* Header with status badge */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
         <div>
-          <span className="text-xs uppercase font-bold tracking-wider text-muted">
-            Verification Run Status
-          </span>
+          <div className="flex items-center space-x-2">
+            <span className="text-xs uppercase font-bold tracking-wider text-muted">
+              Verification Run Status
+            </span>
+            {isLiveApi && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-950 border border-emerald-300">
+                <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-700" aria-hidden="true" />
+                Live API Result
+              </span>
+            )}
+          </div>
           <div className="flex items-center space-x-2.5 mt-1">
             <span
               role="status"
@@ -125,19 +141,40 @@ export function VerificationCoverageCard({
               {badge.icon}
               <span>{badge.label}</span>
             </span>
+            {stopReason && (
+              <span className="text-xs font-mono px-2 py-0.5 rounded bg-canvas border border-border text-muted">
+                Stop: <strong className="text-ink">{stopReason}</strong>
+              </span>
+            )}
           </div>
         </div>
 
         {coverage && (
-          <div className="text-xs text-muted font-mono bg-canvas px-3 py-1.5 rounded border border-border">
-            <span>Duration: </span>
-            <span className="font-semibold text-ink">{coverage.durationMs}ms</span>
-            <span className="mx-2 text-border">|</span>
-            <span>Evaluated: </span>
-            <span className="text-ink font-semibold">{new Date(coverage.evaluatedAt).toLocaleTimeString()}</span>
+          <div className="text-xs text-muted font-mono bg-canvas px-3 py-1.5 rounded border border-border space-y-0.5 text-right">
+            <div>
+              <span>Duration: </span>
+              <span className="font-semibold text-ink">{coverage.durationMs}ms</span>
+              <span className="mx-2 text-border">|</span>
+              <span>Evaluated: </span>
+              <span className="text-ink font-semibold">{new Date(coverage.evaluatedAt).toLocaleTimeString()}</span>
+            </div>
+            {runId && (
+              <div className="text-[11px] text-muted">
+                Run ID: <span className="font-semibold text-ink">{runId}</span>
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      {summary && (
+        <div className="p-3 rounded bg-canvas border border-border text-xs text-ink space-y-0.5">
+          <div className="font-semibold text-[11px] uppercase tracking-wider text-muted">
+            Report Summary
+          </div>
+          <p className="text-muted leading-relaxed">{summary}</p>
+        </div>
+      )}
 
       {errorMessage && (
         <div className="p-3.5 rounded bg-red-50 border border-red-200 text-xs text-red-900 flex items-start space-x-2">

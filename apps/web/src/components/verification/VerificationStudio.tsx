@@ -57,11 +57,12 @@ export function VerificationStudio({ initialPolicyId }: VerificationStudioProps)
     };
   }, []);
 
-  const handleStartRun = async (config: VerificationConfig) => {
+  const handleStartRun = async (config: VerificationConfig, useDemoSimulation?: boolean) => {
+    if (status === "RUNNING") return; // Prevent duplicate submissions
     setStatus("RUNNING");
     setErrorMessage(null);
     try {
-      const result = await executeVerificationRun(config);
+      const result = await executeVerificationRun(config, { useDemoSimulation });
       setRunResult(result);
       setStatus(result.status);
     } catch (err) {
@@ -112,7 +113,7 @@ export function VerificationStudio({ initialPolicyId }: VerificationStudioProps)
           {/* Configuration Form */}
           <VerificationConfigForm
             policies={policies}
-            onStartRun={(cfg) => void handleStartRun(cfg)}
+            onStartRun={(cfg, useDemo) => void handleStartRun(cfg, useDemo)}
             isRunning={status === "RUNNING"}
             initialPolicyId={initialPolicyId}
           />
@@ -123,7 +124,11 @@ export function VerificationStudio({ initialPolicyId }: VerificationStudioProps)
             coverage={runResult?.coverage}
             counterexampleCount={runResult?.counterexampleCount ?? 0}
             unresolvedCount={runResult?.unresolvedCount ?? 0}
+            isLiveApi={runResult?.isLiveApi}
             isDemoFixture={runResult?.isDemoFixture}
+            stopReason={runResult?.stopReason}
+            summary={runResult?.summary}
+            runId={runResult?.runId}
             errorMessage={errorMessage ?? runResult?.errorMessage}
           />
 

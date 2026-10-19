@@ -1,4 +1,12 @@
-import type { Decision, PolicyEvaluationResult, Cart, EvidenceSnapshot } from "@warrant/contracts";
+import type {
+  Decision,
+  PolicyEvaluationResult,
+  Cart,
+  EvidenceSnapshot,
+  PolicyDocument,
+  ConfirmedIntent,
+  StopReason,
+} from "@warrant/contracts";
 
 export type VerificationStatus =
   | "IDLE"
@@ -22,6 +30,10 @@ export interface PolicyOption {
   hash: string;
   description: string;
   limitsSummary: string;
+  policyDocument: PolicyDocument;
+  intent: ConfirmedIntent;
+  defaultCategories: string[];
+  defaultPricePointsMinor: number[];
 }
 
 export interface VerificationConfig {
@@ -65,6 +77,10 @@ export interface VerificationRunResult {
   findings: VerificationFinding[];
   counterexampleCount: number;
   unresolvedCount: number;
+  stopReason?: StopReason | string;
+  summary?: string;
+  isLiveApi?: boolean;
   isDemoFixture?: boolean;
   errorMessage?: string;
 }
+

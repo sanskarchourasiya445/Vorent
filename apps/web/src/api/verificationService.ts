@@ -4,7 +4,16 @@ import type {
   PolicyOption,
   VerificationFinding,
 } from "../types/verification";
-import { ReasonCode, type PolicyEvaluationResult } from "@warrant/contracts";
+import {
+  ReasonCode,
+  type PolicyEvaluationResult,
+  type VerificationReport,
+  type VerificationRequest,
+  VerificationRequestSchema,
+  VerificationReportSchema,
+} from "@warrant/contracts";
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
 export const AVAILABLE_POLICIES: PolicyOption[] = [
   {
@@ -12,25 +21,120 @@ export const AVAILABLE_POLICIES: PolicyOption[] = [
     version: "1.0.0",
     name: "Engineering Hardware & Technical Books Policy",
     hash: "a4f912b7e53c4d89a290bc9812efaa43217d8900fe5b81a91e5d7a810b45cd2e",
-    description: "Approved policy authorizing dev hardware and reference books up to $250.00 USD per item and $600.00 USD total.",
+    description:
+      "Approved policy authorizing dev hardware and reference books up to $250.00 USD per item and $600.00 USD total.",
     limitsSummary: "Max Item: $250.00 | Max Cart: $600.00 | Allowed: Hardware, Reference Books",
+    policyDocument: {
+      schemaVersion: "1.0",
+      currency: "USD",
+      maxItemPriceMinor: 25000,
+      maxCartTotalMinor: 60000,
+      allowedCategories: ["Hardware", "Reference Books", "Peripherals"],
+      prohibitedCategories: ["Weapons / Lasers", "Adult", "Gift Cards"],
+      requireEvidence: true,
+    },
+    intent: {
+      name: "Engineering Hardware & Technical Books Mandate",
+      currency: "USD",
+      maxItemPriceMinor: 25000,
+      maxCartTotalMinor: 60000,
+      allowedCategories: ["Hardware", "Reference Books", "Peripherals"],
+      prohibitedCategories: ["Weapons / Lasers", "Adult", "Gift Cards"],
+      requireEvidence: true,
+    },
+    defaultCategories: ["Hardware", "Reference Books", "Peripherals"],
+    defaultPricePointsMinor: [15000, 24900, 25000, 25100, 30000],
   },
   {
     id: "pol_v2_strict_peripherals",
     version: "2.1.0-draft",
     name: "Strict Ergonomic Peripherals Mandate",
     hash: "8e71fa480cb12da970392bc13d5a42099fbc9018e4726d1b8207f901abcf8912",
-    description: "Draft policy enforcing strict category matching and requiring verifiable quotes for all monitors and keypads.",
+    description:
+      "Draft policy enforcing strict category matching and requiring verifiable quotes for all monitors and keypads.",
     limitsSummary: "Max Item: $150.00 | Max Cart: $300.00 | Strict Quotes Required",
+    policyDocument: {
+      schemaVersion: "1.0",
+      currency: "USD",
+      maxItemPriceMinor: 15000,
+      maxCartTotalMinor: 30000,
+      allowedCategories: ["Peripherals", "Ergonomics"],
+      prohibitedCategories: ["Office Furniture", "Entertainment"],
+      requireEvidence: true,
+    },
+    intent: {
+      name: "Strict Ergonomic Peripherals Mandate",
+      currency: "USD",
+      maxItemPriceMinor: 15000,
+      maxCartTotalMinor: 30000,
+      allowedCategories: ["Peripherals", "Ergonomics"],
+      prohibitedCategories: ["Office Furniture", "Entertainment"],
+      requireEvidence: true,
+    },
+    defaultCategories: ["Peripherals", "Ergonomics"],
+    defaultPricePointsMinor: [9900, 14900, 15000, 15100, 20000],
   },
 ];
 
 export async function fetchAvailablePolicies(): Promise<PolicyOption[]> {
-  // If backend endpoint /api/policies exists in future, call it here.
   return Promise.resolve(AVAILABLE_POLICIES);
 }
 
-import type { VerificationReport } from "@warrant/contracts";
+/**
+ * Builds and validates a VerificationRequest contract payload matching VerificationRequestSchema.
+ */
+export function buildVerificationRequest(
+  policyOption: PolicyOption,
+  config: VerificationConfig,
+  timeoutMs: number = 5000,
+): VerificationRequest {
+  const categories = [...policyOption.defaultCategories];
+  if (config.dimensions.includes("CATEGORY_EVASION")) {
+    categories.push("Weapons / Lasers", "Office Furnishing / Ergonomics");
+  }
+
+  const pricePointsMinor = [...policyOption.defaultPricePointsMinor];
+  if (config.dimensions.includes("PRICE_BOUNDARIES") && policyOption.policyDocument.maxItemPriceMinor) {
+    const limit = policyOption.policyDocument.maxItemPriceMinor;
+    pricePointsMinor.push(limit - 100, limit, limit + 100);
+  }
+
+  const quantities = config.dimensions.includes("QUANTITY_SPLITS") ? [1, 2, 3] : [1];
+  const currencies = config.dimensions.includes("CURRENCY_MUTATION")
+    ? ["USD", "EUR"]
+    : [policyOption.policyDocument.currency];
+  const maxItemsPerCart = config.dimensions.includes("QUANTITY_SPLITS") ? 2 : 1;
+  const evidenceVariations: ("COMPLETE" | "MISSING" | "STALE")[] = config.dimensions.includes(
+    "EVIDENCE_FRESHNESS",
+  )
+    ? ["COMPLETE", "STALE", "MISSING"]
+    : ["COMPLETE"];
+
+  const candidateBudget = Math.max(1, Math.min(10000, config.candidateBudget));
+
+  const rawPayload = {
+    policy: policyOption.policyDocument,
+    intent: policyOption.intent,
+    searchSpace: {
+      domainVersion: "1.0.0",
+      categories: Array.from(new Set(categories)),
+      pricePointsMinor: Array.from(new Set(pricePointsMinor)),
+      quantities,
+      currencies,
+      maxItemsPerCart,
+      evidenceVariations,
+    },
+    config: {
+      maxCandidates: candidateBudget,
+      stopOnFirstFinding: false,
+      policyVersionId: policyOption.id,
+      policyHash: policyOption.hash,
+      timeoutMs,
+    },
+  };
+
+  return VerificationRequestSchema.parse(rawPayload);
+}
 
 /**
  * Pure adapter mapping an authoritative backend VerificationReport from @warrant/contracts
@@ -39,6 +143,7 @@ import type { VerificationReport } from "@warrant/contracts";
 export function adaptVerificationReportToRunResult(
   report: VerificationReport,
   dimensions: VerificationConfig["dimensions"] = ["PRICE_BOUNDARIES"],
+  isLiveApi: boolean = true,
 ): VerificationRunResult {
   let status: VerificationRunResult["status"] = "COMPLETED";
   if (report.status === "FAILED") {
@@ -109,53 +214,168 @@ export function adaptVerificationReportToRunResult(
     findings,
     counterexampleCount: report.findingCount,
     unresolvedCount: report.unresolvedCount,
-    isDemoFixture: false, // Authoritative result from verification engine
+    stopReason: report.stopReason,
+    summary: report.summary,
+    isLiveApi,
+    isDemoFixture: !isLiveApi,
   };
 }
 
 /**
- * Executes a bounded verification run against a policy.
- * Dispatches to backend API if available, or falls back to an isolated,
- * deterministic demonstration fixture explicitly labeled with `isDemoFixture: true`.
+ * Custom error types for fine-grained error surfacing in the Studio UI.
+ */
+export class VerificationApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+    public details?: unknown,
+  ) {
+    super(message);
+    this.name = "VerificationApiError";
+  }
+}
+
+export interface ExecuteRunOptions {
+  signal?: AbortSignal;
+  useDemoSimulation?: boolean; // Set to true only if explicitly requested for demo exploration
+  simulateBudgetExhaustion?: boolean;
+  simulateError?: boolean;
+  timeoutMs?: number;
+}
+
+/**
+ * Executes a bounded verification run.
+ * Defaults to dispatching live requests to `POST /api/verification/run`.
+ * If live API fails, surfaces the real error rather than disguising it as success.
  */
 export async function executeVerificationRun(
   config: VerificationConfig,
-  options?: { signal?: AbortSignal; simulateBudgetExhaustion?: boolean; simulateError?: boolean },
+  options?: ExecuteRunOptions,
 ): Promise<VerificationRunResult> {
-  // Check if real backend endpoint is available
+  const policyOption = AVAILABLE_POLICIES.find((p) => p.id === config.policyVersionId);
+  if (!policyOption) {
+    throw new Error(`Target policy "${config.policyVersionId}" not found in available policy manifests.`);
+  }
+
+  // 1. Explicitly requested demo exploration branch
+  if (options?.useDemoSimulation) {
+    return runSimulatedDemoRun(config, options);
+  }
+
+  // 2. Validate configuration against shared contract schema before dispatch
+  let requestPayload: VerificationRequest;
   try {
-    const response = await fetch("/api/verification/run", {
+    requestPayload = buildVerificationRequest(policyOption, config, options?.timeoutMs ?? 5000);
+  } catch (err) {
+    throw new Error(
+      `Verification request configuration error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  const endpointUrl = `${API_BASE}/api/verification/run`;
+  const timeoutMs = options?.timeoutMs ?? 10000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(endpointUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(config),
-      signal: options?.signal,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestPayload),
+      signal: options?.signal || controller.signal,
     });
-
-    if (response.ok) {
-      const data = (await response.json()) as VerificationReport;
-      return adaptVerificationReportToRunResult(data, config.dimensions);
+  } catch (err: unknown) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Verification run timed out: Server did not respond within ${timeoutMs}ms.`);
     }
-  } catch {
-    // Backend endpoint not yet implemented by Fastify router; proceed with isolated realistic simulation
+    throw new Error(
+      `Network failure connecting to ${endpointUrl}: ${
+        err instanceof Error ? err.message : "Connection refused"
+      }. Backend API server is offline or unreachable.`,
+    );
+  } finally {
+    clearTimeout(timeoutId);
   }
 
+  // Check HTTP response code
+  if (!response.ok) {
+    let errorDetail = "";
+    try {
+      const rawText = await response.text();
+      try {
+        const errorJson = JSON.parse(rawText);
+        errorDetail = typeof errorJson === "object" && errorJson && "message" in errorJson
+          ? String((errorJson as { message: unknown }).message)
+          : (rawText || JSON.stringify(errorJson));
+      } catch {
+        errorDetail = rawText;
+      }
+    } catch {
+      errorDetail = response.statusText || "";
+    }
+
+    if (response.status === 404) {
+      throw new VerificationApiError(
+        404,
+        `Backend route not found: POST ${endpointUrl} returned HTTP 404. Backend verification route is not yet deployed by the CLI agent.`,
+        errorDetail,
+      );
+    }
+
+    if (response.status === 400) {
+      throw new VerificationApiError(
+        400,
+        `Backend request validation failed (HTTP 400): ${errorDetail || "Invalid request schema"}`,
+        errorDetail,
+      );
+    }
+
+    throw new VerificationApiError(
+      response.status,
+      `Backend verification engine failure (HTTP ${response.status}): ${errorDetail || response.statusText}`,
+      errorDetail,
+    );
+  }
+
+  // Validate response format against shared VerificationReportSchema
+  const rawReport = await response.json();
+  const parseResult = VerificationReportSchema.safeParse(rawReport);
+  if (!parseResult.success) {
+    throw new Error(
+      `Malformed verification report received from backend: ${parseResult.error.issues
+        .map((i) => `${i.path.join(".")}: ${i.message}`)
+        .join("; ")}`,
+    );
+  }
+
+  // Return authoritative live result
+  return adaptVerificationReportToRunResult(parseResult.data, config.dimensions, true);
+}
+
+/**
+ * Isolated deterministic demonstration simulation fixture.
+ * Used exclusively for local offline testing or explicit illustrative demonstrations.
+ * Never presented as an authoritative live result.
+ */
+function runSimulatedDemoRun(
+  config: VerificationConfig,
+  options?: ExecuteRunOptions,
+): Promise<VerificationRunResult> {
   if (options?.simulateError) {
-    throw new Error("Verification service connection refused (Fastify server offline)");
+    throw new Error("Simulated verification service error for test coverage.");
   }
-
-  // Realistic deterministic simulation for bounded verification
-  // Yield execution to simulate non-blocking exploration
-  await new Promise((resolve) => setTimeout(resolve, 350));
 
   const totalCandidatesEvaluated = options?.simulateBudgetExhaustion
     ? config.candidateBudget
     : Math.min(config.candidateBudget, 184);
 
   const isExhaustive = !options?.simulateBudgetExhaustion && config.candidateBudget >= 184;
-
   const findings: VerificationFinding[] = [];
 
-  // Finding 1: Real counterexample where unit price passed but cart total boundary was violated
   if (config.dimensions.includes("PRICE_BOUNDARIES") || config.dimensions.includes("QUANTITY_SPLITS")) {
     const counterexampleResult: PolicyEvaluationResult = {
       decision: "DENY",
@@ -187,9 +407,10 @@ export async function executeVerificationRun(
     };
 
     findings.push({
-      id: "fnd_cntr_01_qty_split",
+      id: "fnd_cntr_demo_01",
       title: "Cart Total Boundary Overflow via Compliant Item Stacking",
-      summary: "3 units of $220.00 individually pass per-item threshold ($250.00) but aggregate to $660.00, triggering a cart total refusal.",
+      summary:
+        "3 units of $220.00 individually pass per-item threshold ($250.00) but aggregate to $660.00, triggering a cart total refusal.",
       classification: "COUNTEREXAMPLE",
       expectedDecision: "DENY",
       actualResult: counterexampleResult,
@@ -220,7 +441,6 @@ export async function executeVerificationRun(
     });
   }
 
-  // Finding 2: Unresolved ambiguity case (NOT a confirmed vulnerability)
   if (config.dimensions.includes("EVIDENCE_FRESHNESS") || config.dimensions.includes("CATEGORY_EVASION")) {
     const unresolvedResult: PolicyEvaluationResult = {
       decision: "REVIEW",
@@ -252,9 +472,10 @@ export async function executeVerificationRun(
     };
 
     findings.push({
-      id: "fnd_unres_02_ambig_cat",
+      id: "fnd_unres_demo_02",
       title: "Unverified Merchant Classification & Stale Quote",
-      summary: "Candidate item has an unverified taxonomy category and quote age exceeding policy freshness window. Evaluator correctly holds transaction in fail-closed REVIEW.",
+      summary:
+        "Candidate item has an unverified taxonomy category and quote age exceeding policy freshness window. Evaluator correctly holds transaction in fail-closed REVIEW.",
       classification: "UNRESOLVED_AMBIGUITY",
       expectedDecision: "REVIEW",
       actualResult: unresolvedResult,
@@ -296,22 +517,27 @@ export async function executeVerificationRun(
     status = "UNRESOLVED_CASES";
   }
 
-  return {
-    runId: `run_${Date.now()}`,
+  return Promise.resolve({
+    runId: `demo_run_${Date.now()}`,
     status,
     policyVersionId: config.policyVersionId,
-    policyHash: config.policyHash || AVAILABLE_POLICIES.find((p) => p.id === config.policyVersionId)?.hash || "hash_unavailable",
+    policyHash: AVAILABLE_POLICIES.find((p) => p.id === config.policyVersionId)?.hash || "hash_unavailable",
     coverage: {
       totalCandidatesEvaluated,
       candidateBudget: config.candidateBudget,
       isExhaustive,
       dimensionsCovered: config.dimensions,
       evaluatedAt: new Date().toISOString(),
-      durationMs: 412,
+      durationMs: 350,
     },
     findings,
     counterexampleCount,
     unresolvedCount,
-    isDemoFixture: true, // Clearly disclaim isolated demo data when backend API is not live
-  };
+    stopReason: isExhaustive ? "DOMAIN_EXHAUSTED" : "CANDIDATE_CAP_REACHED",
+    summary: isExhaustive
+      ? "Demonstration exploration completed exhaustively."
+      : "Demonstration exploration reached candidate budget cap.",
+    isLiveApi: false,
+    isDemoFixture: true,
+  });
 }

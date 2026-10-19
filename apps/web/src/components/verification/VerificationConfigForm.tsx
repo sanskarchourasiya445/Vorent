@@ -1,10 +1,10 @@
 import { useState } from "react";
 import type { PolicyOption, SearchDimension, VerificationConfig } from "../../types/verification";
-import { Sliders, Shield, Play, RotateCcw } from "lucide-react";
+import { Sliders, Shield, Play, RotateCcw, Server, AlertCircle } from "lucide-react";
 
 interface VerificationConfigFormProps {
   policies: PolicyOption[];
-  onStartRun: (config: VerificationConfig) => void;
+  onStartRun: (config: VerificationConfig, useDemoSimulation?: boolean) => void;
   isRunning: boolean;
   initialPolicyId?: string;
 }
@@ -59,16 +59,22 @@ export function VerificationConfigForm({
     "EVIDENCE_FRESHNESS",
   ]);
   const [candidateBudget, setCandidateBudget] = useState<number>(250);
+  const [useDemoSimulation, setUseDemoSimulation] = useState<boolean>(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const selectedPolicy = policies.find((p) => p.id === selectedPolicyId);
 
   const toggleDimension = (dim: SearchDimension) => {
+    if (isRunning) return;
+    setValidationError(null);
     setSelectedDimensions((prev) =>
       prev.includes(dim) ? prev.filter((d) => d !== dim) : [...prev, dim],
     );
   };
 
   const handleReset = () => {
+    if (isRunning) return;
+    setValidationError(null);
     setSelectedDimensions([
       "PRICE_BOUNDARIES",
       "QUANTITY_SPLITS",
@@ -76,17 +82,38 @@ export function VerificationConfigForm({
       "EVIDENCE_FRESHNESS",
     ]);
     setCandidateBudget(250);
+    setUseDemoSimulation(false);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedDimensions.length === 0 || !selectedPolicy) return;
-    onStartRun({
-      policyVersionId: selectedPolicy.id,
-      policyHash: selectedPolicy.hash,
-      dimensions: selectedDimensions,
-      candidateBudget,
-    });
+    if (isRunning) return; // Prevent duplicate run submissions
+    setValidationError(null);
+
+    if (!selectedPolicy) {
+      setValidationError("Please select an active policy manifest.");
+      return;
+    }
+
+    if (selectedDimensions.length === 0) {
+      setValidationError("Please select at least one search dimension to probe.");
+      return;
+    }
+
+    if (!candidateBudget || candidateBudget < 10 || candidateBudget > 10000) {
+      setValidationError("Candidate budget must be between 10 and 10,000.");
+      return;
+    }
+
+    onStartRun(
+      {
+        policyVersionId: selectedPolicy.id,
+        policyHash: selectedPolicy.hash,
+        dimensions: selectedDimensions,
+        candidateBudget,
+      },
+      useDemoSimulation,
+    );
   };
 
   return (
@@ -223,6 +250,42 @@ export function VerificationConfigForm({
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Validation Error Alert */}
+      {validationError && (
+        <div
+          role="alert"
+          className="p-3 rounded bg-red-50 border border-red-200 text-xs text-red-900 flex items-center space-x-2"
+        >
+          <AlertCircle className="w-4 h-4 text-red-700 shrink-0" aria-hidden="true" />
+          <span>{validationError}</span>
+        </div>
+      )}
+
+      {/* Execution Mode Selector */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded bg-canvas border border-border text-xs">
+        <div className="space-y-0.5">
+          <div className="font-semibold text-ink flex items-center space-x-1.5">
+            <Server className="w-3.5 h-3.5 text-accent" aria-hidden="true" />
+            <span>Target Engine Mode</span>
+          </div>
+          <div className="text-muted text-[11px]">
+            {useDemoSimulation
+              ? "Offline Simulation (isolated illustrative demo fixture)"
+              : "Live Backend API (dispatches to POST /api/verification/run)"}
+          </div>
+        </div>
+        <label className="flex items-center space-x-2 cursor-pointer text-xs self-start sm:self-auto">
+          <input
+            type="checkbox"
+            checked={useDemoSimulation}
+            onChange={(e) => setUseDemoSimulation(e.target.checked)}
+            disabled={isRunning}
+            className="rounded border-border text-accent focus:ring-accent"
+          />
+          <span className="text-muted font-medium">Use Offline Simulation</span>
+        </label>
       </div>
 
       {/* Action Button */}

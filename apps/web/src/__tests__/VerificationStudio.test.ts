@@ -266,18 +266,22 @@ describe("Verification Studio Frontend Suite", () => {
   });
 
   // Test 5: End-to-end Verification API Service & Adapter
-  it("11. executeVerificationRun service produces valid bounded verification result", async () => {
-    const result = await executeVerificationRun({
-      policyVersionId: "pol_v1_books_hardware",
-      dimensions: ["PRICE_BOUNDARIES", "QUANTITY_SPLITS"],
-      candidateBudget: 250,
-    });
+  it("11. executeVerificationRun offline demo mode produces isolated simulation fixture labeled isDemoFixture", async () => {
+    const result = await executeVerificationRun(
+      {
+        policyVersionId: "pol_v1_books_hardware",
+        dimensions: ["PRICE_BOUNDARIES", "QUANTITY_SPLITS"],
+        candidateBudget: 250,
+      },
+      { useDemoSimulation: true },
+    );
 
     expect(result.status).toBe("COMPLETED");
     expect(result.coverage.isExhaustive).toBe(true);
     expect(result.coverage.totalCandidatesEvaluated).toBe(184);
     expect(result.findings.length).toBeGreaterThan(0);
     expect(result.isDemoFixture).toBe(true);
+    expect(result.isLiveApi).toBe(false);
 
     const counterexample = result.findings.find((f) => f.classification === "COUNTEREXAMPLE");
     expect(counterexample).toBeDefined();
@@ -291,12 +295,13 @@ describe("Verification Studio Frontend Suite", () => {
         dimensions: ["PRICE_BOUNDARIES"],
         candidateBudget: 100,
       },
-      { simulateBudgetExhaustion: true },
+      { useDemoSimulation: true, simulateBudgetExhaustion: true },
     );
 
     expect(result.status).toBe("BUDGET_EXHAUSTED");
     expect(result.coverage.isExhaustive).toBe(false);
     expect(result.coverage.totalCandidatesEvaluated).toBe(100);
+    expect(result.isDemoFixture).toBe(true);
   });
 
   it("13. adaptVerificationReportToRunResult correctly adapts shared VerificationReport contract", async () => {
@@ -358,7 +363,7 @@ describe("Verification Studio Frontend Suite", () => {
     };
 
     const validReport = VerificationReportSchema.parse(rawReport);
-    const adapted = adaptVerificationReportToRunResult(validReport);
+    const adapted = adaptVerificationReportToRunResult(validReport, ["PRICE_BOUNDARIES"], true);
 
     expect(adapted.runId).toBe("rep_123");
     expect(adapted.status).toBe("COMPLETED");
@@ -369,5 +374,135 @@ describe("Verification Studio Frontend Suite", () => {
     expect(adapted.findings[0].expectedDecision).toBe("DENY");
     expect(adapted.findings[0].actualResult.decision).toBe("ALLOW");
     expect(adapted.isDemoFixture).toBe(false);
+    expect(adapted.isLiveApi).toBe(true);
+    expect(adapted.stopReason).toBe("DOMAIN_EXHAUSTED");
+  });
+
+  // Test 6: Live API Integration, Network, and Schema Validation Error Handling
+  it("14. executeVerificationRun handles successful live API response from POST /api/verification/run", async () => {
+    const originalFetch = globalThis.fetch;
+    const mockReport = {
+      runId: "live_run_999",
+      status: "COMPLETED" as const,
+      exhausted: true,
+      stopReason: "DOMAIN_EXHAUSTED" as const,
+      domainVersion: "1.0.0",
+      totalCandidatesExplored: 200,
+      searchSpaceEstimatedSize: 200,
+      findingCount: 0,
+      findings: [],
+      unresolvedCount: 0,
+      durationMs: 410,
+      summary: "Live verification completed cleanly with 0 counterexamples.",
+    };
+
+    globalThis.fetch = async (url, options) => {
+      expect(String(url)).toContain("/api/verification/run");
+      expect(options?.method).toBe("POST");
+      return new Response(JSON.stringify(mockReport), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    try {
+      const result = await executeVerificationRun({
+        policyVersionId: "pol_v1_books_hardware",
+        dimensions: ["PRICE_BOUNDARIES"],
+        candidateBudget: 200,
+      });
+
+      expect(result.runId).toBe("live_run_999");
+      expect(result.status).toBe("COMPLETED");
+      expect(result.isLiveApi).toBe(true);
+      expect(result.isDemoFixture).toBe(false);
+      expect(result.coverage.totalCandidatesEvaluated).toBe(200);
+      expect(result.counterexampleCount).toBe(0);
+      expect(result.summary).toContain("Live verification completed");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("15. executeVerificationRun surfaces HTTP 404 without faking successful live results", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      return new Response("Not Found", { status: 404 });
+    };
+
+    try {
+      await expect(
+        executeVerificationRun({
+          policyVersionId: "pol_v1_books_hardware",
+          dimensions: ["PRICE_BOUNDARIES"],
+          candidateBudget: 100,
+        }),
+      ).rejects.toThrow("Backend route not found: POST");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("16. executeVerificationRun surfaces HTTP 400 validation error from backend", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      return new Response(JSON.stringify({ message: "searchSpace.categories must not be empty" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    try {
+      await expect(
+        executeVerificationRun({
+          policyVersionId: "pol_v1_books_hardware",
+          dimensions: ["PRICE_BOUNDARIES"],
+          candidateBudget: 100,
+        }),
+      ).rejects.toThrow("Backend request validation failed (HTTP 400)");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("17. executeVerificationRun surfaces network failure without inventing data", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new TypeError("Failed to fetch (ECONNREFUSED)");
+    };
+
+    try {
+      await expect(
+        executeVerificationRun({
+          policyVersionId: "pol_v1_books_hardware",
+          dimensions: ["PRICE_BOUNDARIES"],
+          candidateBudget: 100,
+        }),
+      ).rejects.toThrow("Network failure connecting to");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("18. buildVerificationRequest generates contract-valid VerificationRequest matching VerificationRequestSchema", async () => {
+    const { buildVerificationRequest } = await import("../api/verificationService");
+    const { VerificationRequestSchema } = await import("@warrant/contracts");
+
+    const request = buildVerificationRequest(
+      AVAILABLE_POLICIES[0],
+      {
+        policyVersionId: "pol_v1_books_hardware",
+        dimensions: ["PRICE_BOUNDARIES", "CATEGORY_EVASION", "QUANTITY_SPLITS"],
+        candidateBudget: 350,
+      },
+      5000,
+    );
+
+    // Assert that the generated request strictly validates against VerificationRequestSchema
+    const validated = VerificationRequestSchema.parse(request);
+    expect(validated.policy.schemaVersion).toBe("1.0");
+    expect(validated.searchSpace.categories.length).toBeGreaterThan(0);
+    expect(validated.searchSpace.pricePointsMinor.length).toBeGreaterThan(0);
+    expect(validated.config?.maxCandidates).toBe(350);
   });
 });
