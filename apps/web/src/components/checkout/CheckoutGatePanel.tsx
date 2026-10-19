@@ -310,15 +310,37 @@ export function CheckoutGatePanel() {
 
               {/* Spend Reservation Feedback on ALLOW */}
               {evalResult.decision === "ALLOW" && (
-                <div className="p-4 rounded bg-emerald-50 border border-emerald-300 text-xs text-emerald-950 space-y-2">
-                  <div className="flex items-center space-x-2 font-semibold text-emerald-900">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-700" />
-                    <span>Spend Reservation Created</span>
+                <div
+                  className={`p-4 rounded border text-xs space-y-2 ${
+                    evalResult.isDemoSimulation
+                      ? "bg-amber-50 border-amber-300 text-amber-950"
+                      : "bg-emerald-50 border-emerald-300 text-emerald-950"
+                  }`}
+                >
+                  <div className="flex items-center space-x-2 font-semibold">
+                    <CheckCircle2
+                      className={`w-4 h-4 ${
+                        evalResult.isDemoSimulation ? "text-amber-700" : "text-emerald-700"
+                      }`}
+                    />
+                    <span>
+                      {evalResult.isDemoSimulation
+                        ? "Simulated Reservation Preview (Unpersisted)"
+                        : "Spend Reservation Confirmed by Backend"}
+                    </span>
                   </div>
-                  <div className="text-[11px] text-emerald-900 space-y-1">
+                  <div className="text-[11px] space-y-1">
+                    {evalResult.reservationId && (
+                      <div>
+                        Reservation ID:{" "}
+                        <strong className="font-mono">{evalResult.reservationId}</strong>
+                      </div>
+                    )}
                     <div>
                       Reservation State:{" "}
-                      <strong className="font-mono">{evalResult.reservationState || "ORDER_CREATION_PENDING"}</strong>
+                      <strong className="font-mono">
+                        {evalResult.reservationState || "ORDER_CREATION_PENDING"}
+                      </strong>
                     </div>
                     <div>
                       Reserved Amount:{" "}
@@ -326,14 +348,31 @@ export function CheckoutGatePanel() {
                         ${(evalResult.cartTotalMinor / 100).toFixed(2)} {evalResult.currency}
                       </strong>
                     </div>
-                    <div className="flex items-center space-x-1 text-[10px] text-emerald-800 pt-1">
-                      <Clock className="w-3 h-3 text-emerald-700" />
+                    <div className="flex items-center space-x-1 text-[10px] pt-1 text-muted">
+                      <Clock className="w-3 h-3 text-muted shrink-0" />
                       <span>Reservation TTL: 15 minutes (buyer-approval window).</span>
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-emerald-200 text-[10px] text-emerald-900 leading-relaxed">
-                    <strong>Payment Boundary Notice:</strong> PayPal Sandbox order creation and capture integration are scheduled for Phase 6/7. No live funds or payment orders were executed.
+                  <div
+                    className={`pt-2 border-t text-[10px] leading-relaxed ${
+                      evalResult.isDemoSimulation
+                        ? "border-amber-200 text-amber-900"
+                        : "border-emerald-200 text-emerald-900"
+                    }`}
+                  >
+                    {evalResult.isDemoSimulation ? (
+                      <strong>
+                        Simulation Notice: Local calculation only. No reservation record was persisted
+                        to PostgreSQL.
+                      </strong>
+                    ) : (
+                      <>
+                        <strong>Payment Boundary Notice:</strong> PayPal Sandbox order creation and
+                        capture integration are scheduled for Phase 6/7. No live funds or payment
+                        orders were executed.
+                      </>
+                    )}
                   </div>
                 </div>
               )}
