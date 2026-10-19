@@ -13,6 +13,8 @@ import {
 import { api } from "./api/client";
 import type { HealthLiveResponse, HealthReadyResponse } from "@warrant/contracts";
 import { VerificationStudio } from "./components/verification/VerificationStudio";
+import { ApprovalPanel } from "./components/approval/ApprovalPanel";
+import { CheckoutGatePanel } from "./components/checkout/CheckoutGatePanel";
 
 export function App() {
   const [activeWorkstation, setActiveWorkstation] = useState<string>("verification");
@@ -139,6 +141,10 @@ export function App() {
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
           {activeWorkstation === "verification" || activeWorkstation === "findings" ? (
             <VerificationStudio />
+          ) : activeWorkstation === "approval" ? (
+            <ApprovalPanel />
+          ) : activeWorkstation === "checkout" ? (
+            <CheckoutGatePanel />
           ) : activeWorkstation === "overview" ? (
             <div className="max-w-5xl mx-auto space-y-6">
               {/* Title Section */}
