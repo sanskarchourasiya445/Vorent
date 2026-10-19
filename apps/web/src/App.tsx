@@ -12,8 +12,10 @@ import {
 } from "lucide-react";
 import { api } from "./api/client";
 import type { HealthLiveResponse, HealthReadyResponse } from "@warrant/contracts";
+import { VerificationStudio } from "./components/verification/VerificationStudio";
 
 export function App() {
+  const [activeWorkstation, setActiveWorkstation] = useState<string>("verification");
   const [liveData, setLiveData] = useState<HealthLiveResponse | null>(null);
   const [readyData, setReadyData] = useState<HealthReadyResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -88,50 +90,66 @@ export function App() {
         <aside className="w-60 border-r border-border bg-surface hidden md:flex flex-col justify-between p-4">
           <div className="space-y-1">
             <div className="px-3 py-2 text-xs font-semibold text-muted uppercase tracking-wider">
-              Workstation (MVP)
+              Workstations
             </div>
             {[
-              { label: "Overview", active: true },
-              { label: "Mandate Editor", active: false },
-              { label: "Intent Examples", active: false },
-              { label: "Policy Versions", active: false },
-              { label: "Findings & Witnesses", active: false },
-              { label: "Approval Checkpoints", active: false },
-              { label: "Checkout Gate", active: false },
-              { label: "Transactions", active: false },
-              { label: "Evaluation Report", active: false },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className={`px-3 py-2 text-sm rounded cursor-pointer transition-colors ${
-                  item.active
-                    ? "bg-accent/10 text-accent font-medium"
-                    : "text-muted hover:bg-canvas hover:text-ink"
-                }`}
-              >
-                {item.label}
-              </div>
-            ))}
+              { id: "verification", label: "Verification Studio", badge: "Active" },
+              { id: "findings", label: "Findings & Witnesses", badge: "" },
+              { id: "overview", label: "System Overview", badge: "" },
+              { id: "mandate", label: "Mandate Editor", badge: "" },
+              { id: "intent", label: "Intent Examples", badge: "" },
+              { id: "policy-versions", label: "Policy Versions", badge: "" },
+              { id: "approval", label: "Approval Checkpoints", badge: "" },
+              { id: "checkout", label: "Checkout Gate", badge: "" },
+              { id: "transactions", label: "Transactions", badge: "" },
+              { id: "evaluation-report", label: "Evaluation Report", badge: "" },
+            ].map((item) => {
+              const isActive =
+                activeWorkstation === item.id ||
+                (activeWorkstation === "findings" && item.id === "verification");
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveWorkstation(item.id)}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs rounded text-left transition-colors ${
+                    isActive
+                      ? "bg-accent/10 text-accent font-semibold"
+                      : "text-muted hover:bg-canvas hover:text-ink"
+                  }`}
+                >
+                  <span>{item.label}</span>
+                  {item.badge && (
+                    <span className="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-accent/20 text-accent">
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           <div className="border-t border-border pt-3 text-xs text-muted">
-            <div className="font-medium text-ink">Phase 0: Foundation</div>
-            <div>Modular Monolith</div>
+            <div className="font-medium text-ink">Phase 2: Verification</div>
+            <div>Warrant Studio Engine</div>
           </div>
         </aside>
 
         {/* Central Content */}
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
-          <div className="max-w-5xl mx-auto space-y-6">
-            {/* Title Section */}
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-ink">
-                Foundation Verification
-              </h1>
-              <p className="text-sm text-muted mt-1">
-                Phase 0 baseline status: contract validation, API health probes, and local runtime verification.
-              </p>
-            </div>
+          {activeWorkstation === "verification" || activeWorkstation === "findings" ? (
+            <VerificationStudio />
+          ) : activeWorkstation === "overview" ? (
+            <div className="max-w-5xl mx-auto space-y-6">
+              {/* Title Section */}
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight text-ink">
+                  Foundation Verification
+                </h1>
+                <p className="text-sm text-muted mt-1">
+                  Phase 0 baseline status: contract validation, API health probes, and local runtime verification.
+                </p>
+              </div>
 
             {/* Health Status Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -242,6 +260,22 @@ export function App() {
               <div>Node.js {navigator.userAgent ? "v26 Environment" : ""}</div>
             </div>
           </div>
+          ) : (
+            <div className="max-w-md mx-auto py-16 text-center space-y-3">
+              <Shield className="w-8 h-8 text-accent mx-auto" aria-hidden="true" />
+              <h2 className="text-base font-bold text-ink">Workstation in Development</h2>
+              <p className="text-xs text-muted">
+                This workstation module is scheduled for incremental development in subsequent phases.
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveWorkstation("verification")}
+                className="px-4 py-2 rounded text-xs font-semibold bg-accent text-white hover:bg-accent/90 transition-colors"
+              >
+                Open Verification Studio
+              </button>
+            </div>
+          )}
         </main>
       </div>
     </div>
