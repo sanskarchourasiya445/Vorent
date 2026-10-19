@@ -112,14 +112,12 @@ export function CheckoutGatePanel() {
     try {
       let nonce: string | undefined;
       if (!useOfflineSimulation) {
-        try {
-          nonce = await requestCheckoutNonce("appr_v1_books_hardware");
-          setConsumedNonce(nonce);
-        } catch {
-          // If nonce route is not mounted yet, continue with simulated token
-          nonce = `nonce_${Math.random().toString(36).slice(2, 10)}`;
-          setConsumedNonce(nonce);
-        }
+        nonce = await requestCheckoutNonce(
+          "11111111-1111-1111-1111-111111111111",
+          selectedPolicy.id.length === 36 ? selectedPolicy.id : "22222222-2222-2222-2222-222222222222",
+          selectedPolicy.hash,
+        );
+        setConsumedNonce(nonce);
       }
 
       const result = await submitCheckoutProposal({

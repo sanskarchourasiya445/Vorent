@@ -6,7 +6,11 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 /**
  * Requests a single-use 256-bit cryptographic checkout nonce bound to an approval.
  */
-export async function requestCheckoutNonce(approvalId: string): Promise<string> {
+export async function requestCheckoutNonce(
+  approvalId: string,
+  policyVersionId?: string,
+  policyHash?: string,
+): Promise<string> {
   const url = `${API_BASE}/api/checkout/nonces`;
   const response = await fetch(url, {
     method: "POST",
@@ -14,7 +18,12 @@ export async function requestCheckoutNonce(approvalId: string): Promise<string> 
       "Content-Type": "application/json",
       Accept: "application/json",
     },
-    body: JSON.stringify({ approvalId }),
+    body: JSON.stringify({
+      approvalId,
+      policyVersionId: policyVersionId || "00000000-0000-0000-0000-000000000000",
+      policyHash: policyHash || "0".repeat(64),
+      ttlSeconds: 300,
+    }),
   });
 
   if (response.status === 404) {
@@ -46,7 +55,16 @@ export async function requestCheckoutNonce(approvalId: string): Promise<string> 
   }
 
   const json = await response.json();
-  return json?.nonce || json?.data?.nonce || "nonce_simulated_token";
+  return (
+    json?.nonceId ||
+    json?.id ||
+    json?.rawNonce ||
+    json?.nonce ||
+    json?.data?.nonceId ||
+    json?.data?.id ||
+    json?.data?.nonce ||
+    ""
+  );
 }
 
 /**
@@ -125,8 +143,7 @@ export async function submitCheckoutProposal(
         approvalId: input.approvalId,
         policyVersionId: input.policyVersionId,
         policyHash: input.policyHash,
-        nonce: input.nonce,
-        merchantName: input.merchantName,
+        nonceId: input.nonceId || input.nonce,
         cart: {
           currency: input.currency,
           items: input.items.map((i) => ({
@@ -136,6 +153,13 @@ export async function submitCheckoutProposal(
             unitPriceMinor: i.unitPriceMinor,
             quantity: i.quantity,
           })),
+        },
+        evidenceSnapshot: {
+          timestamp: new Date().toISOString(),
+          merchantConfidence: 1.0,
+          itemCategorizations: Object.fromEntries(
+            input.items.map((i) => [i.id, { category: i.category, confidence: 1.0 }]),
+          ),
         },
       }),
     });
@@ -181,22 +205,25 @@ export async function submitCheckoutProposal(
   }
 
   const json = await response.json();
-  const data = json?.proposal || json?.data || json;
+  const proposal = json?.proposal || json?.data || json;
+  const reservation = json?.reservation;
+  const decision = json?.decision || proposal?.decision || "DENY";
+  const reasonCodes = json?.reasonCodes || proposal?.reasonCodes || [];
 
   return {
-    proposalId: data.id || data.proposalId || `prop_${Date.now()}`,
-    approvalId: data.approvalId || input.approvalId,
-    decision: data.decision || "DENY",
-    primaryReasonCode: data.primaryReasonCode || data.reasonCodes?.[0] || ReasonCode.ALL_RULES_PASSED,
-    reasonCodes: data.reasonCodes || [],
-    ruleTrace: data.ruleTrace || [],
-    cartTotalMinor: data.cartTotalMinor ?? cartTotalMinor,
-    currency: data.currency || input.currency,
-    policyVersionId: data.policyVersionId || input.policyVersionId,
-    policyHash: data.policyHash || input.policyHash,
-    reservationId: data.reservationId,
-    reservationState: data.reservationState,
-    evaluatedAt: data.evaluatedAt || new Date().toISOString(),
+    proposalId: proposal.id || proposal.proposalId || `prop_${Date.now()}`,
+    approvalId: proposal.approvalId || input.approvalId,
+    decision,
+    primaryReasonCode: reasonCodes[0] || proposal?.primaryReasonCode || ReasonCode.ALL_RULES_PASSED,
+    reasonCodes,
+    ruleTrace: proposal.ruleTrace || [],
+    cartTotalMinor: proposal.cartTotalMinor ?? cartTotalMinor,
+    currency: proposal.currency || input.currency,
+    policyVersionId: proposal.policyVersionId || input.policyVersionId,
+    policyHash: proposal.policyHash || input.policyHash,
+    reservationId: reservation?.id || proposal.reservationId,
+    reservationState: reservation?.state || proposal.reservationState,
+    evaluatedAt: proposal.evaluatedAt || new Date().toISOString(),
     isLiveApi: true,
     isDemoSimulation: false,
   };

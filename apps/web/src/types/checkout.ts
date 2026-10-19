@@ -16,6 +16,7 @@ export interface CheckoutProposalInput {
   items: CheckoutProposalItem[];
   currency: string;
   nonce?: string;
+  nonceId?: string;
   useOfflineSimulation?: boolean;
 }
 
