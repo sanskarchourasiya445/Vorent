@@ -5,3 +5,4 @@ export * from "./cart.js";
 export * from "./policy.js";
 export * from "./evaluation.js";
 export * from "./verification.js";
+export * from "./persistence.js";

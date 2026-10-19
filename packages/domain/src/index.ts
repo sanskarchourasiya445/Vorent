@@ -9,4 +9,5 @@ export * from "./evaluator.js";
 export * from "./precedence.js";
 export * from "./search/candidateGenerator.js";
 export * from "./verification/fingerprint.js";
+export * from "./verification/policyHash.js";
 export * from "./verification/verifier.js";

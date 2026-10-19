@@ -12,6 +12,13 @@ import {
   VerificationRequestSchema,
 } from "@warrant/contracts";
 import { verifyPolicy } from "@warrant/domain";
+import { db } from "../db/index.js";
+import { getPolicyVersion, ensureDefaultUser } from "../db/repositories/policyRepository.js";
+import {
+  saveVerificationRun,
+  listVerificationRuns,
+  getVerificationRun,
+} from "../db/repositories/verificationRunRepository.js";
 
 export const SERVER_BOUNDS = {
   DEFAULT_MAX_CANDIDATES: 500,
@@ -160,9 +167,22 @@ function extractRequestId(request: FastifyRequest): string {
   return request.id || `req_${randomUUID()}`;
 }
 
+function isDbConnectionError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as any;
+  return (
+    e.code === "28P01" ||
+    e.code === "ECONNREFUSED" ||
+    e.code === "ETIMEDOUT" ||
+    e.code === "ENOTFOUND" ||
+    (typeof e.message === "string" &&
+      (e.message.includes("connection") || e.message.includes("authentication failed")))
+  );
+}
+
 export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
   // Handler for verification run
-  const handleVerificationRun = async (request: FastifyRequest, reply: FastifyReply) => {
+  const handleVerificationRun = async (request: FastifyRequest, reply: FastifyReply, persistRun: boolean = false) => {
     const requestId = extractRequestId(request);
     reply.header("x-request-id", requestId);
 
@@ -238,7 +258,32 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       const presetData = parsed.data;
-      const preset = POLICY_PRESETS[presetData.policyVersionId];
+      let preset = POLICY_PRESETS[presetData.policyVersionId];
+
+      if (!preset) {
+        // Try looking up dynamic policy version from database
+        try {
+          const dbVersion = await getPolicyVersion(db, presetData.policyVersionId);
+          if (dbVersion) {
+            preset = {
+              id: dbVersion.id,
+              name: dbVersion.name,
+              version: String(dbVersion.versionNumber),
+              hash: dbVersion.policyHash,
+              policy: dbVersion.policyDocument,
+              intent: dbVersion.intentSpec,
+              defaultCategories: dbVersion.policyDocument.allowedCategories ?? ["General"],
+              defaultPricePointsMinor: [
+                Math.floor((dbVersion.policyDocument.maxItemPriceMinor ?? 10000) * 0.5),
+                dbVersion.policyDocument.maxItemPriceMinor ?? 10000,
+              ],
+            };
+          }
+        } catch {
+          // If DB lookup fails, continue to not found check
+        }
+      }
+
       if (!preset) {
         return reply.status(404).send({
           error: {
@@ -286,12 +331,9 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // Execute deterministic bounded verification
+    let report: VerificationReport;
     try {
-      const report: VerificationReport = verifyPolicy(verificationRequest);
-
-      // Validate outgoing report against contract schema
-      const validated = VerificationReportSchema.parse(report);
-      return reply.status(200).send(validated);
+      report = verifyPolicy(verificationRequest);
     } catch (err: unknown) {
       request.log.error({ err, requestId }, "Deterministic verification execution error");
       return reply.status(500).send({
@@ -302,11 +344,126 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
         requestId,
       });
     }
+
+    // Validate outgoing report against contract schema
+    const validated = VerificationReportSchema.parse(report);
+
+    // Save to database if persistence is requested
+    if (persistRun || (request.query as any)?.persist === "true") {
+      try {
+        const ownerId = await ensureDefaultUser(db);
+        const savedRun = await saveVerificationRun(db, {
+          ownerId,
+          policyVersionId: verificationRequest.config?.policyVersionId || "unknown",
+          policyHash: verificationRequest.config?.policyHash,
+          request: verificationRequest,
+          report: validated,
+        });
+
+        return reply.status(201).send({
+          run: savedRun,
+          report: validated,
+        });
+      } catch (err: unknown) {
+        request.log.error({ err, requestId }, "Failed to persist verification run to database");
+        return reply.status(500).send({
+          error: {
+            code: "PERSISTENCE_ERROR",
+            message: "Failed to persist verification run to database.",
+          },
+          requestId,
+        });
+      }
+    }
+
+    return reply.status(200).send(validated);
   };
 
-  // POST /run
-  fastify.post("/run", handleVerificationRun);
+  // GET /runs - List recent saved verification runs
+  fastify.get("/runs", async (request: FastifyRequest<{ Querystring: { policyVersionId?: string; limit?: string } }>, reply: FastifyReply) => {
+    const requestId = extractRequestId(request);
+    reply.header("x-request-id", requestId);
 
-  // POST / (convenience if prefix contains /run or if mounted directly)
-  fastify.post("/", handleVerificationRun);
+    try {
+      const limit = request.query?.limit ? parseInt(request.query.limit, 10) : 50;
+      const runs = await listVerificationRuns(db, {
+        policyVersionId: request.query?.policyVersionId,
+        limit: Number.isNaN(limit) ? 50 : limit,
+      });
+
+      return reply.status(200).send({
+        runs,
+        total: runs.length,
+      });
+    } catch (err: unknown) {
+      if (isDbConnectionError(err)) {
+        request.log.warn({ err, requestId }, "Database unavailable when listing verification runs");
+        return reply.status(503).send({
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "Persistence store is currently unavailable.",
+          },
+          requestId,
+        });
+      }
+      request.log.error({ err, requestId }, "Failed to list verification runs");
+      return reply.status(500).send({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "An internal error occurred while listing verification runs.",
+        },
+        requestId,
+      });
+    }
+  });
+
+  // GET /runs/:id - Retrieve specific saved verification run
+  fastify.get("/runs/:id", async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const requestId = extractRequestId(request);
+    reply.header("x-request-id", requestId);
+
+    const { id } = request.params;
+    try {
+      const run = await getVerificationRun(db, id);
+      if (!run) {
+        return reply.status(404).send({
+          error: {
+            code: "RUN_NOT_FOUND",
+            message: `Verification run '${id}' was not found.`,
+          },
+          requestId,
+        });
+      }
+
+      return reply.status(200).send(run);
+    } catch (err: unknown) {
+      if (isDbConnectionError(err)) {
+        request.log.warn({ err, requestId, id }, "Database unavailable when retrieving verification run");
+        return reply.status(503).send({
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "Persistence store is currently unavailable.",
+          },
+          requestId,
+        });
+      }
+      request.log.error({ err, requestId, id }, "Failed to retrieve verification run");
+      return reply.status(500).send({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "An internal error occurred while retrieving verification run.",
+        },
+        requestId,
+      });
+    }
+  });
+
+  // POST /runs - Execute and persist verification run
+  fastify.post("/runs", (request, reply) => handleVerificationRun(request, reply, true));
+
+  // POST /run - Pure execution (Phase 3 contract)
+  fastify.post("/run", (request, reply) => handleVerificationRun(request, reply, false));
+
+  // POST / (convenience alias)
+  fastify.post("/", (request, reply) => handleVerificationRun(request, reply, false));
 };
