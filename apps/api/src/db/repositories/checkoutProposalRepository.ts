@@ -305,7 +305,7 @@ export async function submitCheckoutProposal(
       reasonCodes: finalReasonCodes,
       ruleTrace: finalRuleTrace,
       evaluatedAt: new Date(),
-    });
+    }).returning();
 
     // 6. Atomically reserve spend in ORDER_CREATION_PENDING if ALLOWed
     let reservationRecord: any = null;
@@ -319,7 +319,7 @@ export async function submitCheckoutProposal(
         currency: input.cart.currency,
         state: "ORDER_CREATION_PENDING",
         expiresAt: null,
-      });
+      }).returning();
       reservationRecord = res;
     }
 

@@ -104,6 +104,10 @@ export async function listPolicies(db: any, _ownerId?: string): Promise<PolicySu
       .from(policies)
       .orderBy(desc(policies.updatedAt));
 
+    if (dbPolicies.length === 0) {
+      return getPresetSummaries();
+    }
+
     const summaries: PolicySummary[] = [];
 
     for (const p of dbPolicies) {

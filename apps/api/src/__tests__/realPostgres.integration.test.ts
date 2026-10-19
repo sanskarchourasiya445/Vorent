@@ -121,7 +121,11 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
   };
 
   describe("Real PostgreSQL Live Persistence (conditional on live DB authentication)", () => {
-    it.runIf(isDbLive)("1. Creates policy and initial immutable version 1 record in PostgreSQL", async () => {
+    it("1. Creates policy and initial immutable version 1 record in PostgreSQL", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
       const res = await server.inject({
         method: "POST",
         url: "/api/policies",
@@ -147,7 +151,11 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
       expect(dbRows[0]?.currentVersionId).toBe(created.id);
     });
 
-    it.runIf(isDbLive)("2 & 3. Executes verification run and confirms run + findings are persisted in PostgreSQL", async () => {
+    it("2 & 3. Executes verification run and confirms run + findings are persisted in PostgreSQL", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
       const policyId = createdPolicyIds[0];
       if (!policyId) throw new Error("Policy ID not found from previous step");
 
@@ -188,7 +196,11 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
       }
     });
 
-    it.runIf(isDbLive)("4 & 5. Retrieves saved run via API and verifies exact match with PostgreSQL record", async () => {
+    it("4 & 5. Retrieves saved run via API and verifies exact match with PostgreSQL record", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
       const runId = createdRunIds[0];
       if (!runId) throw new Error("Run ID not found from previous step");
 
@@ -205,7 +217,11 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
       expect(detail.report.totalCandidatesExplored).toBeGreaterThan(0);
     });
 
-    it.runIf(isDbLive)("6. Confirms subsequent list request includes the saved run", async () => {
+    it("6. Confirms subsequent list request includes the saved run", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
       const runId = createdRunIds[0];
       if (!runId) throw new Error("Run ID not found from previous step");
 
@@ -221,7 +237,11 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
       expect(found).toBe(true);
     });
 
-    it.runIf(isDbLive)("7. Verifies prior policy versions remain unchanged after creating a new version", async () => {
+    it("7. Verifies prior policy versions remain unchanged after creating a new version", async (ctx) => {
+      if (!isDbLive) {
+        ctx.skip();
+        return;
+      }
       const policyId = createdPolicyIds[0];
       if (!policyId) throw new Error("Policy ID not found from previous step");
 
