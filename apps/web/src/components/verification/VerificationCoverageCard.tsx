@@ -55,6 +55,18 @@ export function VerificationCoverageCard({
           label: "BUDGET EXHAUSTED (PARTIAL)",
           styles: "bg-amber-100 text-amber-950 border-amber-300",
         };
+      case "TIMED_OUT":
+        return {
+          icon: <Clock className="w-4 h-4 text-amber-800" aria-hidden="true" />,
+          label: "SEARCH TIMED OUT (PARTIAL)",
+          styles: "bg-amber-100 text-amber-950 border-amber-300",
+        };
+      case "EMPTY_SEARCH_SPACE":
+        return {
+          icon: <Info className="w-4 h-4 text-muted" aria-hidden="true" />,
+          label: "EMPTY SEARCH SPACE",
+          styles: "bg-canvas text-muted border-border",
+        };
       case "UNRESOLVED_CASES":
         return {
           icon: <HelpCircle className="w-4 h-4 text-amber-800" aria-hidden="true" />,
@@ -237,8 +249,39 @@ export function VerificationCoverageCard({
         </div>
       )}
 
-      {/* Exhaustive vs Budget Bound Callout */}
-      {coverage && !coverage.isExhaustive && (
+      {/* Exhaustive vs Budget Bound vs Timed Out vs Empty Space Callouts */}
+      {coverage && status === "TIMED_OUT" && (
+        <div
+          role="note"
+          className="p-3 rounded bg-amber-50 border border-amber-300 text-xs text-amber-950 space-y-1"
+        >
+          <div className="font-semibold flex items-center space-x-1.5">
+            <Clock className="w-3.5 h-3.5 text-amber-800 shrink-0" aria-hidden="true" />
+            <span>Search Duration Limit Reached: Partial Exploration Disclaimer</span>
+          </div>
+          <p className="text-amber-900 text-[11px] leading-relaxed">
+            Exploration halted because the allocated timeout ({coverage.durationMs}ms) was reached before the declared search domain could be exhausted.
+            Findings discovered before the timeout are valid counterexamples, but <strong>this run does not prove universal safety</strong>.
+          </p>
+        </div>
+      )}
+
+      {coverage && status === "EMPTY_SEARCH_SPACE" && (
+        <div
+          role="note"
+          className="p-3 rounded bg-blue-50 border border-blue-200 text-xs text-blue-950 space-y-1"
+        >
+          <div className="font-semibold flex items-center space-x-1.5">
+            <Info className="w-3.5 h-3.5 text-blue-700 shrink-0" aria-hidden="true" />
+            <span>Empty Search Domain</span>
+          </div>
+          <p className="text-blue-900 text-[11px] leading-relaxed">
+            Zero candidate permutations were generated. The declared search space definition contains no reachable cart combinations.
+          </p>
+        </div>
+      )}
+
+      {coverage && status === "BUDGET_EXHAUSTED" && (
         <div
           role="note"
           className="p-3 rounded bg-amber-50 border border-amber-300 text-xs text-amber-950 space-y-1"

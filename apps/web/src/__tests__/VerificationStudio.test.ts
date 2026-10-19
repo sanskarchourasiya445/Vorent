@@ -505,4 +505,180 @@ describe("Verification Studio Frontend Suite", () => {
     expect(validated.searchSpace.pricePointsMinor.length).toBeGreaterThan(0);
     expect(validated.config?.maxCandidates).toBe(350);
   });
+
+  it("19. seeded defective-policy workflow: discovers counterexample, and repaired policy eliminates it", async () => {
+    const defectivePolicy = AVAILABLE_POLICIES.find((p) => p.id === "pol_seeded_defect_unbounded_cart");
+    const repairedPolicy = AVAILABLE_POLICIES.find((p) => p.id === "pol_v1_books_hardware");
+
+    expect(defectivePolicy).toBeDefined();
+    expect(repairedPolicy).toBeDefined();
+
+    // The defective policy omits whole-cart cap while intent requires $600 cap
+    expect(defectivePolicy!.policyDocument.maxCartTotalMinor).toBeUndefined();
+    expect(defectivePolicy!.intent.maxCartTotalMinor).toBe(60000);
+
+    // The repaired policy has the explicit $600 cap
+    expect(repairedPolicy!.policyDocument.maxCartTotalMinor).toBe(60000);
+
+    const originalFetch = globalThis.fetch;
+    try {
+      // 1. Defective policy run returns finding
+      globalThis.fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            runId: "run_defective_1",
+            status: "COMPLETED",
+            exhausted: true,
+            stopReason: "DOMAIN_EXHAUSTED",
+            domainVersion: "1.0.0",
+            totalCandidatesExplored: 24,
+            searchSpaceEstimatedSize: 24,
+            findingCount: 1,
+            findings: [
+              {
+                findingId: "fnd_cart_unbounded",
+                fingerprint: "0123456789abcdef",
+                severity: "HIGH",
+                violationType: "FALSE_POSITIVE_ALLOW",
+                title: "Cart Total Exceeds User Mandate Cap ($600.00)",
+                description: "Cart allowed 3 items totaling $660.00 because maxCartTotalMinor is omitted in policy rules.",
+                candidateCart: {
+                  cartId: "cart_witness",
+                  currency: "USD",
+                  items: [
+                    { sku: "sku_1", title: "Reference Book", category: "Reference Books", unitPriceMinor: 22000, quantity: 3 },
+                  ],
+                },
+                expectedOutcome: { decision: "DENY", reasonCode: ReasonCode.CART_TOTAL_LIMIT_EXCEEDED },
+                actualOutcome: { decision: "ALLOW", primaryReasonCode: ReasonCode.ALL_RULES_PASSED, reasonCodes: [ReasonCode.ALL_RULES_PASSED] },
+                reproduction: { candidateIndex: 5, summary: "3 items @ $220.00 = $660.00 > $600.00" },
+                policyVersionId: "pol_seeded_defect_unbounded_cart",
+                resolutionStatus: "UNRESOLVED",
+              },
+            ],
+            unresolvedCount: 0,
+            durationMs: 42,
+            summary: "Discovered 1 counterexample: Whole-cart spending limit omitted.",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const defectiveResult = await executeVerificationRun({
+        policyVersionId: "pol_seeded_defect_unbounded_cart",
+        dimensions: ["PRICE_BOUNDARIES", "QUANTITY_SPLITS"],
+        candidateBudget: 100,
+      });
+
+      expect(defectiveResult.counterexampleCount).toBe(1);
+      expect(defectiveResult.findings[0].classification).toBe("COUNTEREXAMPLE");
+      expect(defectiveResult.findings[0].title).toContain("Cart Total Exceeds User Mandate Cap");
+
+      // 2. Repaired policy run returns 0 findings
+      globalThis.fetch = async () => {
+        return new Response(
+          JSON.stringify({
+            runId: "run_repaired_1",
+            status: "COMPLETED",
+            exhausted: true,
+            stopReason: "DOMAIN_EXHAUSTED",
+            domainVersion: "1.0.0",
+            totalCandidatesExplored: 24,
+            searchSpaceEstimatedSize: 24,
+            findingCount: 0,
+            findings: [],
+            unresolvedCount: 0,
+            durationMs: 38,
+            summary: "No counterexamples detected across explored bounds.",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      };
+
+      const repairedResult = await executeVerificationRun({
+        policyVersionId: "pol_v1_books_hardware",
+        dimensions: ["PRICE_BOUNDARIES", "QUANTITY_SPLITS"],
+        candidateBudget: 100,
+      });
+
+      expect(repairedResult.counterexampleCount).toBe(0);
+      expect(repairedResult.findings.length).toBe(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("20. CoverageCard renders TIMED_OUT status and time-bound partial exploration disclaimer", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(VerificationCoverageCard, {
+        status: "TIMED_OUT",
+        coverage: {
+          totalCandidatesEvaluated: 142,
+          candidateBudget: 500,
+          isExhaustive: false,
+          dimensionsCovered: ["PRICE_BOUNDARIES"],
+          evaluatedAt: "2026-10-19T12:00:00Z",
+          durationMs: 5000,
+        },
+        counterexampleCount: 0,
+        unresolvedCount: 0,
+        stopReason: "TIMEOUT",
+      }),
+    );
+
+    expect(html).toContain("SEARCH TIMED OUT (PARTIAL)");
+    expect(html).toContain("Search Duration Limit Reached: Partial Exploration Disclaimer");
+    expect(html).toContain("Exploration halted because the allocated timeout (5000ms) was reached");
+  });
+
+  it("21. CoverageCard renders EMPTY_SEARCH_SPACE status with informative domain guidance", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(VerificationCoverageCard, {
+        status: "EMPTY_SEARCH_SPACE",
+        coverage: {
+          totalCandidatesEvaluated: 0,
+          candidateBudget: 100,
+          isExhaustive: false,
+          dimensionsCovered: ["PRICE_BOUNDARIES"],
+          evaluatedAt: "2026-10-19T12:00:00Z",
+          durationMs: 5,
+        },
+        counterexampleCount: 0,
+        unresolvedCount: 0,
+        stopReason: "EMPTY_SEARCH_SPACE",
+      }),
+    );
+
+    expect(html).toContain("EMPTY SEARCH SPACE");
+    expect(html).toContain("Empty Search Domain");
+    expect(html).toContain("Zero candidate permutations were generated");
+  });
+
+  it("22. executeVerificationRun unpacks structured ApiErrorResponse envelope", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: "VALIDATION_ERROR",
+            message: "Candidate budget exceeds maximum server bound of 2000.",
+          },
+          requestId: "req_test_123",
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    };
+
+    try {
+      await expect(
+        executeVerificationRun({
+          policyVersionId: "pol_v1_books_hardware",
+          dimensions: ["PRICE_BOUNDARIES"],
+          candidateBudget: 5000,
+        }),
+      ).rejects.toThrow("Candidate budget exceeds maximum server bound of 2000.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

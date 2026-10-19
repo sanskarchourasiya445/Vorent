@@ -74,6 +74,35 @@ export const AVAILABLE_POLICIES: PolicyOption[] = [
     defaultCategories: ["Peripherals", "Ergonomics"],
     defaultPricePointsMinor: [9900, 14900, 15000, 15100, 20000],
   },
+  {
+    id: "pol_seeded_defect_unbounded_cart",
+    version: "1.0.0-flawed",
+    name: "Defective Policy: Whole-Cart Spending Limit Omitted",
+    hash: "b7e4521098acdf512345678901234567890abcdef1234567890abcdef1234567",
+    description:
+      "Seeded defective policy: Item price ceiling ($250.00) is enforced, but whole-cart total ceiling is omitted while user intent restricts cart total to $600.00.",
+    limitsSummary: "Max Item: $250.00 | Max Cart: UNBOUNDED (Defect) | Intent Total: $600.00",
+    policyDocument: {
+      schemaVersion: "1.0",
+      currency: "USD",
+      maxItemPriceMinor: 25000, // $250.00
+      // maxCartTotalMinor is intentionally omitted to discover loophole
+      allowedCategories: ["Hardware", "Reference Books"],
+      prohibitedCategories: ["Gift Cards"],
+      requireEvidence: true,
+    },
+    intent: {
+      name: "Mandate with Whole-Cart Cap of $600",
+      currency: "USD",
+      maxItemPriceMinor: 25000,
+      maxCartTotalMinor: 60000, // $600.00
+      allowedCategories: ["Hardware", "Reference Books"],
+      prohibitedCategories: ["Gift Cards"],
+      requireEvidence: true,
+    },
+    defaultCategories: ["Hardware", "Reference Books"],
+    defaultPricePointsMinor: [22000, 25000], // 3 items @ $220.00 = $660.00 > $600.00
+  },
 ];
 
 export async function fetchAvailablePolicies(): Promise<PolicyOption[]> {
@@ -148,9 +177,11 @@ export function adaptVerificationReportToRunResult(
   let status: VerificationRunResult["status"] = "COMPLETED";
   if (report.status === "FAILED") {
     status = "FAILED";
-  } else if (report.stopReason === "CANDIDATE_CAP_REACHED" || report.status === "INCOMPLETE") {
-    status = "BUDGET_EXHAUSTED";
-  } else if (!report.exhausted) {
+  } else if (report.stopReason === "TIMEOUT") {
+    status = "TIMED_OUT";
+  } else if (report.stopReason === "EMPTY_SEARCH_SPACE" || (report.totalCandidatesExplored === 0 && !report.exhausted)) {
+    status = "EMPTY_SEARCH_SPACE";
+  } else if (report.stopReason === "CANDIDATE_CAP_REACHED" || report.status === "INCOMPLETE" || !report.exhausted) {
     status = "BUDGET_EXHAUSTED";
   } else if (report.unresolvedCount > 0 && report.findingCount === 0) {
     status = "UNRESOLVED_CASES";
@@ -308,9 +339,17 @@ export async function executeVerificationRun(
       const rawText = await response.text();
       try {
         const errorJson = JSON.parse(rawText);
-        errorDetail = typeof errorJson === "object" && errorJson && "message" in errorJson
-          ? String((errorJson as { message: unknown }).message)
-          : (rawText || JSON.stringify(errorJson));
+        if (typeof errorJson === "object" && errorJson !== null) {
+          if ("error" in errorJson && typeof (errorJson as { error: unknown }).error === "object" && (errorJson as { error: { message?: string } }).error?.message) {
+            errorDetail = String((errorJson as { error: { message: string } }).error.message);
+          } else if ("message" in errorJson) {
+            errorDetail = String((errorJson as { message: unknown }).message);
+          } else {
+            errorDetail = rawText || JSON.stringify(errorJson);
+          }
+        } else {
+          errorDetail = rawText;
+        }
       } catch {
         errorDetail = rawText;
       }

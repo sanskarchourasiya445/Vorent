@@ -13,6 +13,8 @@ export type VerificationStatus =
   | "RUNNING"
   | "COMPLETED"
   | "BUDGET_EXHAUSTED"
+  | "TIMED_OUT"
+  | "EMPTY_SEARCH_SPACE"
   | "UNRESOLVED_CASES"
   | "FAILED";
 
