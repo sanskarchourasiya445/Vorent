@@ -10,17 +10,20 @@ import {
   fetchAvailablePolicies,
   executeVerificationRun,
 } from "../../api/verificationService";
+import { fetchSavedVerificationReport } from "../../api/persistenceService";
 import { VerificationConfigForm } from "./VerificationConfigForm";
 import { VerificationCoverageCard } from "./VerificationCoverageCard";
 import { FindingsList } from "./FindingsList";
 import { FindingDetailModal } from "./FindingDetailModal";
-import { ShieldCheck, RefreshCw, AlertCircle } from "lucide-react";
+import { SavedRunsBrowser } from "./SavedRunsBrowser";
+import { ShieldCheck, RefreshCw, AlertCircle, PlayCircle, Database } from "lucide-react";
 
 interface VerificationStudioProps {
   initialPolicyId?: string;
 }
 
 export function VerificationStudio({ initialPolicyId }: VerificationStudioProps) {
+  const [activeTab, setActiveTab] = useState<"RUNNER" | "SAVED_RUNS">("RUNNER");
   const [policies, setPolicies] = useState<PolicyOption[]>([]);
   const [policiesLoading, setPoliciesLoading] = useState(true);
   const [policiesError, setPoliciesError] = useState<string | null>(null);
@@ -29,6 +32,7 @@ export function VerificationStudio({ initialPolicyId }: VerificationStudioProps)
   const [runResult, setRunResult] = useState<VerificationRunResult | null>(null);
   const [selectedFinding, setSelectedFinding] = useState<VerificationFinding | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [loadingSavedReport, setLoadingSavedReport] = useState(false);
 
   // Load available policies
   useEffect(() => {
@@ -73,6 +77,21 @@ export function VerificationStudio({ initialPolicyId }: VerificationStudioProps)
     }
   };
 
+  const handleLoadSavedReport = async (runId: string) => {
+    setLoadingSavedReport(true);
+    setErrorMessage(null);
+    try {
+      const result = await fetchSavedVerificationReport(runId);
+      setRunResult(result);
+      setStatus(result.status);
+      setActiveTab("RUNNER"); // Return to runner view to inspect loaded report
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : `Failed to load saved report ${runId}`);
+    } finally {
+      setLoadingSavedReport(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto" role="main" aria-label="Verification Studio Workstation">
       {/* Studio Header */}
@@ -97,58 +116,97 @@ export function VerificationStudio({ initialPolicyId }: VerificationStudioProps)
         </div>
       </div>
 
-      {/* Policies Loading / Error State */}
-      {policiesLoading ? (
-        <div className="p-8 text-center text-xs text-muted space-y-2">
-          <RefreshCw className="w-5 h-5 animate-spin mx-auto text-accent" aria-hidden="true" />
-          <div>Loading policy manifests...</div>
-        </div>
-      ) : policiesError ? (
-        <div className="p-4 rounded bg-red-50 border border-red-200 text-xs text-red-900 flex items-center space-x-2">
-          <AlertCircle className="w-4 h-4 text-red-700 shrink-0" aria-hidden="true" />
-          <div>Failed to load policies: {policiesError}</div>
-        </div>
+      {/* Studio Navigation Tabs */}
+      <div className="flex items-center space-x-2 border-b border-border pb-2 text-xs">
+        <button
+          type="button"
+          onClick={() => setActiveTab("RUNNER")}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded transition-colors font-medium ${
+            activeTab === "RUNNER"
+              ? "bg-accent/10 text-accent font-semibold border border-accent/20"
+              : "text-muted hover:text-ink hover:bg-canvas"
+          }`}
+        >
+          <PlayCircle className="w-3.5 h-3.5" aria-hidden="true" />
+          <span>Active Verification Runner</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("SAVED_RUNS")}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded transition-colors font-medium ${
+            activeTab === "SAVED_RUNS"
+              ? "bg-accent/10 text-accent font-semibold border border-accent/20"
+              : "text-muted hover:text-ink hover:bg-canvas"
+          }`}
+        >
+          <Database className="w-3.5 h-3.5" aria-hidden="true" />
+          <span>Persisted Runs History</span>
+        </button>
+      </div>
+
+      {activeTab === "SAVED_RUNS" ? (
+        <SavedRunsBrowser
+          onLoadReport={handleLoadSavedReport}
+          isLoadingReport={loadingSavedReport}
+        />
       ) : (
         <>
-          {/* Configuration Form */}
-          <VerificationConfigForm
-            policies={policies}
-            onStartRun={(cfg, useDemo) => void handleStartRun(cfg, useDemo)}
-            isRunning={status === "RUNNING"}
-            initialPolicyId={initialPolicyId}
-          />
+          {/* Policies Loading / Error State */}
+          {policiesLoading ? (
+            <div className="p-8 text-center text-xs text-muted space-y-2">
+              <RefreshCw className="w-5 h-5 animate-spin mx-auto text-accent" aria-hidden="true" />
+              <div>Loading policy manifests...</div>
+            </div>
+          ) : policiesError ? (
+            <div className="p-4 rounded bg-red-50 border border-red-200 text-xs text-red-900 flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 text-red-700 shrink-0" aria-hidden="true" />
+              <div>Failed to load policies: {policiesError}</div>
+            </div>
+          ) : (
+            <>
+              {/* Configuration Form */}
+              <VerificationConfigForm
+                policies={policies}
+                onStartRun={(cfg, useDemo) => void handleStartRun(cfg, useDemo)}
+                isRunning={status === "RUNNING"}
+                initialPolicyId={initialPolicyId}
+              />
 
-          {/* Verification Status & Search Coverage */}
-          <VerificationCoverageCard
-            status={status}
-            coverage={runResult?.coverage}
-            counterexampleCount={runResult?.counterexampleCount ?? 0}
-            unresolvedCount={runResult?.unresolvedCount ?? 0}
-            isLiveApi={runResult?.isLiveApi}
-            isDemoFixture={runResult?.isDemoFixture}
-            stopReason={runResult?.stopReason}
-            summary={runResult?.summary}
-            runId={runResult?.runId}
-            errorMessage={errorMessage ?? runResult?.errorMessage}
-          />
+              {/* Verification Status & Search Coverage */}
+              <VerificationCoverageCard
+                status={status}
+                coverage={runResult?.coverage}
+                counterexampleCount={runResult?.counterexampleCount ?? 0}
+                unresolvedCount={runResult?.unresolvedCount ?? 0}
+                isLiveApi={runResult?.isLiveApi}
+                isDemoFixture={runResult?.isDemoFixture}
+                isSavedRun={runResult?.isSavedRun}
+                stopReason={runResult?.stopReason}
+                summary={runResult?.summary}
+                runId={runResult?.runId}
+                errorMessage={errorMessage ?? runResult?.errorMessage}
+              />
 
-          {/* Findings List (Rendered when a run has produced findings or confirmed 0 findings) */}
-          {runResult && status !== "RUNNING" && (
-            <FindingsList
-              findings={runResult.findings}
-              totalEvaluated={runResult.coverage.totalCandidatesEvaluated}
-              onSelectFinding={(f) => setSelectedFinding(f)}
-              selectedFindingId={selectedFinding?.id}
-            />
+              {/* Findings List (Rendered when a run has produced findings or confirmed 0 findings) */}
+              {runResult && status !== "RUNNING" && (
+                <FindingsList
+                  findings={runResult.findings}
+                  totalEvaluated={runResult.coverage.totalCandidatesEvaluated}
+                  onSelectFinding={(f) => setSelectedFinding(f)}
+                  selectedFindingId={selectedFinding?.id}
+                />
+              )}
+
+              {/* Finding Detail Modal / Drawer */}
+              <FindingDetailModal
+                finding={selectedFinding}
+                policyVersionId={runResult?.policyVersionId}
+                policyHash={runResult?.policyHash}
+                onClose={() => setSelectedFinding(null)}
+              />
+            </>
           )}
-
-          {/* Finding Detail Modal / Drawer */}
-          <FindingDetailModal
-            finding={selectedFinding}
-            policyVersionId={runResult?.policyVersionId}
-            policyHash={runResult?.policyHash}
-            onClose={() => setSelectedFinding(null)}
-          />
         </>
       )}
     </div>

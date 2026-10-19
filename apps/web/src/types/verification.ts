@@ -83,6 +83,7 @@ export interface VerificationRunResult {
   summary?: string;
   isLiveApi?: boolean;
   isDemoFixture?: boolean;
+  isSavedRun?: boolean;
   errorMessage?: string;
 }
 

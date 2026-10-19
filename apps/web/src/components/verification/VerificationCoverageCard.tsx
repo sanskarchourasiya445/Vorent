@@ -17,6 +17,7 @@ interface VerificationCoverageCardProps {
   unresolvedCount: number;
   isLiveApi?: boolean;
   isDemoFixture?: boolean;
+  isSavedRun?: boolean;
   stopReason?: string;
   summary?: string;
   runId?: string;
@@ -30,6 +31,7 @@ export function VerificationCoverageCard({
   unresolvedCount,
   isLiveApi = false,
   isDemoFixture = false,
+  isSavedRun = false,
   stopReason,
   summary,
   runId,
@@ -142,6 +144,12 @@ export function VerificationCoverageCard({
               <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-950 border border-emerald-300">
                 <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-700" aria-hidden="true" />
                 Live API Result
+              </span>
+            )}
+            {isSavedRun && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-sky-100 text-sky-950 border border-sky-300">
+                <Layers className="w-3 h-3 mr-1 text-accent" aria-hidden="true" />
+                Saved Database Run
               </span>
             )}
           </div>
