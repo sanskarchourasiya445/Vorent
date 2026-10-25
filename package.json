@@ -16,6 +16,8 @@
     "start:api": "npm run start --workspace=@warrant/api",
     "preview:web": "npm run preview --workspace=@warrant/web",
     "db:migrate": "drizzle-kit migrate",
+    "seed": "tsx apps/api/src/scripts/seedDemoData.ts",
+    "demo:reset": "tsx apps/api/src/scripts/seedDemoData.ts --force-reset",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "npm run typecheck --workspaces --if-present"
