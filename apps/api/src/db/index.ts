@@ -14,6 +14,7 @@ export const pool = new Pool({
 });
 
 export const db = drizzle(pool, { schema });
+export type Database = typeof db;
 export * from "./schema.js";
 
 export interface DbStatus {

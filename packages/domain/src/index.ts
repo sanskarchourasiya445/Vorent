@@ -14,4 +14,5 @@ export * from "./verification/verifier.js";
 export * from "./compiler/intentCompiler.js";
 export * from "./repair/policyDiff.js";
 export * from "./repair/policyRepairer.js";
+export * from "./auditPacket.js";
 

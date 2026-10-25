@@ -1,5 +1,4 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
-import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import {
   CreateCheckoutNonceRequestSchema,
@@ -11,27 +10,7 @@ import { db } from "../db/index.js";
 import { approvals } from "../db/schema.js";
 import * as policyRepo from "../db/repositories/policyRepository.js";
 import * as checkoutRepo from "../db/repositories/checkoutProposalRepository.js";
-
-function extractRequestId(request: FastifyRequest): string {
-  const incoming = request.headers["x-request-id"];
-  if (typeof incoming === "string" && incoming.trim().length > 0) {
-    return incoming.trim();
-  }
-  return `req_${randomUUID()}`;
-}
-
-function isDbConnectionError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as any;
-  return (
-    e.code === "28P01" ||
-    e.code === "ECONNREFUSED" ||
-    e.code === "ETIMEDOUT" ||
-    e.code === "ENOTFOUND" ||
-    (typeof e.message === "string" &&
-      (e.message.includes("connection") || e.message.includes("authentication failed") || e.message.includes("ECONNREFUSED")))
-  );
-}
+import { extractRequestId, isDbConnectionError, authenticateRequest } from "./routeUtils.js";
 
 export const checkoutRoutes: FastifyPluginAsync = async (fastify) => {
   // 1. POST /nonces - Issue single-use checkout nonce
@@ -52,7 +31,8 @@ export const checkoutRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const ownerId = await policyRepo.ensureDefaultUser(db);
+      const user = await authenticateRequest(request);
+      const ownerId = user?.id || (await policyRepo.ensureDefaultUser(db));
       const { approvalId, policyVersionId, policyHash, ttlSeconds } = parseResult.data;
 
       // Verify approval exists and is valid before issuing nonce
@@ -161,7 +141,8 @@ export const checkoutRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const ownerId = await policyRepo.ensureDefaultUser(db);
+      const user = await authenticateRequest(request);
+      const ownerId = user?.id || (await policyRepo.ensureDefaultUser(db));
       const result = await checkoutRepo.submitCheckoutProposal(db, {
         ownerId,
         approvalId: parseResult.data.approvalId,

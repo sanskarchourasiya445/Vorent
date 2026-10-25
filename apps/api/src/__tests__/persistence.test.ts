@@ -16,6 +16,7 @@ import {
   createPolicy,
   createPolicyVersion,
   seedPresets,
+  ensureDefaultUser,
 } from "../db/repositories/policyRepository.js";
 import {
   saveVerificationRun,
@@ -797,4 +798,79 @@ describe("Phase 4: Database Persistence & Policy Version History", () => {
       expect(entry0002.idx).toBe(2);
     });
   });
+
+  // 8. ensureDefaultUser Concurrency & Idempotency Invariants
+  describe("8. ensureDefaultUser Idempotency and Concurrency Conflict Handling", () => {
+    it("creates default user if not present, and returns existing id idempotently on subsequent calls", async () => {
+      const mockDb = createInMemoryDb();
+      const id1 = await ensureDefaultUser(mockDb);
+      expect(id1).toBeDefined();
+
+      const id2 = await ensureDefaultUser(mockDb);
+      expect(id2).toBe(id1);
+    });
+
+    it("gracefully catches unique constraint conflict (code 23505) and returns the existing user id", async () => {
+      const existingUserId = "11111111-1111-1111-1111-111111111111";
+
+      let hasSelected = false;
+      const racingDb: any = {
+        select: (_fields?: any) => ({
+          from: () => ({
+            where: () => ({
+              limit: async () => {
+                if (!hasSelected) {
+                  hasSelected = true;
+                  return []; // Empty on initial check
+                }
+                return [{ id: existingUserId }]; // Found on fallback check
+              },
+            }),
+          }),
+        }),
+        insert: () => ({
+          values: () => {
+            const err: any = new Error("duplicate key value violates unique constraint \"users_auth_subject_unique\"");
+            err.code = "23505";
+            err.constraint = "users_auth_subject_unique";
+            throw err;
+          },
+        }),
+      };
+
+      const resolvedId = await ensureDefaultUser(racingDb);
+      expect(resolvedId).toBe(existingUserId);
+    });
+
+    it("supports onConflictDoNothing on the insert builder during concurrent races", async () => {
+      const existingUserId = "22222222-2222-2222-2222-222222222222";
+      let selectCount = 0;
+
+      const onConflictDb: any = {
+        select: (_fields?: any) => ({
+          from: () => ({
+            where: () => ({
+              limit: async () => {
+                selectCount++;
+                if (selectCount === 1) return []; // Empty on initial check
+                return [{ id: existingUserId }]; // Found on fallback check after onConflictDoNothing
+              },
+            }),
+          }),
+        }),
+        insert: () => ({
+          values: () => ({
+            onConflictDoNothing: async () => {
+              // Simulates ON CONFLICT DO NOTHING succeeding silently
+              return [];
+            },
+          }),
+        }),
+      };
+
+      const resolvedId = await ensureDefaultUser(onConflictDb);
+      expect(resolvedId).toBe(existingUserId);
+    });
+  });
 });
+

@@ -9,7 +9,8 @@ import {
 } from "@warrant/contracts";
 import { computePolicyHash } from "@warrant/domain";
 import { policies, policyVersions, users } from "../schema.js";
-import { POLICY_PRESETS } from "../../routes/verification.js";
+import { CANONICAL_POLICY_PRESETS as POLICY_PRESETS } from "@warrant/test-fixtures";
+import { logAuditEvent } from "./auditRepository.js";
 
 export const SYSTEM_DEFAULT_USER_SUBJECT = "system:default_owner";
 
@@ -29,10 +30,38 @@ export async function ensureDefaultUser(db: any): Promise<string> {
   }
 
   const newId = randomUUID();
-  await db.insert(users).values({
-    id: newId,
-    authSubject: SYSTEM_DEFAULT_USER_SUBJECT,
-  });
+  try {
+    const insertBuilder = db.insert(users).values({
+      id: newId,
+      authSubject: SYSTEM_DEFAULT_USER_SUBJECT,
+    });
+
+    if (typeof insertBuilder?.onConflictDoNothing === "function") {
+      await insertBuilder.onConflictDoNothing({ target: users.authSubject });
+    } else {
+      await insertBuilder;
+    }
+  } catch (err: any) {
+    const isConflict =
+      err?.code === "23505" ||
+      err?.message?.includes("duplicate key") ||
+      err?.message?.includes("unique") ||
+      err?.constraint?.includes("users_auth_subject");
+
+    if (!isConflict) {
+      throw err;
+    }
+  }
+
+  const fallback = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.authSubject, SYSTEM_DEFAULT_USER_SUBJECT))
+    .limit(1);
+
+  if (fallback.length > 0 && fallback[0]?.id) {
+    return fallback[0].id;
+  }
 
   return newId;
 }
@@ -478,6 +507,20 @@ export async function createPolicy(
       confirmationState: input.confirmationState ?? "CONFIRMED",
       createdAt: now,
     });
+
+    await logAuditEvent(tx, {
+      ownerId,
+      actorType: "USER",
+      eventType: "POLICY_CREATED",
+      entityType: "POLICY",
+      entityId: policyId,
+      payload: {
+        name: input.name,
+        sourceMandate: input.sourceMandate,
+        initialVersionId: versionId,
+        policyHash,
+      },
+    });
   });
 
   return PolicyVersionRecordSchema.parse({
@@ -560,6 +603,20 @@ export async function createPolicyVersion(
         updatedAt: now,
       })
       .where(eq(policies.id, policyId));
+
+    await logAuditEvent(tx, {
+      ownerId,
+      actorType: "USER",
+      eventType: "POLICY_VERSION_CREATED",
+      entityType: "POLICY_VERSION",
+      entityId: versionId,
+      payload: {
+        policyId,
+        versionNumber: nextVersionNumber,
+        policyHash,
+        name: policyName,
+      },
+    });
   });
 
   return PolicyVersionRecordSchema.parse({

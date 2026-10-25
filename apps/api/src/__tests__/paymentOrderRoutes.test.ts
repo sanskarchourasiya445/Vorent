@@ -492,9 +492,10 @@ describe("Payment Orders Routes & Repository (PayPal Sandbox Integration)", () =
       // Verify DB updates
       expect(mockDb._updates).toHaveLength(1);
       expect(mockDb._updates[0].setVals.state).toBe("RESERVED");
-      expect(mockDb._inserts).toHaveLength(1);
-      expect(mockDb._inserts[0].vals.status).toBe("CREATED");
-      expect(mockDb._inserts[0].vals.providerOrderId).toBe(validPayPalOrderId);
+      const orderInserts = mockDb._inserts.filter((i: any) => i.table === paymentOrders);
+      expect(orderInserts).toHaveLength(1);
+      expect(orderInserts[0].vals.status).toBe("CREATED");
+      expect(orderInserts[0].vals.providerOrderId).toBe(validPayPalOrderId);
 
       // Verify return structure
       expect(result.paypalOrderId).toBe(validPayPalOrderId);

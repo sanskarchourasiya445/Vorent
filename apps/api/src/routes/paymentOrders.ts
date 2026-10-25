@@ -1,5 +1,4 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
-import { randomUUID } from "node:crypto";
 import {
   CreatePaymentOrderRequestSchema,
   CreatePaymentOrderResponseSchema,
@@ -19,29 +18,7 @@ import * as policyRepo from "../db/repositories/policyRepository.js";
 import * as paymentOrderRepo from "../db/repositories/paymentOrderRepository.js";
 import { CheckoutError } from "../db/repositories/checkoutProposalRepository.js";
 import { PayPalService, defaultPayPalService } from "../services/paypalService.js";
-
-function extractRequestId(request: FastifyRequest): string {
-  const incoming = request.headers["x-request-id"];
-  if (typeof incoming === "string" && incoming.trim().length > 0) {
-    return incoming.trim();
-  }
-  return `req_${randomUUID()}`;
-}
-
-function isDbConnectionError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as any;
-  return (
-    e.code === "28P01" ||
-    e.code === "ECONNREFUSED" ||
-    e.code === "ETIMEDOUT" ||
-    e.code === "ENOTFOUND" ||
-    (typeof e.message === "string" &&
-      (e.message.includes("connection") ||
-        e.message.includes("authentication failed") ||
-        e.message.includes("ECONNREFUSED")))
-  );
-}
+import { extractRequestId, isDbConnectionError } from "./routeUtils.js";
 
 function handleRouteError(
   err: unknown,

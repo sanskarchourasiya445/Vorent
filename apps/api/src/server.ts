@@ -5,11 +5,15 @@ import { randomUUID } from "node:crypto";
 import { healthRoutes, type HealthRoutesOptions } from "./routes/health.js";
 import { verificationRoutes } from "./routes/verification.js";
 import { policyRoutes } from "./routes/policies.js";
+import { policyWorkflowRoutes } from "./routes/policyWorkflow.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { checkoutRoutes } from "./routes/checkout.js";
 import { paymentOrderRoutes, type PaymentOrderRoutesOptions } from "./routes/paymentOrders.js";
 import { webhookRoutes, type WebhookRoutesOptions } from "./routes/webhooks.js";
 import { findingRoutes } from "./routes/findings.js";
+import { evaluationRoutes } from "./routes/evaluation.js";
+import { auditEventRoutes } from "./routes/auditEvents.js";
+import { evidencePacketRoutes } from "./routes/evidencePackets.js";
 import { env } from "./config/env.js";
 import { pool } from "./db/index.js";
 
@@ -85,20 +89,44 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
 
   // Register routes
   await app.register(healthRoutes, { checkDb: options.checkDb });
-  await app.register(verificationRoutes, { prefix: "/api/verification" });
-  await app.register(verificationRoutes, { prefix: "/api/v1/verification" });
-  await app.register(policyRoutes, { prefix: "/api/policies" });
-  await app.register(policyRoutes, { prefix: "/api/v1/policies" });
-  await app.register(approvalRoutes, { prefix: "/api/approvals" });
-  await app.register(approvalRoutes, { prefix: "/api/v1/approvals" });
-  await app.register(checkoutRoutes, { prefix: "/api/checkout" });
-  await app.register(checkoutRoutes, { prefix: "/api/v1/checkout" });
-  await app.register(findingRoutes, { prefix: "/api/findings" });
-  await app.register(findingRoutes, { prefix: "/api/v1/findings" });
-  await app.register(paymentOrderRoutes, { prefix: "/api/payment-orders", paypalService: options.paypalService });
-  await app.register(paymentOrderRoutes, { prefix: "/api/v1/payment-orders", paypalService: options.paypalService });
-  await app.register(webhookRoutes, { prefix: "/api/webhooks", paypalService: options.paypalService });
-  await app.register(webhookRoutes, { prefix: "/api/v1/webhooks", paypalService: options.paypalService });
+
+  // Standard route definitions: canonical prefix and backward-compatibility aliases
+  // Note: /api/v1/* and /api/audit-packets are preserved for client and test compatibility (LEAN-005)
+  const apiRouteDefinitions = [
+    { plugin: verificationRoutes, prefixes: ["/api/verification", "/api/v1/verification"] },
+    { plugin: policyRoutes, prefixes: ["/api/policies", "/api/v1/policies"] },
+    { plugin: policyWorkflowRoutes, prefixes: ["/api/policies", "/api/v1/policies"] },
+    { plugin: approvalRoutes, prefixes: ["/api/approvals", "/api/v1/approvals"] },
+    { plugin: checkoutRoutes, prefixes: ["/api/checkout", "/api/v1/checkout"] },
+    { plugin: findingRoutes, prefixes: ["/api/findings", "/api/v1/findings"] },
+    {
+      plugin: paymentOrderRoutes,
+      prefixes: ["/api/payment-orders", "/api/v1/payment-orders"],
+      opts: { paypalService: options.paypalService },
+    },
+    {
+      plugin: webhookRoutes,
+      prefixes: ["/api/webhooks", "/api/v1/webhooks"],
+      opts: { paypalService: options.paypalService },
+    },
+    { plugin: evaluationRoutes, prefixes: ["/api/evaluation", "/api/v1/evaluation"] },
+    { plugin: auditEventRoutes, prefixes: ["/api/audit-events", "/api/v1/audit-events"] },
+    {
+      plugin: evidencePacketRoutes,
+      prefixes: [
+        "/api/evidence-packets",
+        "/api/v1/evidence-packets",
+        "/api/audit-packets",
+        "/api/v1/audit-packets",
+      ],
+    },
+  ];
+
+  for (const { plugin, prefixes, opts } of apiRouteDefinitions) {
+    for (const prefix of prefixes) {
+      await app.register(plugin, { ...opts, prefix });
+    }
+  }
 
 
   // Root welcome route

@@ -11,6 +11,7 @@ import {
   PersistedTestRunSummarySchema,
 } from "@warrant/contracts";
 import { findings, testRuns } from "../schema.js";
+import { logAuditEvent } from "./auditRepository.js";
 
 export interface SaveVerificationRunParams {
   ownerId: string;
@@ -74,6 +75,21 @@ export async function saveVerificationRun(
         });
       }
     }
+
+    await logAuditEvent(tx, {
+      ownerId: params.ownerId,
+      actorType: "SYSTEM",
+      eventType: "VERIFICATION_RUN_COMPLETED",
+      entityType: "TEST_RUN",
+      entityId: runId,
+      payload: {
+        policyVersionId: params.policyVersionId,
+        policyHash,
+        status: params.report.status,
+        findingCount: params.report.findingCount,
+        stopReason: params.report.stopReason,
+      },
+    });
   });
 
   return PersistedTestRunSummarySchema.parse({
@@ -338,6 +354,18 @@ export async function resolveFinding(
     })
     .where(eq(findings.id, findingId));
 
+  await logAuditEvent(db, {
+    ownerId: existing.ownerId,
+    actorType: "USER",
+    eventType: "FINDING_RESOLVED",
+    entityType: "FINDING",
+    entityId: findingId,
+    payload: {
+      resolvedByVersionId,
+      resolutionNote,
+    },
+  });
+
   const updated = await getFinding(db, findingId);
   if (!updated) {
     throw new Error(`Failed to reload resolved finding '${findingId}'.`);
@@ -377,6 +405,18 @@ export async function acceptRiskFinding(
       resolvedAt: now,
     })
     .where(eq(findings.id, findingId));
+
+  await logAuditEvent(db, {
+    ownerId: existing.ownerId,
+    actorType: "USER",
+    eventType: "FINDING_RISK_ACCEPTED",
+    entityType: "FINDING",
+    entityId: findingId,
+    payload: {
+      rationale: rationale.trim(),
+      severity: existing.severity,
+    },
+  });
 
   const updated = await getFinding(db, findingId);
   if (!updated) {

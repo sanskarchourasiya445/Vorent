@@ -12,6 +12,10 @@
     "dev:api": "npm run dev --workspace=@warrant/api",
     "dev:web": "npm run dev --workspace=@warrant/web",
     "build": "npm run build --workspaces --if-present",
+    "start": "npm run start --workspace=@warrant/api",
+    "start:api": "npm run start --workspace=@warrant/api",
+    "preview:web": "npm run preview --workspace=@warrant/web",
+    "db:migrate": "drizzle-kit migrate",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "npm run typecheck --workspaces --if-present"

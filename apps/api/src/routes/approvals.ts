@@ -1,35 +1,15 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
-import { randomUUID } from "node:crypto";
 import {
   CreateApprovalRequestSchema,
   ApprovalListResponseSchema,
   RevokeApprovalResponseSchema,
+  UserRole,
 } from "@warrant/contracts";
 import { db } from "../db/index.js";
 import * as policyRepo from "../db/repositories/policyRepository.js";
 import * as approvalRepo from "../db/repositories/approvalRepository.js";
 import { CheckoutError } from "../db/repositories/checkoutProposalRepository.js";
-
-function extractRequestId(request: FastifyRequest): string {
-  const incoming = request.headers["x-request-id"];
-  if (typeof incoming === "string" && incoming.trim().length > 0) {
-    return incoming.trim();
-  }
-  return `req_${randomUUID()}`;
-}
-
-function isDbConnectionError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as any;
-  return (
-    e.code === "28P01" ||
-    e.code === "ECONNREFUSED" ||
-    e.code === "ETIMEDOUT" ||
-    e.code === "ENOTFOUND" ||
-    (typeof e.message === "string" &&
-      (e.message.includes("connection") || e.message.includes("authentication failed") || e.message.includes("ECONNREFUSED")))
-  );
-}
+import { extractRequestId, isDbConnectionError, authenticateRequest } from "./routeUtils.js";
 
 export const approvalRoutes: FastifyPluginAsync = async (fastify) => {
   // 1. GET / - List approvals
@@ -84,7 +64,22 @@ export const approvalRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const ownerId = await policyRepo.ensureDefaultUser(db);
+      const user = await authenticateRequest(request);
+      if (
+        user &&
+        user.role !== UserRole.APPROVER &&
+        user.role !== UserRole.ADMINISTRATOR
+      ) {
+        return reply.status(403).send({
+          error: {
+            code: "FORBIDDEN",
+            message: `User role ${user.role} is not authorized to create approvals. Requires APPROVER.`,
+          },
+          requestId,
+        });
+      }
+
+      const ownerId = user?.id || (await policyRepo.ensureDefaultUser(db));
       const created = await approvalRepo.createApproval(db, parseResult.data, ownerId);
       return reply.status(201).send({ approval: created });
     } catch (err: unknown) {

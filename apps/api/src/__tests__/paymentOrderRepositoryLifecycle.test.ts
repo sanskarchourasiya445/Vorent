@@ -41,8 +41,15 @@ describe("PaymentOrderRepository Comprehensive Lifecycle Tests (Phase 1)", () =>
       _inserts: inserts,
       select: vi.fn().mockImplementation(() => ({
         from: vi.fn().mockImplementation((table: any) => ({
-          where: vi.fn().mockImplementation(async () => {
-            if (table === paymentOrders) return setup.orders ?? [];
+          where: vi.fn().mockImplementation(async (clause: any) => {
+            if (table === paymentOrders) {
+              const hasCaptureId = clause?.queryChunks?.some((c: any) => c?.name === "capture_id");
+              const hasOrderId = clause?.queryChunks?.some((c: any) => c?.name === "provider_order_id" || c?.name === "reservation_id");
+              if (hasCaptureId && !hasOrderId) {
+                return (setup.orders ?? []).filter((o: any) => Boolean(o.captureId));
+              }
+              return setup.orders ?? [];
+            }
             if (table === spendReservations) return setup.reservations ?? [];
             if (table === checkoutProposals) return setup.proposals ?? [];
             if (table === approvals) return setup.approvals ?? [];
@@ -242,6 +249,42 @@ describe("PaymentOrderRepository Comprehensive Lifecycle Tests (Phase 1)", () =>
       await expect(
         cancelPaymentOrder(db, { orderId: validOrderId, ownerId: validOwnerId }, mockPayPal)
       ).rejects.toThrowError(/Order has already been captured/);
+    });
+
+    it("rejects cancellation if order was concurrently captured before cancellation transaction commits", async () => {
+      const order = {
+        id: validOrderId,
+        ownerId: validOwnerId,
+        reservationId: validReservationId,
+        providerOrderId: validPayPalOrderId,
+        status: "APPROVED",
+        amountMinor: 4500,
+        currency: "USD",
+      };
+      const res = { id: validReservationId, state: "RESERVED" };
+      const db = createMockDb({ orders: [order], reservations: [res] });
+
+      // Mock update to return [] simulating that where clause filtered out the concurrently captured row
+      db.update = vi.fn().mockImplementation(() => ({
+        set: vi.fn().mockImplementation(() => ({
+          where: vi.fn().mockImplementation(() => {
+            const promise: any = Promise.resolve([]);
+            promise.returning = vi.fn().mockResolvedValue([]);
+            return promise;
+          }),
+        })),
+      }));
+
+      const mockPayPal: any = {
+        getOrder: vi.fn().mockResolvedValueOnce({
+          id: validPayPalOrderId,
+          status: "APPROVED",
+        }),
+      };
+
+      await expect(
+        cancelPaymentOrder(db, { orderId: validOrderId, ownerId: validOwnerId }, mockPayPal)
+      ).rejects.toThrowError(/Order has already been captured or is pending capture/);
     });
   });
 
@@ -545,6 +588,96 @@ describe("PaymentOrderRepository Comprehensive Lifecycle Tests (Phase 1)", () =>
       await expect(
         processWebhookEvent(db, { event: mockEvent, headers: validHeaders }, mockPayPal)
       ).rejects.toThrowError(/signature verification failed/);
+    });
+
+    it("processes PAYMENT.CAPTURE.DENIED when captureId is not yet on local order", async () => {
+      const order = {
+        id: validOrderId,
+        providerOrderId: validPayPalOrderId,
+        reservationId: validReservationId,
+        status: "APPROVED",
+        captureId: null,
+      };
+      const res = { id: validReservationId, state: "RESERVED" };
+      const db = createMockDb({
+        orders: [order],
+        reservations: [res],
+        webhookEvents: [],
+      });
+
+      const deniedEvent = {
+        id: "WH-EVT-DENIED-1",
+        event_version: "1.0",
+        create_time: "2026-10-19T14:10:00Z",
+        resource_type: "capture",
+        event_type: "PAYMENT.CAPTURE.DENIED",
+        resource: {
+          id: "CAP-DENIED-99",
+          status: "DENIED",
+          supplementary_data: { related_ids: { order_id: validPayPalOrderId } },
+        },
+      };
+
+      const mockPayPal: any = {
+        verifyWebhookSignature: vi.fn().mockResolvedValueOnce(true),
+      };
+
+      const result = await processWebhookEvent(
+        db,
+        { event: deniedEvent, headers: validHeaders },
+        mockPayPal
+      );
+
+      expect(result.received).toBe(true);
+      expect(result.actionTaken).toBe("CAPTURE_DENIED_HOLD");
+      const orderUpdate = db._updates.find((u: any) => u.table === paymentOrders);
+      expect(orderUpdate.values.status).toBe("FAILED");
+      const resUpdate = db._updates.find((u: any) => u.table === spendReservations);
+      expect(resUpdate.values.state).toBe("RECONCILIATION_HOLD");
+    });
+
+    it("processes PAYMENT.CAPTURE.PENDING when captureId is not yet on local order", async () => {
+      const order = {
+        id: validOrderId,
+        providerOrderId: validPayPalOrderId,
+        reservationId: validReservationId,
+        status: "APPROVED",
+        captureId: null,
+      };
+      const res = { id: validReservationId, state: "RESERVED" };
+      const db = createMockDb({
+        orders: [order],
+        reservations: [res],
+        webhookEvents: [],
+      });
+
+      const pendingEvent = {
+        id: "WH-EVT-PENDING-1",
+        event_version: "1.0",
+        create_time: "2026-10-19T14:15:00Z",
+        resource_type: "capture",
+        event_type: "PAYMENT.CAPTURE.PENDING",
+        resource: {
+          id: "CAP-PEND-99",
+          status: "PENDING",
+          supplementary_data: { related_ids: { order_id: validPayPalOrderId } },
+        },
+      };
+
+      const mockPayPal: any = {
+        verifyWebhookSignature: vi.fn().mockResolvedValueOnce(true),
+      };
+
+      const result = await processWebhookEvent(
+        db,
+        { event: pendingEvent, headers: validHeaders },
+        mockPayPal
+      );
+
+      expect(result.received).toBe(true);
+      expect(result.actionTaken).toBe("CAPTURE_MARKED_PENDING");
+      const orderUpdate = db._updates.find((u: any) => u.table === paymentOrders);
+      expect(orderUpdate.values.status).toBe("CAPTURE_PENDING");
     });
   });
 });

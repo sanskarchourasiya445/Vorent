@@ -12,6 +12,7 @@ import {
   calculateCommittedAndActiveSpend,
   CheckoutError,
 } from "./checkoutProposalRepository.js";
+import { logAuditEvent } from "./auditRepository.js";
 
 export interface ListApprovalsFilter {
   policyVersionId?: string;
@@ -234,6 +235,21 @@ export async function createApproval(
       })
       .returning();
 
+    await logAuditEvent(tx, {
+      ownerId,
+      actorType: "USER",
+      eventType: "APPROVAL_CREATED",
+      entityType: "APPROVAL",
+      entityId: approvalId,
+      payload: {
+        policyVersionId: input.policyVersionId,
+        policyHash: input.policyHash,
+        spendLimitMinor: input.spendLimitMinor,
+        currency: input.currency,
+        expiresAt: expiresAt.toISOString(),
+      },
+    });
+
     return {
       id: created.id,
       ownerId: created.ownerId,
@@ -286,6 +302,18 @@ export async function revokeApproval(
   } catch {
     consumedSpendMinor = 0;
   }
+
+  await logAuditEvent(db, {
+    ownerId: existing.ownerId,
+    actorType: "USER",
+    eventType: "APPROVAL_REVOKED",
+    entityType: "APPROVAL",
+    entityId: approvalId,
+    payload: {
+      revokedAt: now.toISOString(),
+      consumedSpendMinor,
+    },
+  });
 
   return {
     id: updated.id,

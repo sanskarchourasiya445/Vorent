@@ -9,6 +9,7 @@ import { TransactionsPanel } from "./components/transactions/TransactionsPanel";
 import { MandateEditorPanel } from "./components/policy/MandateEditorPanel";
 import { FindingsPanel } from "./components/verification/FindingsPanel";
 import { GovernanceDashboardPanel } from "./components/dashboard/GovernanceDashboardPanel";
+import { EvaluationReportPanel } from "./components/evaluation/EvaluationReportPanel";
 import type { PolicyOption } from "./types/verification";
 
 export function App() {
@@ -88,6 +89,7 @@ export function App() {
               { id: "approval", label: "Approval Checkpoints", badge: "" },
               { id: "checkout", label: "Checkout Gate", badge: "" },
               { id: "transactions", label: "Transactions", badge: "Phase 1" },
+              { id: "evaluation", label: "Evaluation Report", badge: "Audit" },
             ].map((item) => {
               const isActive = activeWorkstation === item.id;
               return (
@@ -113,7 +115,7 @@ export function App() {
           </div>
 
           <div className="border-t border-border pt-3 text-xs text-muted">
-            <div className="font-medium text-ink">Phase 2: Verification</div>
+            <div className="font-medium text-ink">Phase 3: Evaluation</div>
             <div>Warrant Studio Engine</div>
           </div>
         </aside>
@@ -160,6 +162,10 @@ export function App() {
             <CheckoutGatePanel />
           ) : activeWorkstation === "transactions" ? (
             <TransactionsPanel />
+          ) : activeWorkstation === "evaluation" ? (
+            <EvaluationReportPanel
+              onNavigateWorkstation={(id) => setActiveWorkstation(id)}
+            />
           ) : activeWorkstation === "overview" ? (
             <GovernanceDashboardPanel
               onNavigateWorkstation={(id) => setActiveWorkstation(id)}

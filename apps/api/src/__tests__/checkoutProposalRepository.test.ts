@@ -521,4 +521,209 @@ describe("Checkout Proposal Repository", () => {
       })
     ).rejects.toThrowError(/REVOKED_APPROVAL/);
   });
+
+  it("rejects proposal when stored policy document has been modified/tampered (hash mismatch)", async () => {
+    // Simulate stored policy document having been modified without regenerating policyHash
+    const tamperedPolicyDoc = {
+      ...policyDoc,
+      maxCartTotalMinor: 999999, // tampered limit
+    };
+    const tamperedVersionId = randomUUID();
+    db._stores.policyVersionsStore.push({
+      id: tamperedVersionId,
+      ownerId,
+      versionNumber: 2,
+      policyDocument: tamperedPolicyDoc,
+      policyHash, // Claiming it matches the approved policyHash
+    });
+
+    const nonce = await issueCheckoutNonce(db, {
+      ownerId,
+      approvalId,
+      policyVersionId: tamperedVersionId,
+      policyHash,
+    });
+
+    await expect(
+      submitCheckoutProposal(db, {
+        ownerId,
+        approvalId,
+        policyVersionId: tamperedVersionId,
+        policyHash,
+        nonceId: nonce.id,
+        cart: sampleCart,
+        evidenceSnapshot: sampleEvidence,
+      })
+    ).rejects.toThrowError(/POLICY_HASH_MISMATCH/);
+  });
+
+  it("evaluates stale evidence to REVIEW and creates zero spend reservation", async () => {
+    const nonce = await issueCheckoutNonce(db, {
+      ownerId,
+      approvalId,
+      policyVersionId,
+      policyHash,
+    });
+
+    const staleEvidence = {
+      ...sampleEvidence,
+      snapshotTimestamp: new Date(Date.now() - 7200000).toISOString(), // 2 hours old (> 1 hr staleness threshold)
+    };
+
+    const result = await submitCheckoutProposal(db, {
+      ownerId,
+      approvalId,
+      policyVersionId,
+      policyHash,
+      nonceId: nonce.id,
+      cart: sampleCart,
+      evidenceSnapshot: staleEvidence,
+    });
+
+    expect(result.decision).toBe("REVIEW");
+    expect(result.reasonCodes).toContain("STALE_EVIDENCE");
+    expect(result.reservation).toBeNull(); // Zero reservation created on REVIEW
+  });
+
+  it("ensures denied checkout proposal does not consume budget on subsequent checkouts", async () => {
+    // 1. First proposal violates policy (e.g. prohibited category) -> DENY
+    const nonce1 = await issueCheckoutNonce(db, {
+      ownerId,
+      approvalId,
+      policyVersionId,
+      policyHash,
+    });
+
+    const prohibitedCart = {
+      currency: "USD",
+      items: [
+        {
+          sku: "SKU-GIFT-CARD",
+          title: "Amazon Gift Card",
+          category: "Gift Cards",
+          unitPriceMinor: 5000,
+          quantity: 1,
+        },
+      ],
+    };
+
+    const result1 = await submitCheckoutProposal(db, {
+      ownerId,
+      approvalId,
+      policyVersionId,
+      policyHash,
+      nonceId: nonce1.id,
+      cart: prohibitedCart,
+      evidenceSnapshot: sampleEvidence,
+    });
+
+    expect(result1.decision).toBe("DENY");
+    expect(result1.reservation).toBeNull();
+
+    // Verify committed and active spend remains 0
+    const spendAfterDeny = await calculateCommittedAndActiveSpend(db, approvalId);
+    expect(spendAfterDeny).toBe(0);
+
+    // 2. Second proposal with compliant cart succeeds within limit
+    const nonce2 = await issueCheckoutNonce(db, {
+      ownerId,
+      approvalId,
+      policyVersionId,
+      policyHash,
+    });
+
+    const result2 = await submitCheckoutProposal(db, {
+      ownerId,
+      approvalId,
+      policyVersionId,
+      policyHash,
+      nonceId: nonce2.id,
+      cart: sampleCart,
+      evidenceSnapshot: sampleEvidence,
+    });
+
+    expect(result2.decision).toBe("ALLOW");
+    expect(result2.reservation).toBeDefined();
+    expect(result2.reservation?.amountMinor).toBe(4000);
+
+    const spendAfterAllow = await calculateCommittedAndActiveSpend(db, approvalId);
+    expect(spendAfterAllow).toBe(4000);
+  });
+
+  it("enforces price trust boundary: client-supplied deflated price on catalog SKU is overridden by authoritative catalog price and DENIED if exceeding limit", async () => {
+    const nonce = await issueCheckoutNonce(db, {
+      ownerId,
+      approvalId,
+      policyVersionId,
+      policyHash,
+    });
+
+    // Client/AI Agent attempts to purchase $1,299 studio display by forging unitPriceMinor to $1.00 (100 minor)
+    const spoofedCart = {
+      currency: "USD",
+      items: [
+        {
+          sku: "hw-studio-display-004",
+          title: "Forged Cheap Display",
+          category: "Hardware",
+          unitPriceMinor: 100, // Spoofed $1.00
+          quantity: 1,
+        },
+      ],
+    };
+
+    const result = await submitCheckoutProposal(db, {
+      ownerId,
+      approvalId,
+      policyVersionId,
+      policyHash,
+      nonceId: nonce.id,
+      cart: spoofedCart,
+      evidenceSnapshot: sampleEvidence,
+    });
+
+    // Server normalized cart to authoritative $1,299.00 (129900 minor), exceeding per-item limit ($700) and cart limit ($750)
+    expect(result.decision).toBe("DENY");
+    expect(result.proposal.normalizedCart.items[0].unitPriceMinor).toBe(129900);
+    expect(result.reservation).toBeNull();
+  });
+
+  it("enforces category trust boundary: client-supplied spoofed category on prohibited SKU is overridden by authoritative catalog and DENIED with PROHIBITED_CATEGORY", async () => {
+    const nonce = await issueCheckoutNonce(db, {
+      ownerId,
+      approvalId,
+      policyVersionId,
+      policyHash,
+    });
+
+    // Client/AI Agent attempts to buy a gift card by claiming it's "Reference Books"
+    const spoofedCart = {
+      currency: "USD",
+      items: [
+        {
+          sku: "proh-amazon-giftcard-001",
+          title: "Claimed Reference Book",
+          category: "Reference Books", // Spoofed category
+          unitPriceMinor: 10000,
+          quantity: 1,
+        },
+      ],
+    };
+
+    const result = await submitCheckoutProposal(db, {
+      ownerId,
+      approvalId,
+      policyVersionId,
+      policyHash,
+      nonceId: nonce.id,
+      cart: spoofedCart,
+      evidenceSnapshot: sampleEvidence,
+    });
+
+    // Server normalized category to authoritative "Gift Cards", which is prohibited
+    expect(result.decision).toBe("DENY");
+    expect(result.proposal.normalizedCart.items[0].category).toBe("Gift Cards");
+    expect(result.reasonCodes).toContain(ReasonCode.PROHIBITED_CATEGORY);
+    expect(result.reservation).toBeNull();
+  });
 });
