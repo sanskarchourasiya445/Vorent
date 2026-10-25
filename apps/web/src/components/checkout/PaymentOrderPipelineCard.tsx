@@ -215,7 +215,7 @@ export function PaymentOrderPipelineCard({
 
   return (
     <article
-      className={`rounded-panel border border-border bg-surface p-5 shadow-sm space-y-5 ${className}`}
+      className={`rounded border border-border bg-surface p-5 shadow-2xs space-y-5 ${className}`}
       role="region"
       aria-label="Payment Order Pipeline"
     >
@@ -223,17 +223,17 @@ export function PaymentOrderPipelineCard({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
         <div className="flex items-center space-x-2">
           <CreditCard className="w-5 h-5 text-accent shrink-0" aria-hidden="true" />
-          <h3 className="text-sm font-bold tracking-tight text-ink">
+          <h3 className="text-sm font-bold tracking-tight text-ink font-sans">
             Checkout Execution Pipeline
           </h3>
         </div>
         <div className="flex items-center space-x-2">
           {isDemoSimulation && (
-            <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">
+            <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-amber-50 text-amber-950 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-800">
               Offline Simulation
             </span>
           )}
-          <span className="text-[11px] font-medium text-muted">
+          <span className="text-[11px] font-mono text-muted">
             Phase 1 Lifecycle Active
           </span>
           {paypalCreated && onRefreshOrderDetails && (
@@ -241,39 +241,39 @@ export function PaymentOrderPipelineCard({
               type="button"
               onClick={() => void onRefreshOrderDetails()}
               disabled={paypalOrderState?.isRefreshing}
-              className="p-1 rounded text-muted hover:text-ink hover:bg-canvas transition-colors"
+              className="p-1 rounded text-muted hover:text-ink hover:bg-surface-raised transition-colors"
               title="Refresh order details from backend"
               aria-label="Refresh order details"
             >
               <RefreshCw
-                className={`w-3.5 h-3.5 ${paypalOrderState?.isRefreshing ? "animate-spin" : ""}`}
+                className={`w-3.5 h-3.5 ${paypalOrderState?.isRefreshing ? "animate-spin text-accent" : ""}`}
               />
             </button>
           )}
         </div>
       </div>
 
-      {/* 4-Stage Stepper Track */}
-      <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 list-none p-0 m-0" role="list">
+      {/* 4-Stage Stepper Track - Balanced 2x2 grid inside half-width column */}
+      <ol className="grid grid-cols-1 sm:grid-cols-2 gap-3 list-none p-0 m-0" role="list">
         {stages.map((stage, idx) => {
-          let badgeColor = "bg-muted/10 border-border text-muted";
+          let badgeColor = "bg-surface-inset border-border text-muted";
           let icon = <Clock className="w-4 h-4 text-muted shrink-0" aria-hidden="true" />;
 
           if (stage.status === "SUCCESS") {
-            badgeColor = "bg-emerald-50 border-emerald-300 text-emerald-950";
-            icon = <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" aria-hidden="true" />;
+            badgeColor = "bg-allow/10 border-allow/30 text-ink";
+            icon = <CheckCircle2 className="w-4 h-4 text-allow shrink-0" aria-hidden="true" />;
           } else if (stage.status === "FAILED") {
-            badgeColor = "bg-red-50 border-red-300 text-red-950";
-            icon = <XCircle className="w-4 h-4 text-red-700 shrink-0" aria-hidden="true" />;
+            badgeColor = "bg-deny/10 border-deny/30 text-ink";
+            icon = <XCircle className="w-4 h-4 text-deny shrink-0" aria-hidden="true" />;
           } else if (stage.status === "BLOCKED") {
-            badgeColor = "bg-canvas border-border/80 text-muted";
+            badgeColor = "bg-surface-inset border-border text-muted";
             icon = <Lock className="w-4 h-4 text-muted/60 shrink-0" aria-hidden="true" />;
           } else if (stage.status === "IN_PROGRESS") {
-            badgeColor = "bg-blue-50 border-blue-300 text-blue-950";
-            icon = <Clock className="w-4 h-4 text-blue-700 animate-spin shrink-0" aria-hidden="true" />;
+            badgeColor = "bg-accent/10 border-accent/30 text-accent";
+            icon = <Clock className="w-4 h-4 text-accent animate-spin shrink-0" aria-hidden="true" />;
           } else if (stage.status === "FUTURE_PHASE") {
-            badgeColor = "bg-purple-50/60 border-purple-200 text-purple-950";
-            icon = <UserCheck className="w-4 h-4 text-purple-700 shrink-0" aria-hidden="true" />;
+            badgeColor = "bg-surface-inset border-border text-muted";
+            icon = <Clock className="w-4 h-4 text-muted/60 shrink-0" aria-hidden="true" />;
           }
 
           return (
@@ -284,17 +284,17 @@ export function PaymentOrderPipelineCard({
             >
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-muted">
+                  <span className="text-[10px] uppercase font-bold tracking-wider font-mono text-muted">
                     Step {idx + 1}
                   </span>
                   {icon}
                 </div>
-                <div className="text-xs font-semibold text-ink leading-snug">
+                <div className="text-xs font-semibold text-ink leading-snug font-sans">
                   {stage.title}
                 </div>
               </div>
 
-              <div className="space-y-1 pt-1 border-t border-border/40">
+              <div className="space-y-1 pt-1 border-t border-border/60">
                 <div className="text-[11px] font-mono font-medium truncate">
                   {stage.statusText}
                 </div>
@@ -308,12 +308,12 @@ export function PaymentOrderPipelineCard({
       </ol>
 
       {/* Main Interaction Area */}
-      <div className="p-4 rounded-panel bg-canvas border border-border space-y-4">
+      <div className="p-4 rounded bg-surface-inset border border-border space-y-4">
         {/* Header line */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center space-x-2">
             <CreditCard className="w-4 h-4 text-accent" aria-hidden="true" />
-            <span className="text-xs font-bold uppercase tracking-wider text-ink">
+            <span className="text-xs font-bold uppercase tracking-wider text-ink font-mono">
               PayPal Lifecycle Execution
             </span>
           </div>
@@ -326,17 +326,17 @@ export function PaymentOrderPipelineCard({
         {isUnknown && (
           <div
             role="alert"
-            className="p-3.5 rounded bg-amber-50 border border-amber-300 text-amber-950 space-y-2 text-xs"
+            className="p-3.5 rounded bg-review-bg/60 border border-review-border text-review space-y-2 text-xs"
           >
-            <div className="flex items-center space-x-2 font-bold text-amber-900">
-              <AlertCircle className="w-4 h-4 text-amber-800 shrink-0" />
-              <span>Ambiguous Payment Outcome — Reconciliation Hold Active</span>
+            <div className="flex items-center space-x-2 font-bold text-review">
+              <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="font-mono uppercase text-[11px]">Ambiguous Payment Outcome — Reconciliation Hold Active</span>
             </div>
-            <p className="text-[11px] text-amber-900 leading-relaxed">
+            <p className="text-[11px] text-review leading-relaxed font-sans">
               {paypalOrderState?.error ||
                 "A network timeout or uncertain outcome occurred. Spend reservation is on RECONCILIATION_HOLD to prevent double charging."}
             </p>
-            <div className="p-2.5 rounded bg-amber-100/80 border border-amber-300/80 text-[11px] text-amber-950 space-y-2">
+            <div className="p-2.5 rounded bg-review-bg border border-review-border text-[11px] text-review space-y-2">
               <div>
                 <strong>Recovery Guidance:</strong> Automatic retry is strictly blocked. Use the authoritative reconciliation endpoint below to safely query the PayPal ledger.
               </div>
@@ -345,7 +345,7 @@ export function PaymentOrderPipelineCard({
                   type="button"
                   onClick={() => void onReconcilePaymentOrder()}
                   disabled={paypalOrderState?.isReconciling}
-                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded font-semibold text-xs bg-amber-800 text-white hover:bg-amber-900 transition-colors disabled:opacity-50"
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded font-mono font-semibold text-xs bg-amber-600 hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600 text-white transition-colors disabled:opacity-50"
                 >
                   <RefreshCw
                     className={`w-3.5 h-3.5 ${paypalOrderState?.isReconciling ? "animate-spin" : ""}`}
@@ -365,13 +365,13 @@ export function PaymentOrderPipelineCard({
         {!isUnknown && paypalOrderState?.error && (
           <div
             role="alert"
-            className="p-3.5 rounded bg-red-50 border border-red-200 text-red-950 space-y-1.5 text-xs"
+            className="p-3.5 rounded bg-deny/10 border border-deny/30 text-deny space-y-1.5 text-xs font-mono"
           >
-            <div className="flex items-center space-x-2 font-semibold text-red-900">
-              <XCircle className="w-4 h-4 text-red-700 shrink-0" />
-              <span>Payment Lifecycle Action Error</span>
+            <div className="flex items-center space-x-2 font-semibold text-deny">
+              <XCircle className="w-4 h-4 text-deny shrink-0" />
+              <span className="font-mono text-xs">Payment Lifecycle Action Error</span>
             </div>
-            <p className="text-[11px] text-red-900 leading-relaxed">
+            <p className="text-[11px] text-deny leading-relaxed font-sans">
               {paypalOrderState.error}
             </p>
           </div>
@@ -380,23 +380,23 @@ export function PaymentOrderPipelineCard({
         {/* State A: Before Order Creation */}
         {!paypalCreated && !isDeny && hasReservation && (
           <div className="space-y-3">
-            <div className="p-3 rounded bg-blue-50/80 border border-blue-200 text-blue-950 text-xs space-y-1">
-              <div className="flex items-center space-x-1.5 font-semibold text-blue-900">
-                <ShieldCheck className="w-4 h-4 text-blue-700" />
-                <span>Prerequisites Satisfied for Sandbox Order Creation</span>
+            <div className="p-3 rounded bg-accent/5 border border-accent/20 text-ink text-xs space-y-1">
+              <div className="flex items-center space-x-1.5 font-semibold text-accent">
+                <ShieldCheck className="w-4 h-4 text-accent" />
+                <span className="font-mono text-xs">Prerequisites Satisfied for Sandbox Order Creation</span>
               </div>
-              <p className="text-[11px] text-blue-900 leading-relaxed">
+              <p className="text-[11px] text-muted leading-relaxed font-sans">
                 Warrant authorization is <strong>ALLOW</strong> and spend hold <code>{reservationId}</code> is active in <code>{reservationState || "ORDER_CREATION_PENDING"}</code> state on the ledger.
               </p>
             </div>
 
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
-              <div className="text-[11px] text-muted space-y-0.5">
+              <div className="text-[11px] text-muted space-y-0.5 font-mono">
                 <div>
                   Payload Target: <code>{`{ proposalId, reservationId }`}</code>
                 </div>
-                <div className="text-[10px] text-muted">
-                  Dispatches exclusively server-trusted proposal & reservation UUIDs.
+                <div className="text-[10px] text-muted font-sans">
+                  Dispatches exclusively server-trusted proposal &amp; reservation UUIDs.
                 </div>
               </div>
 
@@ -404,7 +404,7 @@ export function PaymentOrderPipelineCard({
                 type="button"
                 onClick={onCreatePayPalOrder}
                 disabled={isCreateButtonDisabled}
-                className="w-full sm:w-auto inline-flex items-center justify-center space-x-2 px-4 py-2 rounded text-xs font-semibold bg-accent text-white hover:bg-accent/90 transition-colors shadow-sm disabled:opacity-50 shrink-0"
+                className="w-full sm:w-auto inline-flex items-center justify-center space-x-2 px-4 py-2 rounded font-mono text-xs font-semibold bg-accent text-white hover:bg-accent/90 active:bg-accent/80 transition-colors shadow-2xs disabled:opacity-50 shrink-0 focus:outline-none focus:ring-2 focus:ring-accent/30"
               >
                 {paypalOrderState?.isCreating ? (
                   <>
@@ -424,11 +424,11 @@ export function PaymentOrderPipelineCard({
 
         {/* State B: Denied by Gate */}
         {!paypalCreated && isDeny && (
-          <div className="p-3 rounded bg-red-50 border border-red-200 text-red-950 text-xs flex items-start space-x-2">
-            <AlertCircle className="w-4 h-4 text-red-700 shrink-0 mt-0.5" />
+          <div className="p-3 rounded bg-deny/10 border border-deny/30 text-deny text-xs flex items-start space-x-2">
+            <AlertCircle className="w-4 h-4 text-deny shrink-0 mt-0.5" />
             <div className="space-y-0.5">
-              <span className="font-semibold">PayPal Order Dispatch Blocked</span>
-              <p className="text-[11px] text-red-900 leading-relaxed">
+              <span className="font-semibold font-mono text-xs">PayPal Order Dispatch Blocked</span>
+              <p className="text-[11px] text-deny leading-relaxed font-sans">
                 The Warrant Gate denied this proposal ({primaryReasonCode}). No spend reservation or PayPal order can be created for non-compliant carts.
               </p>
             </div>
@@ -439,24 +439,24 @@ export function PaymentOrderPipelineCard({
         {paypalCreated && (
           <div className="space-y-4">
             {/* Order Attributes Grid */}
-            <div className="p-3.5 rounded bg-surface border border-border text-xs space-y-3">
+            <div className="p-3.5 rounded bg-surface border border-border text-xs space-y-3 shadow-2xs">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center space-x-2">
-                  <span className="font-bold text-ink text-xs">Payment Order Details</span>
+                  <span className="font-bold text-ink text-xs font-mono uppercase tracking-wider">Payment Order Details</span>
                   {/* Status Badge */}
                   <span
                     className={`font-mono px-2 py-0.5 rounded text-[10px] font-bold border ${
                       isCaptured
-                        ? "bg-emerald-100 text-emerald-900 border-emerald-300"
+                        ? "bg-allow-bg text-allow border-allow-border"
                         : isApproved
-                        ? "bg-blue-100 text-blue-900 border-blue-300"
+                        ? "bg-accent/10 text-accent border-accent/30"
                         : isCancelled
-                        ? "bg-gray-100 text-gray-800 border-gray-300"
+                        ? "bg-surface-inset text-muted border-border"
                         : isUnknown
-                        ? "bg-amber-100 text-amber-900 border-amber-300"
+                        ? "bg-review-bg text-review border-review-border"
                         : isFailed
-                        ? "bg-red-100 text-red-900 border-red-300"
-                        : "bg-blue-50 text-blue-900 border-blue-200"
+                        ? "bg-deny/10 text-deny border-deny/30"
+                        : "bg-accent/10 text-accent border-accent/30"
                     }`}
                   >
                     STATUS: {status || "CREATED"}
@@ -464,16 +464,16 @@ export function PaymentOrderPipelineCard({
                 </div>
 
                 <div className="flex items-center space-x-2">
-                  <span className="text-[11px] text-muted">Reservation:</span>
+                  <span className="text-[11px] font-mono text-muted">Reservation:</span>
                   <span
                     className={`font-mono text-[10px] font-semibold px-2 py-0.5 rounded border ${
                       currentReservationState === "COMMITTED"
-                        ? "bg-emerald-50 text-emerald-900 border-emerald-300"
+                        ? "bg-allow-bg text-allow border-allow-border"
                         : currentReservationState === "RELEASED"
-                        ? "bg-gray-100 text-gray-700 border-gray-300"
+                        ? "bg-surface-inset text-muted border-border"
                         : currentReservationState === "RECONCILIATION_HOLD"
-                        ? "bg-amber-100 text-amber-900 border-amber-300"
-                        : "bg-blue-50 text-blue-900 border-blue-200"
+                        ? "bg-review-bg text-review border-review-border"
+                        : "bg-accent/10 text-accent border-accent/30"
                     }`}
                   >
                     {currentReservationState || "RESERVED"}
@@ -481,42 +481,42 @@ export function PaymentOrderPipelineCard({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-2 border-t border-border/60 text-[11px]">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-2 border-t border-border text-[11px]">
                 <div>
-                  <span className="text-muted block text-[10px] uppercase font-bold">PayPal Order ID</span>
+                  <span className="text-muted block text-[10px] uppercase font-bold font-mono">PayPal Order ID</span>
                   <strong className="font-mono text-ink select-all">
                     {paypalOrderState?.paypalOrderId || "N/A"}
                   </strong>
                 </div>
                 <div>
-                  <span className="text-muted block text-[10px] uppercase font-bold">Internal Order ID</span>
+                  <span className="text-muted block text-[10px] uppercase font-bold font-mono">Internal Order ID</span>
                   <span className="font-mono text-muted text-[10px] truncate block select-all">
                     {paypalOrderState?.orderId || "N/A"}
                   </span>
                 </div>
                 <div>
-                  <span className="text-muted block text-[10px] uppercase font-bold">Authorized Amount</span>
-                  <strong className="font-mono text-ink">
+                  <span className="text-muted block text-[10px] uppercase font-bold font-mono">Authorized Amount</span>
+                  <strong className="font-mono text-ink tabular-nums">
                     ${((amountMinor || paypalOrderState?.amountMinor || 0) / 100).toFixed(2)}{" "}
                     {currency || paypalOrderState?.currency || "USD"}
                   </strong>
                 </div>
                 {paypalOrderState?.payerId && (
                   <div>
-                    <span className="text-muted block text-[10px] uppercase font-bold">Verified Payer ID</span>
+                    <span className="text-muted block text-[10px] uppercase font-bold font-mono">Verified Payer ID</span>
                     <strong className="font-mono text-ink">{paypalOrderState.payerId}</strong>
                   </div>
                 )}
                 {paypalOrderState?.captureId && (
                   <div>
-                    <span className="text-muted block text-[10px] uppercase font-bold">PayPal Capture ID</span>
-                    <strong className="font-mono text-emerald-800">{paypalOrderState.captureId}</strong>
+                    <span className="text-muted block text-[10px] uppercase font-bold font-mono">PayPal Capture ID</span>
+                    <strong className="font-mono text-allow">{paypalOrderState.captureId}</strong>
                   </div>
                 )}
                 {paypalOrderState?.createdAt && (
                   <div>
-                    <span className="text-muted block text-[10px] uppercase font-bold">Created Timestamp</span>
-                    <span className="text-muted text-[10px]">
+                    <span className="text-muted block text-[10px] uppercase font-bold font-mono">Created Timestamp</span>
+                    <span className="text-muted text-[10px] font-mono">
                       {new Date(paypalOrderState.createdAt).toLocaleString()}
                     </span>
                   </div>
@@ -526,18 +526,18 @@ export function PaymentOrderPipelineCard({
 
             {/* Stage 4A: Buyer Approval Action (When CREATED or PAYER_ACTION_REQUIRED) */}
             {!isApproved && !isCaptured && !isCancelled && !isUnknown && (
-              <div className="p-3.5 rounded bg-blue-50/70 border border-blue-200 text-xs space-y-3">
+              <div className="p-3.5 rounded-lg bg-info/10 border border-info/30 text-xs space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2 font-semibold text-blue-950">
-                    <UserCheck className="w-4 h-4 text-blue-700" />
-                    <span>Buyer Approval Required</span>
+                  <div className="flex items-center space-x-2 font-semibold text-accent">
+                    <UserCheck className="w-4 h-4 text-accent" />
+                    <span className="font-mono text-xs font-bold">Buyer Approval Required</span>
                   </div>
-                  <span className="text-[10px] font-semibold uppercase text-blue-800 bg-blue-100 px-2 py-0.5 rounded border border-blue-300">
+                  <span className="text-[10px] font-semibold uppercase text-accent bg-accent/10 px-2 py-0.5 rounded border border-accent/20">
                     Step 1 of 2
                   </span>
                 </div>
 
-                <p className="text-[11px] text-blue-900 leading-relaxed">
+                <p className="text-[11px] text-muted leading-relaxed font-sans">
                   The buyer must authorize the payment in the PayPal Sandbox portal. Browser redirects are treated as untrusted; clicking "Verify Buyer Approval" validates the actual state against the PayPal Orders API.
                 </p>
 
@@ -547,7 +547,7 @@ export function PaymentOrderPipelineCard({
                       href={paypalOrderState.approvalUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center justify-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold bg-blue-700 text-white hover:bg-blue-800 transition-colors shadow-xs"
+                      className="inline-flex items-center justify-center space-x-1.5 px-3 py-1.5 rounded font-mono text-xs font-semibold bg-accent text-white hover:bg-accent/90 transition-colors shadow-2xs"
                     >
                       <span>Open Buyer Portal</span>
                       <ExternalLink className="w-3.5 h-3.5" />
@@ -559,11 +559,11 @@ export function PaymentOrderPipelineCard({
                       type="button"
                       onClick={() => void onConfirmBuyerApproval(customPayerId || undefined)}
                       disabled={paypalOrderState?.isConfirmingApproval}
-                      className="inline-flex items-center justify-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold bg-accent text-white hover:bg-accent/90 transition-colors shadow-xs disabled:opacity-50"
+                      className="inline-flex items-center justify-center space-x-1.5 px-3 py-1.5 rounded font-mono text-xs font-semibold bg-surface text-ink border border-border hover:bg-surface-raised transition-colors shadow-2xs disabled:opacity-50"
                     >
                       <RefreshCw
                         className={`w-3.5 h-3.5 ${
-                          paypalOrderState?.isConfirmingApproval ? "animate-spin" : ""
+                          paypalOrderState?.isConfirmingApproval ? "animate-spin text-accent" : ""
                         }`}
                       />
                       <span>
@@ -576,14 +576,14 @@ export function PaymentOrderPipelineCard({
                 </div>
 
                 {/* Optional PayerID field for manual return confirmation */}
-                <div className="pt-2 border-t border-blue-200/60 flex items-center space-x-2 text-[11px]">
-                  <span className="text-blue-900 text-[10px]">Return PayerID (Optional):</span>
+                <div className="pt-2 border-t border-accent/20 flex items-center space-x-2 text-[11px]">
+                  <span className="text-accent text-[10px] font-mono">Return PayerID (Optional):</span>
                   <input
                     type="text"
                     value={customPayerId}
                     onChange={(e) => setCustomPayerId(e.target.value)}
                     placeholder="e.g. 7XYZ..."
-                    className="px-2 py-1 text-[11px] font-mono rounded border border-blue-300 bg-white text-ink w-36"
+                    className="px-2 py-1 text-[11px] font-mono rounded border border-border bg-surface text-ink w-36 focus:outline-none focus:ring-1 focus:ring-accent/30"
                   />
                 </div>
               </div>
@@ -591,30 +591,30 @@ export function PaymentOrderPipelineCard({
 
             {/* Stage 4B: Capture Action Area (When APPROVED) */}
             {isApproved && !isCaptured && (
-              <div className="p-3.5 rounded bg-emerald-50 border border-emerald-300 text-xs space-y-3">
+              <div className="p-3.5 rounded bg-allow-bg/40 border border-allow-border text-xs space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2 font-bold text-emerald-950">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-700" />
-                    <span>Buyer Approved — Eligible for Server-Side Capture</span>
+                  <div className="flex items-center space-x-2 font-bold text-allow">
+                    <CheckCircle2 className="w-4 h-4 text-allow" />
+                    <span className="font-mono text-xs">Buyer Approved — Eligible for Server-Side Capture</span>
                   </div>
-                  <span className="text-[10px] font-bold uppercase text-emerald-900 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                  <span className="text-[10px] font-bold uppercase text-allow bg-allow-bg px-2 py-0.5 rounded border border-allow-border">
                     Ready for Capture
                   </span>
                 </div>
 
-                <p className="text-[11px] text-emerald-950 leading-relaxed">
+                <p className="text-[11px] text-allow leading-relaxed font-sans">
                   Buyer authorization is authoritatively confirmed by PayPal. Clicking "Capture Payment" will commit the spend on the ledger and capture the funds in PayPal Sandbox.
                 </p>
 
                 {/* Confirmation Box to prevent accidental triggers */}
                 {showCaptureConfirm ? (
-                  <div className="p-3 rounded bg-white border border-emerald-300 space-y-2">
-                    <div className="text-[11px] font-bold text-emerald-950">
+                  <div className="p-3 rounded bg-surface border border-allow-border space-y-2 shadow-2xs">
+                    <div className="text-[11px] font-bold text-allow font-mono">
                       Confirm Server Capture of $
                       {((amountMinor || paypalOrderState?.amountMinor || 0) / 100).toFixed(2)}{" "}
                       {currency || paypalOrderState?.currency || "USD"}?
                     </div>
-                    <p className="text-[10px] text-muted leading-tight">
+                    <p className="text-[10px] text-muted leading-tight font-sans">
                       This action will initiate the PayPal capture request and commit the spend reservation. Duplicate clicks are blocked.
                     </p>
                     <div className="flex items-center space-x-2 pt-1">
@@ -625,7 +625,7 @@ export function PaymentOrderPipelineCard({
                           if (onCapturePaymentOrder) void onCapturePaymentOrder();
                         }}
                         disabled={paypalOrderState?.isCapturing}
-                        className="px-3 py-1.5 rounded text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-800 transition-colors disabled:opacity-50 flex items-center space-x-1.5"
+                        className="px-3 py-1.5 rounded font-mono text-xs font-semibold bg-allow text-white hover:bg-allow/90 transition-colors disabled:opacity-50 flex items-center space-x-1.5 shadow-2xs"
                       >
                         {paypalOrderState?.isCapturing ? (
                           <>
@@ -634,7 +634,7 @@ export function PaymentOrderPipelineCard({
                           </>
                         ) : (
                           <>
-                            <span>Confirm & Capture</span>
+                            <span>Confirm &amp; Capture</span>
                             <ArrowRight className="w-3.5 h-3.5" />
                           </>
                         )}
@@ -643,7 +643,7 @@ export function PaymentOrderPipelineCard({
                         type="button"
                         onClick={() => setShowCaptureConfirm(false)}
                         disabled={paypalOrderState?.isCapturing}
-                        className="px-2.5 py-1.5 rounded text-xs text-muted hover:bg-muted/10 transition-colors"
+                        className="px-2.5 py-1.5 rounded text-xs font-mono text-muted hover:bg-surface-raised transition-colors"
                       >
                         Cancel
                       </button>
@@ -655,7 +655,7 @@ export function PaymentOrderPipelineCard({
                       type="button"
                       onClick={() => setShowCaptureConfirm(true)}
                       disabled={!isCaptureActionEligible || paypalOrderState?.isCapturing}
-                      className="px-4 py-2 rounded text-xs font-semibold bg-emerald-700 text-white hover:bg-emerald-800 transition-colors shadow-xs disabled:opacity-50 flex items-center space-x-1.5"
+                      className="px-4 py-2 rounded font-mono text-xs font-semibold bg-allow text-white hover:bg-allow/90 transition-colors shadow-2xs disabled:opacity-50 flex items-center space-x-1.5"
                     >
                       <CreditCard className="w-3.5 h-3.5" />
                       <span>Capture Payment</span>
@@ -667,12 +667,12 @@ export function PaymentOrderPipelineCard({
 
             {/* Stage 4C: Captured Success Banner */}
             {isCaptured && (
-              <div className="p-3.5 rounded bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs space-y-2">
-                <div className="flex items-center space-x-2 font-bold text-emerald-900">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-700" />
-                  <span>Payment Successfully Captured & Committed</span>
+              <div className="p-3.5 rounded bg-allow-bg/40 border border-allow-border text-allow text-xs space-y-2">
+                <div className="flex items-center space-x-2 font-bold text-allow">
+                  <CheckCircle2 className="w-4 h-4 text-allow" />
+                  <span className="font-mono text-xs">Payment Successfully Captured &amp; Committed</span>
                 </div>
-                <p className="text-[11px] text-emerald-950 leading-relaxed">
+                <p className="text-[11px] text-allow leading-relaxed font-sans">
                   The payment has settled. PayPal capture ID <code>{paypalOrderState?.captureId}</code> is linked, and the spend reservation has transitioned to <code>COMMITTED</code>.
                 </p>
               </div>
@@ -680,12 +680,12 @@ export function PaymentOrderPipelineCard({
 
             {/* Stage 4D: Cancelled Banner */}
             {isCancelled && (
-              <div className="p-3.5 rounded bg-gray-50 border border-gray-300 text-gray-900 text-xs space-y-1">
-                <div className="flex items-center space-x-2 font-bold text-gray-800">
-                  <Ban className="w-4 h-4 text-gray-600" />
-                  <span>Payment Order Cancelled</span>
+              <div className="p-3.5 rounded bg-surface-inset border border-border text-muted text-xs space-y-1">
+                <div className="flex items-center space-x-2 font-bold text-ink">
+                  <Ban className="w-4 h-4 text-muted" />
+                  <span className="font-mono text-xs">Payment Order Cancelled</span>
                 </div>
-                <p className="text-[11px] text-gray-700 leading-relaxed">
+                <p className="text-[11px] text-muted leading-relaxed font-sans">
                   The order was cancelled prior to capture. The spend reservation has been released and available budget restored.
                 </p>
               </div>
@@ -693,7 +693,7 @@ export function PaymentOrderPipelineCard({
 
             {/* Order Cancellation Controls (Available when uncaptured) */}
             {isCancelActionEligible && (
-              <div className="pt-2 border-t border-border/60 flex items-center justify-between flex-wrap gap-2">
+              <div className="pt-2 border-t border-border flex items-center justify-between flex-wrap gap-2">
                 <div className="text-[10px] text-muted flex items-center space-x-1">
                   <HelpCircle className="w-3 h-3 text-muted/60" />
                   <span>Cancellation safely releases the spend reservation if uncaptured.</span>
@@ -706,7 +706,7 @@ export function PaymentOrderPipelineCard({
                       placeholder="Reason (optional)"
                       value={cancelReason}
                       onChange={(e) => setCancelReason(e.target.value)}
-                      className="px-2 py-1 text-[11px] rounded border border-border bg-surface text-ink w-36"
+                      className="px-2 py-1 text-[11px] font-mono rounded border border-border bg-surface text-ink w-36 focus:outline-none focus:ring-1 focus:ring-accent/30"
                     />
                     <button
                       type="button"
@@ -715,14 +715,14 @@ export function PaymentOrderPipelineCard({
                         if (onCancelPaymentOrder) void onCancelPaymentOrder(cancelReason);
                       }}
                       disabled={paypalOrderState?.isCancelling}
-                      className="px-2.5 py-1 rounded text-xs font-medium bg-red-700 text-white hover:bg-red-800 transition-colors disabled:opacity-50"
+                      className="px-2.5 py-1 rounded text-xs font-mono font-medium bg-deny text-white hover:bg-deny/90 transition-colors disabled:opacity-50"
                     >
                       {paypalOrderState?.isCancelling ? "Cancelling..." : "Confirm Cancel"}
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowCancelConfirm(false)}
-                      className="text-xs text-muted hover:underline"
+                      className="text-xs font-mono text-muted hover:underline"
                     >
                       Dismiss
                     </button>
@@ -732,7 +732,7 @@ export function PaymentOrderPipelineCard({
                     type="button"
                     onClick={() => setShowCancelConfirm(true)}
                     disabled={paypalOrderState?.isCancelling}
-                    className="text-xs text-red-700 hover:text-red-900 font-medium transition-colors"
+                    className="text-xs text-deny hover:text-deny/80 font-medium transition-colors font-mono"
                   >
                     Cancel Order...
                   </button>

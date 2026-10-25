@@ -197,3 +197,91 @@ export const WebhookProcessResponseSchema = z.object({
 });
 
 export type WebhookProcessResponse = z.infer<typeof WebhookProcessResponseSchema>;
+
+/**
+ * PayPal Sandbox Auth Status Schema
+ */
+export const PayPalAuthStatusResponseSchema = z.object({
+  environment: z.literal("sandbox"),
+  authenticated: z.boolean(),
+  hasTransactionSearchScope: z.boolean(),
+  clientIdConfigured: z.boolean(),
+  clientSecretConfigured: z.boolean(),
+  webhookIdConfigured: z.boolean(),
+  scopes: z.array(z.string()).default([]),
+  message: z.string(),
+});
+
+export type PayPalAuthStatusResponse = z.infer<typeof PayPalAuthStatusResponseSchema>;
+
+/**
+ * PayPal Normalized Transaction Schema
+ */
+export const PayPalTransactionSchema = z.object({
+  transactionId: z.string(),
+  paypalReferenceId: z.string().nullable().optional(),
+  status: z.string(),
+  amountMinor: z.number().int(),
+  currency: z.string().length(3),
+  initiationDate: z.string(),
+  updatedDate: z.string().nullable().optional(),
+  payerEmail: z.string().nullable().optional(),
+  payerName: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  feeAmountMinor: z.number().int().optional(),
+  syncedToLedger: z.boolean().default(false),
+  associatedOrderId: z.string().uuid().nullable().optional(),
+});
+
+export type PayPalTransaction = z.infer<typeof PayPalTransactionSchema>;
+
+/**
+ * PayPal Transaction List Response Schema
+ */
+export const PayPalTransactionListResponseSchema = z.object({
+  transactions: z.array(PayPalTransactionSchema),
+  total: z.number().int().nonnegative(),
+  startDate: z.string(),
+  endDate: z.string(),
+  source: z.enum(["PAYPAL_TRANSACTION_SEARCH_API", "DATABASE_SYNCHRONIZED_ORDERS", "MOCK_STANDBY"]),
+  permissionRequired: z.boolean().default(false),
+  permissionNote: z.string().optional(),
+});
+
+export type PayPalTransactionListResponse = z.infer<typeof PayPalTransactionListResponseSchema>;
+
+/**
+ * PayPal Sync Response Schema
+ */
+export const PayPalSyncResponseSchema = z.object({
+  success: z.boolean(),
+  syncedCount: z.number().int().nonnegative(),
+  updatedCount: z.number().int().nonnegative(),
+  source: z.string(),
+  message: z.string(),
+});
+
+export type PayPalSyncResponse = z.infer<typeof PayPalSyncResponseSchema>;
+
+/**
+ * Create Test Sandbox Order Request & Response
+ */
+export const CreateTestSandboxOrderRequestSchema = z.object({
+  amountMinor: z.number().int().positive().default(1500),
+  currency: z.string().length(3).default("USD"),
+  itemDescription: z.string().default("PayPal Sandbox Test Purchase"),
+});
+
+export type CreateTestSandboxOrderRequest = z.infer<typeof CreateTestSandboxOrderRequestSchema>;
+
+export const CreateTestSandboxOrderResponseSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  approvalUrl: z.string().url().optional(),
+  amountMinor: z.number().int(),
+  currency: z.string(),
+  createdAt: z.string(),
+});
+
+export type CreateTestSandboxOrderResponse = z.infer<typeof CreateTestSandboxOrderResponseSchema>;
+

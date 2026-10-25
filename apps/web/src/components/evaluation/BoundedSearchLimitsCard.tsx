@@ -8,25 +8,25 @@ interface BoundedSearchLimitsCardProps {
 export function BoundedSearchLimitsCard({ limits }: BoundedSearchLimitsCardProps) {
   return (
     <div
-      className="border border-border rounded-panel bg-surface p-5 shadow-sm space-y-4"
+      className="border border-border rounded bg-surface p-5 shadow-xs space-y-4"
       data-testid="bounded-search-limits-card"
     >
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border/70 pb-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
         <div className="flex items-center space-x-2.5">
           <Sliders className="w-4 h-4 text-accent" aria-hidden="true" />
-          <h3 className="text-sm font-bold text-ink tracking-tight">
-            Bounded Search Space Specification & Scope (NFR-010)
+          <h3 className="text-sm font-semibold text-ink tracking-tight font-sans">
+            Bounded Search Space Specification &amp; Scope (NFR-010)
           </h3>
         </div>
-        <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-muted/20 text-muted border border-border">
+        <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-surface-inset text-muted border border-border">
           {`Domain v${limits.domainVersion}`}
         </span>
       </div>
 
       {/* Grid of parameters */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-        <div className="p-3 rounded bg-canvas border border-border/60">
-          <div className="flex items-center space-x-1.5 text-muted text-[11px] font-medium uppercase tracking-wider mb-1">
+        <div className="p-3 rounded bg-surface-inset border border-border">
+          <div className="flex items-center space-x-1.5 text-muted text-[11px] font-medium uppercase tracking-wider mb-1 font-mono">
             <Tag className="w-3 h-3 text-muted" aria-hidden="true" />
             <span>Declared Categories</span>
           </div>
@@ -42,8 +42,8 @@ export function BoundedSearchLimitsCard({ limits }: BoundedSearchLimitsCardProps
           </div>
         </div>
 
-        <div className="p-3 rounded bg-canvas border border-border/60">
-          <div className="flex items-center space-x-1.5 text-muted text-[11px] font-medium uppercase tracking-wider mb-1">
+        <div className="p-3 rounded bg-surface-inset border border-border">
+          <div className="flex items-center space-x-1.5 text-muted text-[11px] font-medium uppercase tracking-wider mb-1 font-mono">
             <Database className="w-3 h-3 text-muted" aria-hidden="true" />
             <span>Price Points</span>
           </div>
@@ -51,7 +51,7 @@ export function BoundedSearchLimitsCard({ limits }: BoundedSearchLimitsCardProps
             {limits.pricePointsMinor.map((p) => (
               <span
                 key={p}
-                className="px-1.5 py-0.5 rounded bg-surface border border-border text-[10px] font-mono text-ink"
+                className="px-1.5 py-0.5 rounded bg-surface border border-border text-[10px] font-mono text-ink tabular-nums"
               >
                 {`$${(p / 100).toFixed(2)}`}
               </span>
@@ -59,8 +59,8 @@ export function BoundedSearchLimitsCard({ limits }: BoundedSearchLimitsCardProps
           </div>
         </div>
 
-        <div className="p-3 rounded bg-canvas border border-border/60">
-          <div className="flex items-center space-x-1.5 text-muted text-[11px] font-medium uppercase tracking-wider mb-1">
+        <div className="p-3 rounded bg-surface-inset border border-border">
+          <div className="flex items-center space-x-1.5 text-muted text-[11px] font-medium uppercase tracking-wider mb-1 font-mono">
             <Sliders className="w-3 h-3 text-muted" aria-hidden="true" />
             <span>Server Clamping Limits</span>
           </div>
@@ -76,8 +76,8 @@ export function BoundedSearchLimitsCard({ limits }: BoundedSearchLimitsCardProps
           </div>
         </div>
 
-        <div className="p-3 rounded bg-canvas border border-border/60">
-          <div className="flex items-center space-x-1.5 text-muted text-[11px] font-medium uppercase tracking-wider mb-1">
+        <div className="p-3 rounded bg-surface-inset border border-border">
+          <div className="flex items-center space-x-1.5 text-muted text-[11px] font-medium uppercase tracking-wider mb-1 font-mono">
             <Clock className="w-3 h-3 text-muted" aria-hidden="true" />
             <span>Execution Envelope</span>
           </div>
@@ -95,12 +95,12 @@ export function BoundedSearchLimitsCard({ limits }: BoundedSearchLimitsCardProps
       </div>
 
       {/* Honest Limitations Callout */}
-      <div className="p-3.5 rounded bg-amber-50/60 border border-amber-200/80 text-xs text-amber-950 space-y-2">
-        <div className="flex items-center space-x-2 font-bold text-amber-900 text-xs">
-          <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" aria-hidden="true" />
-          <span>Formal Scope Limitations & Safety Governance Disclosures</span>
+      <div className="p-3.5 rounded-lg bg-warning/10 border border-warning/30 text-xs text-ink space-y-2">
+        <div className="flex items-center space-x-2 font-semibold text-warning text-xs">
+          <AlertCircle className="w-4 h-4 text-warning shrink-0" aria-hidden="true" />
+          <span>Formal Scope Limitations &amp; Safety Governance Disclosures</span>
         </div>
-        <ul className="list-disc pl-5 space-y-1 text-[11px] text-amber-900/90 leading-relaxed">
+        <ul className="list-disc pl-5 space-y-1 text-[11px] text-muted leading-relaxed font-sans">
           {limits.knownLimitations.map((limitation, idx) => (
             <li key={idx}>{limitation}</li>
           ))}

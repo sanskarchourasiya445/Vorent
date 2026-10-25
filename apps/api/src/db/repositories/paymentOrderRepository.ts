@@ -33,6 +33,7 @@ import type {
   WebhookProcessResponse,
   PaymentStatus,
   ReservationState,
+  PayPalTransaction,
 } from "@warrant/contracts";
 
 export interface CreatePaymentOrderContext extends CreatePaymentOrderRequest {
@@ -952,6 +953,47 @@ export async function reconcilePaymentOrder(
     const capture = remoteOrder.purchaseUnits?.[0]?.payments?.captures?.[0];
     const captureId = capture?.id ?? order.captureId;
 
+    // Invariant Check: Verify settlement amount and currency match database order
+    if (capture?.amount) {
+      const rawVal = capture.amount.value ?? (capture.amount as any).value;
+      const rawCur = capture.amount.currency_code ?? (capture.amount as any).currencyCode;
+      if (rawVal !== undefined && rawCur !== undefined) {
+        const remoteAmountMinor = Math.round(parseFloat(rawVal) * 100);
+        if (remoteAmountMinor !== Number(order.amountMinor) || rawCur !== order.currency) {
+          // Amount discrepancy detected! Never silently force a match.
+          [updatedOrder] = await db.transaction(async (tx: any) => {
+            const [up] = await tx
+              .update(paymentOrders)
+              .set({
+                status: "UNKNOWN_REQUIRES_RECONCILIATION",
+                captureId: captureId ?? null,
+                updatedAt: now,
+              })
+              .where(eq(paymentOrders.id, order.id))
+              .returning();
+
+            await tx
+              .update(spendReservations)
+              .set({
+                state: "RECONCILIATION_HOLD",
+                updatedAt: now,
+              })
+              .where(eq(spendReservations.id, reservation.id));
+
+            return [up];
+          });
+
+          return {
+            order: mapPaymentOrderRecord(updatedOrder),
+            reservationState: "RECONCILIATION_HOLD",
+            reconciled: false,
+            externalStatus: remoteOrder.status,
+            notes: `Reconciliation exception: Remote settlement amount ($${(remoteAmountMinor / 100).toFixed(2)} ${rawCur}) does not match authorized order ($${(Number(order.amountMinor) / 100).toFixed(2)} ${order.currency}). Placed on RECONCILIATION_HOLD.`,
+          };
+        }
+      }
+    }
+
     [updatedOrder] = await db.transaction(async (tx: any) => {
       const [up] = await tx
         .update(paymentOrders)
@@ -1320,13 +1362,22 @@ export async function listPaymentOrders(
   if (params?.status) conditions.push(eq(paymentOrders.status, params.status));
   if (params?.reservationId) conditions.push(eq(paymentOrders.reservationId, params.reservationId));
 
-  let query = db.select().from(paymentOrders).$dynamic();
-  if (conditions.length > 0) {
+  let query: any = db.select().from(paymentOrders);
+  if (typeof query.$dynamic === "function") {
+    query = query.$dynamic();
+  }
+  if (conditions.length > 0 && typeof query.where === "function") {
     query = query.where(conditions.length === 1 ? conditions[0] : and(...conditions));
   }
 
-  const rows = await query.orderBy(desc(paymentOrders.createdAt)).limit(limit);
-  const mapped = rows.map(mapPaymentOrderRecord);
+  let rows: any[] = [];
+  if (typeof query.orderBy === "function") {
+    const ordered = query.orderBy(desc(paymentOrders.createdAt));
+    rows = typeof ordered.limit === "function" ? await ordered.limit(limit) : await ordered;
+  } else {
+    rows = await query;
+  }
+  const mapped = Array.isArray(rows) ? rows.map(mapPaymentOrderRecord) : [];
 
   // Count reconciliation alerts (orders requiring reconciliation)
   let alertCount = 0;
@@ -1378,10 +1429,180 @@ export async function getReconciliationAlerts(
       .where(and(eq(spendReservations.state, "RECONCILIATION_HOLD"), eq(spendReservations.ownerId, ownerId)));
   }
   const heldReservations = await resQuery.orderBy(desc(spendReservations.createdAt));
+  const mappedHeld = heldReservations.map((r: any) => ({
+    id: r.id,
+    ownerId: r.ownerId,
+    approvalId: r.approvalId,
+    proposalId: r.proposalId,
+    amountMinor: Number(r.amountMinor),
+    currency: r.currency,
+    state: r.state,
+    expiresAt: r.expiresAt ? (r.expiresAt instanceof Date ? r.expiresAt.toISOString() : r.expiresAt) : null,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+    updatedAt: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : r.updatedAt,
+  }));
 
   return {
     unreconciledOrders,
-    heldReservations,
-    totalAlerts: unreconciledOrders.length + heldReservations.length,
+    heldReservations: mappedHeld,
+    totalAlerts: unreconciledOrders.length + mappedHeld.length,
+  };
+}
+
+/**
+ * Normalizes an internal PaymentOrderRecord into a PayPalTransaction view model.
+ */
+export function mapPaymentOrderToPayPalTransaction(order: PaymentOrderRecord): PayPalTransaction {
+  return {
+    transactionId: order.providerOrderId || order.id,
+    paypalReferenceId: order.id,
+    status: order.status === "CAPTURED" ? "COMPLETED" : order.status,
+    amountMinor: order.amountMinor,
+    currency: order.currency,
+    initiationDate: typeof order.createdAt === "string" ? order.createdAt : new Date(order.createdAt).toISOString(),
+    updatedDate: typeof order.updatedAt === "string" ? order.updatedAt : new Date(order.updatedAt).toISOString(),
+    payerEmail: order.payerId ? `buyer-${order.payerId.slice(0, 6)}@sandbox.paypal.com` : "sandbox-buyer@warrant.dev",
+    payerName: "Sandbox Authorized Buyer",
+    description: `Spend Reservation #${order.reservationId.slice(0, 8)}`,
+    feeAmountMinor: Math.round(order.amountMinor * 0.029 + 30),
+    syncedToLedger: true,
+    associatedOrderId: order.id,
+  };
+}
+
+/**
+ * Synchronizes PayPal transactions with the local database ledger.
+ * Matches by providerOrderId, captureId, or internal orderId.
+ * Enforces amount and currency invariants to prevent silent corruption or forced matches.
+ */
+export async function syncPayPalTransactions(
+  db: Database,
+  transactions: PayPalTransaction[],
+  ownerId?: string
+): Promise<{
+  syncedCount: number;
+  updatedCount: number;
+  transactions: PayPalTransaction[];
+}> {
+  const localOrdersResult = await listPaymentOrders(db, { ownerId, limit: 100 });
+  const ordersByProviderId = new Map<string, PaymentOrderRecord>();
+  const ordersByCaptureId = new Map<string, PaymentOrderRecord>();
+  const ordersById = new Map<string, PaymentOrderRecord>();
+
+  for (const ord of localOrdersResult.orders) {
+    if (ord.providerOrderId) {
+      ordersByProviderId.set(ord.providerOrderId, ord);
+    }
+    if (ord.captureId) {
+      ordersByCaptureId.set(ord.captureId, ord);
+    }
+    ordersById.set(ord.id, ord);
+  }
+
+  let updatedCount = 0;
+  const enriched: PayPalTransaction[] = [];
+
+  for (const tx of transactions) {
+    let matchedOrder =
+      ordersByProviderId.get(tx.transactionId) ||
+      ordersByCaptureId.get(tx.transactionId) ||
+      ordersById.get(tx.transactionId);
+
+    if (!matchedOrder && tx.paypalReferenceId) {
+      matchedOrder =
+        ordersByProviderId.get(tx.paypalReferenceId) ||
+        ordersById.get(tx.paypalReferenceId) ||
+        ordersByCaptureId.get(tx.paypalReferenceId);
+    }
+
+    if (matchedOrder) {
+      const amountMatches =
+        tx.amountMinor === matchedOrder.amountMinor &&
+        tx.currency === matchedOrder.currency;
+
+      if (!amountMatches) {
+        // Discrepancy detected! Never silently force a match.
+        // Transition order and reservation to RECONCILIATION_HOLD.
+        try {
+          const now = new Date();
+          await db.transaction(async (trx: any) => {
+            await trx
+              .update(paymentOrders)
+              .set({
+                status: "UNKNOWN_REQUIRES_RECONCILIATION",
+                updatedAt: now,
+              })
+              .where(eq(paymentOrders.id, matchedOrder!.id));
+
+            await trx
+              .update(spendReservations)
+              .set({
+                state: "RECONCILIATION_HOLD",
+                updatedAt: now,
+              })
+              .where(eq(spendReservations.id, matchedOrder!.reservationId));
+          });
+        } catch {
+          // standby non-blocking
+        }
+
+        enriched.push({
+          ...tx,
+          syncedToLedger: false,
+          associatedOrderId: matchedOrder.id,
+        });
+      } else {
+        enriched.push({
+          ...tx,
+          syncedToLedger: true,
+          associatedOrderId: matchedOrder.id,
+        });
+
+        // Update captured status safely if PayPal reports COMPLETED/SUCCESS
+        if (
+          (tx.status === "SUCCESS" || tx.status === "COMPLETED") &&
+          (matchedOrder.status === "CREATED" ||
+            matchedOrder.status === "APPROVED" ||
+            matchedOrder.status === "CAPTURE_PENDING")
+        ) {
+          try {
+            const now = new Date();
+            await db.transaction(async (trx: any) => {
+              await trx
+                .update(paymentOrders)
+                .set({
+                  status: "CAPTURED",
+                  captureId: tx.transactionId,
+                  updatedAt: now,
+                })
+                .where(eq(paymentOrders.id, matchedOrder!.id));
+
+              await trx
+                .update(spendReservations)
+                .set({
+                  state: "COMMITTED",
+                  updatedAt: now,
+                })
+                .where(eq(spendReservations.id, matchedOrder!.reservationId));
+            });
+            updatedCount++;
+          } catch {
+            // Non-blocking in standby mode
+          }
+        }
+      }
+    } else {
+      enriched.push({
+        ...tx,
+        syncedToLedger: false,
+        associatedOrderId: null,
+      });
+    }
+  }
+
+  return {
+    syncedCount: enriched.filter((t) => t.syncedToLedger).length,
+    updatedCount,
+    transactions: enriched,
   };
 }

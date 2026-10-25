@@ -36,6 +36,9 @@ export const AuditEventTypeZodSchema = z.enum([
   "PAYMENT_ORDER_FAILED",
   "WEBHOOK_EVENT_PROCESSED",
   "RECONCILIATION_HOLD_TRIGGERED",
+  "USER_REGISTERED",
+  "USER_LOGGED_IN",
+  "USER_LOGGED_OUT",
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeZodSchema>;
 
@@ -53,7 +56,9 @@ export const EntityTypeZodSchema = z.enum([
   "SPEND_RESERVATION",
   "PAYMENT_ORDER",
   "WEBHOOK_EVENT",
+  "USER",
 ]);
+
 export type EntityType = z.infer<typeof EntityTypeZodSchema>;
 
 /**

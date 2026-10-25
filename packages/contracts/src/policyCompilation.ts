@@ -20,15 +20,23 @@ export const PolicyValidationResultSchema = z.object({
 export type PolicyValidationResult = z.infer<typeof PolicyValidationResultSchema>;
 
 // 2. Intent Compilation Request
-export const CompileIntentRequestSchema = z.object({
-  mandateText: z
-    .string()
-    .min(1, "Mandate text is required")
-    .max(10000, "Mandate text exceeds 10000 characters limit"),
-  currency: z.string().length(3, "Currency code must be 3 characters").optional(),
-  policyId: z.string().optional(),
-  targetName: z.string().optional(),
-});
+export const CompileIntentRequestSchema = z.preprocess(
+  (val: any) => {
+    if (val && typeof val === "object" && !val.mandateText && typeof val.rawPrompt === "string") {
+      return { ...val, mandateText: val.rawPrompt };
+    }
+    return val;
+  },
+  z.object({
+    mandateText: z
+      .string()
+      .min(1, "Mandate text is required")
+      .max(10000, "Mandate text exceeds 10000 characters limit"),
+    currency: z.string().length(3, "Currency code must be 3 characters").optional(),
+    policyId: z.string().optional(),
+    targetName: z.string().optional(),
+  })
+);
 
 export type CompileIntentRequest = z.infer<typeof CompileIntentRequestSchema>;
 

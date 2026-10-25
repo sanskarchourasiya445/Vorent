@@ -90,22 +90,22 @@ export function SavedRunsBrowser({ onLoadReport, isLoadingReport = false }: Save
       )}
 
       {loadState.state === "UNAVAILABLE" && (
-        <div className="p-4 rounded bg-amber-50 border border-amber-300 text-xs text-amber-950 space-y-2">
+        <div className="p-4 rounded bg-amber-50 dark:bg-review/10 border border-amber-300 dark:border-review/40 text-xs text-amber-950 dark:text-review space-y-2">
           <div className="flex items-center space-x-2 font-semibold">
-            <AlertTriangle className="w-4 h-4 text-amber-800 shrink-0" aria-hidden="true" />
+            <AlertTriangle className="w-4 h-4 text-amber-800 dark:text-review shrink-0" aria-hidden="true" />
             <span>Database Persistence Standby</span>
           </div>
-          <p className="text-[11px] text-amber-900 leading-relaxed">
+          <p className="text-[11px] text-amber-900 dark:text-amber-200 leading-relaxed">
             {loadState.message}
           </p>
           <div className="pt-1 flex items-center justify-between">
-            <span className="text-[10px] text-amber-800">
+            <span className="text-[10px] text-amber-800 dark:text-amber-300">
               Live in-memory runs via POST /api/verification/run remain fully operational.
             </span>
             <button
               type="button"
               onClick={() => void loadRuns()}
-              className="px-2.5 py-1 rounded text-xs font-semibold bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-400 transition-colors"
+              className="px-2.5 py-1 rounded text-xs font-semibold bg-amber-100 dark:bg-review/20 hover:bg-amber-200 dark:hover:bg-review/30 text-amber-950 dark:text-review border border-amber-400 dark:border-review/40 transition-colors"
             >
               Retry Connection
             </button>
@@ -114,18 +114,18 @@ export function SavedRunsBrowser({ onLoadReport, isLoadingReport = false }: Save
       )}
 
       {loadState.state === "ERROR" && (
-        <div className="p-4 rounded bg-red-50 border border-red-200 text-xs text-red-950 space-y-2">
-          <div className="flex items-center space-x-2 font-semibold text-red-900">
-            <AlertCircle className="w-4 h-4 text-red-700 shrink-0" aria-hidden="true" />
+        <div className="p-4 rounded bg-red-50 dark:bg-deny/10 border border-red-200 dark:border-deny/40 text-xs text-red-950 dark:text-deny space-y-2">
+          <div className="flex items-center space-x-2 font-semibold text-red-900 dark:text-deny">
+            <AlertCircle className="w-4 h-4 text-red-700 dark:text-deny shrink-0" aria-hidden="true" />
             <span>Persistence Connection Error</span>
           </div>
-          <p className="text-[11px] text-red-900 leading-relaxed">
+          <p className="text-[11px] text-red-900 dark:text-red-200 leading-relaxed">
             {loadState.message}
           </p>
           <button
             type="button"
             onClick={() => void loadRuns()}
-            className="px-2.5 py-1 rounded text-xs font-semibold bg-red-100 hover:bg-red-200 text-red-950 border border-red-300 transition-colors"
+            className="px-2.5 py-1 rounded text-xs font-semibold bg-red-100 dark:bg-deny/20 hover:bg-red-200 dark:hover:bg-deny/30 text-red-950 dark:text-deny border border-red-300 dark:border-deny/40 transition-colors"
           >
             Retry
           </button>
@@ -164,8 +164,8 @@ export function SavedRunsBrowser({ onLoadReport, isLoadingReport = false }: Save
                     <span
                       className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
                         run.status === "COMPLETED"
-                          ? "bg-emerald-100 text-emerald-950 border border-emerald-300"
-                          : "bg-amber-100 text-amber-950 border border-amber-300"
+                          ? "bg-emerald-100 dark:bg-allow/20 text-emerald-950 dark:text-allow border border-emerald-300 dark:border-allow/40"
+                          : "bg-amber-100 dark:bg-review/20 text-amber-950 dark:text-review border border-amber-300 dark:border-review/40"
                       }`}
                     >
                       {run.status}
@@ -189,7 +189,7 @@ export function SavedRunsBrowser({ onLoadReport, isLoadingReport = false }: Save
                     </span>
                     <span>
                       Completeness:{" "}
-                      <strong className={isExhaustive ? "text-emerald-700" : "text-amber-800"}>
+                      <strong className={isExhaustive ? "text-emerald-700 dark:text-allow" : "text-amber-800 dark:text-review"}>
                         {isExhaustive ? "Exhaustive" : "Budget Bound"}
                       </strong>
                     </span>
@@ -206,7 +206,7 @@ export function SavedRunsBrowser({ onLoadReport, isLoadingReport = false }: Save
                   <div className="text-right">
                     <div
                       className={`font-bold font-mono ${
-                        hasFindings ? "text-deny" : "text-emerald-700"
+                        hasFindings ? "text-deny" : "text-emerald-700 dark:text-allow"
                       }`}
                     >
                       {run.findingCount} {run.findingCount === 1 ? "finding" : "findings"}

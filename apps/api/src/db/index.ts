@@ -6,8 +6,16 @@ import * as schema from "./schema.js";
 
 const { Pool } = pg;
 
+function getEffectiveConnectionString(rawUrl?: string): string | undefined {
+  if (!rawUrl) return undefined;
+  if (rawUrl.includes("sslmode=require") && !rawUrl.includes("uselibpqcompat=true")) {
+    return rawUrl + (rawUrl.includes("?") ? "&" : "?") + "uselibpqcompat=true";
+  }
+  return rawUrl;
+}
+
 export const pool = new Pool({
-  connectionString: env.DATABASE_URL,
+  connectionString: getEffectiveConnectionString(env.DATABASE_URL),
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 3000,

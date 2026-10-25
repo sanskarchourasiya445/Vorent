@@ -240,7 +240,10 @@ export async function submitCheckoutProposal(
     proposalId: proposal.id || proposal.proposalId || `prop_${Date.now()}`,
     approvalId: proposal.approvalId || input.approvalId,
     decision,
-    primaryReasonCode: reasonCodes[0] || proposal?.primaryReasonCode || ReasonCode.ALL_RULES_PASSED,
+    primaryReasonCode:
+      reasonCodes[0] ||
+      proposal?.primaryReasonCode ||
+      (decision === "ALLOW" ? ReasonCode.ALL_RULES_PASSED : ReasonCode.INTERNAL_EVALUATION_ERROR),
     reasonCodes,
     ruleTrace: proposal.ruleTrace || [],
     cartTotalMinor: proposal.cartTotalMinor ?? cartTotalMinor,

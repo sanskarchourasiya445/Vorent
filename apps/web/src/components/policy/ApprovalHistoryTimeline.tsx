@@ -132,11 +132,11 @@ export function ApprovalHistoryTimeline({
       </div>
 
       {revokeError && (
-        <div className="p-3 rounded border border-red-300 bg-red-50 text-red-900 text-xs flex items-start space-x-2">
-          <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+        <div className="p-3 rounded border border-deny/30 bg-deny/10 text-deny text-xs flex items-start space-x-2">
+          <AlertTriangle className="w-4 h-4 text-deny shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="font-semibold">Failed to revoke approval</p>
-            <p>{revokeError}</p>
+            <p className="text-ink">{revokeError}</p>
           </div>
         </div>
       )}
@@ -151,12 +151,12 @@ export function ApprovalHistoryTimeline({
 
       {/* Database Standby State */}
       {listState.state === "UNAVAILABLE" && (
-        <div className="p-6 rounded-panel border border-amber-300 bg-amber-50/70 text-amber-900 space-y-3">
+        <div className="p-6 rounded-lg border border-review/40 bg-review/10 text-ink space-y-3">
           <div className="flex items-center space-x-2">
-            <Database className="w-5 h-5 text-amber-600" />
+            <Database className="w-5 h-5 text-review" />
             <h4 className="font-semibold text-sm">PostgreSQL Standby: Persistence Unavailable</h4>
           </div>
-          <p className="text-xs text-amber-800">
+          <p className="text-xs text-muted">
             {listState.message ||
               "The approval record ledger requires active PostgreSQL database persistence. When the database is in standby mode, historical approvals cannot be queried."}
           </p>
@@ -164,7 +164,7 @@ export function ApprovalHistoryTimeline({
             <button
               type="button"
               onClick={() => void loadApprovals()}
-              className="px-3 py-1.5 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+              className="px-3 py-1.5 text-xs font-medium rounded bg-review text-white hover:bg-review/90 transition-colors"
             >
               Retry Database Connection
             </button>
@@ -174,16 +174,16 @@ export function ApprovalHistoryTimeline({
 
       {/* Error State */}
       {listState.state === "ERROR" && (
-        <div className="p-6 rounded-panel border border-red-300 bg-red-50 text-red-900 space-y-3">
+        <div className="p-6 rounded-lg border border-deny/40 bg-deny/10 text-ink space-y-3">
           <div className="flex items-center space-x-2">
-            <AlertTriangle className="w-5 h-5 text-red-600" />
-            <h4 className="font-semibold text-sm">Failed to Load Approval Timeline</h4>
+            <AlertTriangle className="w-5 h-5 text-deny" />
+            <h4 className="font-semibold text-sm text-deny">Failed to Load Approval Timeline</h4>
           </div>
-          <p className="text-xs text-red-800">{listState.message}</p>
+          <p className="text-xs text-muted">{listState.message}</p>
           <button
             type="button"
             onClick={() => void loadApprovals()}
-            className="px-3 py-1.5 text-xs font-medium rounded bg-red-600 text-white hover:bg-red-700 transition-colors"
+            className="px-3 py-1.5 text-xs font-medium rounded bg-deny text-white hover:bg-deny/90 transition-colors"
           >
             Retry
           </button>
@@ -238,17 +238,17 @@ export function ApprovalHistoryTimeline({
 
                         {/* Status Badge */}
                         {approval.status === "ACTIVE" && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-allow/10 text-allow border border-allow/30">
                             <CheckCircle2 className="w-3 h-3 mr-1" /> ACTIVE
                           </span>
                         )}
                         {approval.status === "EXPIRED" && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-review/10 text-review border border-review/30">
                             <Clock className="w-3 h-3 mr-1" /> EXPIRED
                           </span>
                         )}
                         {approval.status === "REVOKED" && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-red-100 text-red-800 border border-red-300">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-deny/10 text-deny border border-deny/30">
                             <Ban className="w-3 h-3 mr-1" /> REVOKED
                           </span>
                         )}
@@ -273,7 +273,7 @@ export function ApprovalHistoryTimeline({
                         type="button"
                         onClick={() => void handleRevoke(approval.id)}
                         disabled={revokingId === approval.id}
-                        className="px-2.5 py-1 text-xs font-semibold rounded border border-red-300 bg-red-50 text-red-800 hover:bg-red-100 transition-colors disabled:opacity-50"
+                        className="px-2.5 py-1 text-xs font-semibold rounded border border-deny/30 bg-deny/10 text-deny hover:bg-deny/20 transition-colors disabled:opacity-50 cursor-pointer"
                       >
                         {revokingId === approval.id ? "Revoking..." : "Revoke Approval"}
                       </button>
@@ -295,10 +295,10 @@ export function ApprovalHistoryTimeline({
                       <div
                         className={`h-full transition-all duration-300 ${
                           percentConsumed >= 100
-                            ? "bg-red-500"
+                            ? "bg-deny"
                             : percentConsumed >= 75
-                            ? "bg-amber-500"
-                            : "bg-emerald-500"
+                            ? "bg-review"
+                            : "bg-allow"
                         }`}
                         style={{ width: `${percentConsumed}%` }}
                       />
@@ -320,7 +320,7 @@ export function ApprovalHistoryTimeline({
                         aria-label="Copy hash"
                       >
                         {copiedHash === approval.policyHash ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <Check className="w-3.5 h-3.5 text-allow" />
                         ) : (
                           <Copy className="w-3.5 h-3.5" />
                         )}
@@ -331,7 +331,7 @@ export function ApprovalHistoryTimeline({
                     <div className="flex items-center space-x-2 text-muted">
                       <Calendar className="w-3 h-3 text-muted" />
                       {approval.revokedAt ? (
-                        <span className="text-red-700">
+                        <span className="text-deny font-medium">
                           Revoked on {formatRelativeTime(approval.revokedAt)}
                         </span>
                       ) : (

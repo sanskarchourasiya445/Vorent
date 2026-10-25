@@ -279,6 +279,41 @@ export async function compileIntent(
 }
 
 /**
+ * Compiles a natural-language mandate using the bounded LLM Assistant.
+ * Calls POST /api/mandates/compile-llm with automatic deterministic fallback.
+ */
+export async function compileIntentLLM(
+  request: CompileIntentRequest,
+): Promise<CompileIntentResponse> {
+  const url = `${API_BASE}/api/mandates/compile-llm`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!res.ok) {
+    let message = `LLM compilation failed with HTTP ${res.status}`;
+    try {
+      const errJson = await res.json();
+      if (errJson && typeof errJson === "object") {
+        message = errJson.error?.message || errJson.message || message;
+      }
+    } catch {
+      // fallback
+    }
+    throw new Error(message);
+  }
+
+  const json = await res.json();
+  return CompileIntentResponseSchema.parse(json);
+}
+
+/**
  * Computes a semantic field-level diff between two policy documents.
  * Calls POST /api/policies/diff.
  */

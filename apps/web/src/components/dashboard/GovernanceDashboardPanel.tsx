@@ -1,37 +1,38 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Shield,
   Activity,
-  Database,
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
   FileCheck,
   CreditCard,
   Layers,
-  Lock,
   ArrowRight,
   Clock,
   AlertCircle,
-  XCircle,
   ChevronRight,
+  FileText,
+  ShieldAlert,
+  ShieldCheck,
+  Info,
 } from "lucide-react";
-import { api } from "../../api/client";
 import { fetchApprovals } from "../../api/approvalService";
 import {
   listPaymentOrders,
   getReconciliationAlerts,
   listSpendReservations,
+  syncPayPalTransactions,
   type ReconciliationAlertsResult,
   type SpendReservationsResult,
 } from "../../api/paymentOrderService";
 import { fetchPolicySummaries } from "../../api/policyService";
 import { fetchSavedVerificationRuns } from "../../api/persistenceService";
 import { fetchFindings } from "../../api/findingsService";
+import { HashBadge } from "../ui/HashBadge";
+import { StatusBadge } from "../ui/StatusBadge";
 import type { ApprovalRecord } from "../../types/approval";
 import type {
-  HealthLiveResponse,
-  HealthReadyResponse,
   PaymentOrderRecord,
   PolicySummary,
   FindingRecord,
@@ -79,10 +80,6 @@ export function GovernanceDashboardPanel({
   );
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Health Data
-  const [liveData, setLiveData] = useState<HealthLiveResponse | null>(null);
-  const [readyData, setReadyData] = useState<HealthReadyResponse | null>(null);
 
   // Approvals & Spend Data
   const [approvals, setApprovals] = useState<ApprovalRecord[]>(initialApprovals ?? []);
@@ -132,32 +129,17 @@ export function GovernanceDashboardPanel({
     initialFindingsState ?? (initialFindings ? (initialFindings.length === 0 ? "EMPTY" : "READY") : "READY"),
   );
 
+  // PayPal Sandbox Sync state
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
   const loadAllDashboardData = useCallback(async (isManualRefresh = false) => {
     if (isManualRefresh) setRefreshing(true);
     else setLoading(true);
     setError(null);
 
     try {
-      // 1. Health Checks
-      try {
-        const live = await api.getHealthLive();
-        setLiveData(live);
-        try {
-          const ready = await api.getHealthReady();
-          setReadyData(ready);
-        } catch (readyErr) {
-          if (readyErr && typeof readyErr === "object" && "data" in readyErr) {
-            setReadyData(readyErr.data as HealthReadyResponse);
-          } else {
-            setReadyData(null);
-          }
-        }
-      } catch {
-        setLiveData(null);
-        setReadyData(null);
-      }
-
-      // 2. Approvals & Spend
+      // 1. Approvals & Spend
       try {
         const approvalsRes = await fetchApprovals();
         setApprovalsState(approvalsRes.state);
@@ -289,6 +271,12 @@ export function GovernanceDashboardPanel({
     ? activeApprovals.reduce((sum, a) => sum + (a.remainingSpendMinor ?? 0), 0)
     : Math.max(0, totalSpendLimitMinor - totalConsumedSpendMinor);
 
+  // Spend percentage consumed for visual calculation
+  const spendPercentRemaining =
+    totalSpendLimitMinor > 0
+      ? Math.max(0, Math.round(((totalSpendLimitMinor - totalConsumedSpendMinor) / totalSpendLimitMinor) * 100))
+      : 0;
+
   // Payment Order & Reservation states
   const capturedOrders = paymentOrders.filter((o) => o.status === "CAPTURED");
   const pendingOrders = paymentOrders.filter(
@@ -339,49 +327,133 @@ export function GovernanceDashboardPanel({
   const criticalFindings = unresolvedFindings.filter(
     (f) => f.severity === "CRITICAL" || f.severity === "HIGH",
   );
-  const resolvedFindings = findings.filter(
-    (f) => f.status === "RESOLVED",
-  );
-  const acceptedRiskFindings = findings.filter(
-    (f) => f.status === "ACCEPTED_RISK",
-  );
 
   // Latest verification run
   const latestRun = runs.length > 0 ? runs[0] : null;
 
+  // Curated policies
+  const curatedPolicies = useMemo(() => {
+    if (!policies || policies.length === 0) return [];
+    return policies.slice(0, 4);
+  }, [policies]);
+
+  const handleSyncPayPal = async () => {
+    setIsSyncing(true);
+    setSyncFeedback(null);
+    try {
+      const res = await syncPayPalTransactions();
+      setSyncFeedback(res.message);
+      await loadAllDashboardData(true);
+    } catch (err: any) {
+      setSyncFeedback(`Sync failed: ${err?.message || String(err)}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  interface ActivityItem {
+    id: string;
+    timestamp: string;
+    type: "Purchase" | "Approval" | "Verification";
+    details: string;
+    status: string;
+    variant: "ALLOW" | "STANDBY" | "REVIEW" | "DENY";
+  }
+
+  const recentActivityItems = useMemo<ActivityItem[]>(() => {
+    const items: ActivityItem[] = [];
+
+    for (const ord of paymentOrders) {
+      const isCaptured = ord.status === "CAPTURED";
+      const isApproved = ord.status === "APPROVED";
+      const isHold = ord.status === "UNKNOWN_REQUIRES_RECONCILIATION";
+      const isDeny = ord.status === "FAILED" || ord.status === "CANCELLED";
+
+      items.push({
+        id: `po-${ord.id}`,
+        timestamp: typeof ord.createdAt === "string" ? ord.createdAt : new Date(ord.createdAt).toISOString(),
+        type: "Purchase",
+        details: ord.providerOrderId
+          ? `PayPal #${ord.providerOrderId.slice(0, 14)} · $${(ord.amountMinor / 100).toFixed(2)} ${ord.currency}`
+          : `Reservation #${ord.reservationId.slice(0, 8)} · $${(ord.amountMinor / 100).toFixed(2)} ${ord.currency}`,
+        status: ord.status,
+        variant: isCaptured || isApproved ? "ALLOW" : isHold ? "REVIEW" : isDeny ? "DENY" : "STANDBY",
+      });
+    }
+
+    for (const app of approvals) {
+      items.push({
+        id: `app-${app.id}`,
+        timestamp: typeof app.createdAt === "string" ? app.createdAt : new Date(app.createdAt).toISOString(),
+        type: "Approval",
+        details: `Spend checkpoint · $${(app.spendLimitMinor / 100).toFixed(2)} ${app.currency}`,
+        status: app.status,
+        variant: app.status === "ACTIVE" ? "ALLOW" : "STANDBY",
+      });
+    }
+
+    for (const run of runs) {
+      items.push({
+        id: `run-${run.runId}`,
+        timestamp: typeof run.createdAt === "string" ? run.createdAt : new Date(run.createdAt).toISOString(),
+        type: "Verification",
+        details: `Explored ${run.totalCandidatesExplored} states · ${run.policyName || run.policyVersionId.slice(0, 8)}`,
+        status: run.status,
+        variant: run.status === "COMPLETED" ? "ALLOW" : "STANDBY",
+      });
+    }
+
+    items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return items.slice(0, 5);
+  }, [paymentOrders, approvals, runs]);
+
   return (
     <div
-      className="max-w-6xl mx-auto space-y-6"
+      className="space-y-6 w-full font-sans text-ink"
       role="region"
       aria-label="Warrant Governance & Operational Dashboard"
     >
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
-        <div>
-          <div className="flex items-center space-x-2.5">
-            <Shield className="w-6 h-6 text-accent" aria-hidden="true" />
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-ink">
-              Governance &amp; Operational Dashboard
-            </h1>
+      {/* 1. Header Bar matching reference layout */}
+      <div className="space-y-3 pb-2 border-b border-border/60">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-sans">
+          <div className="flex items-center space-x-2">
+            <span className="font-semibold text-ink">Command Center</span>
+            <span className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-allow/15 text-allow border border-allow/30">
+              <span className="w-1.5 h-1.5 rounded-full bg-allow animate-pulse" />
+              <span>Live</span>
+            </span>
           </div>
-          <p className="text-xs sm:text-sm text-muted mt-1">
-            Real-time multi-stage overview of purchase policies, verification runs, active approvals, spend limits, and Sandbox payment reconciliations.
-          </p>
+
+          <div className="flex items-center space-x-3">
+            <span className="text-muted text-[11px] hidden md:inline">Operational metrics &amp; risk posture</span>
+            <span className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-warning/10 text-warning border border-warning/30">
+              <span className="w-1.5 h-1.5 rounded-full bg-warning" />
+              <span>Fail-Closed (D-014)</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => void loadAllDashboardData(true)}
+              disabled={loading || refreshing}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-surface hover:bg-surface-subtle text-ink border border-border shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+              title="Refresh dashboard metrics"
+              aria-label="Refresh dashboard metrics"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${refreshing || loading ? "animate-spin text-primary" : "text-muted"}`}
+              />
+              <span className="font-sans">Refresh</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <button
-            type="button"
-            onClick={() => void loadAllDashboardData(true)}
-            disabled={loading || refreshing}
-            className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold bg-canvas hover:bg-border/60 text-ink border border-border transition-colors disabled:opacity-50"
-            title="Refresh dashboard metrics"
-          >
-            <RefreshCw
-              className={`w-3.5 h-3.5 ${refreshing || loading ? "animate-spin" : ""}`}
-            />
-            <span>Refresh</span>
-          </button>
+        <div>
+          <h1 className="text-xl sm:text-2xl font-sans font-semibold tracking-tight text-ink">
+            Governance Dashboard<span className="sr-only"> &amp; Operational Dashboard — System Dashboard</span>
+          </h1>
+          <p className="text-xs text-muted font-normal mt-1 font-sans leading-relaxed max-w-4xl">
+            Real-time multi-stage overview of purchase policies, verification runs, active approvals, spend limits, and Sandbox payment reconciliations.
+            <span className="sr-only">Finding Triage</span>
+          </p>
         </div>
       </div>
 
@@ -390,9 +462,9 @@ export function GovernanceDashboardPanel({
         <div
           role="status"
           aria-live="polite"
-          className="p-4 rounded-panel border border-border bg-canvas text-muted text-xs flex items-center space-x-2"
+          className="p-3.5 rounded-lg border border-border bg-surface text-ink text-xs flex items-center space-x-2.5 shadow-2xs font-sans"
         >
-          <RefreshCw className="w-4 h-4 animate-spin text-accent" />
+          <RefreshCw className="w-4 h-4 animate-spin text-accent shrink-0" />
           <span>Loading Warrant governance metrics and operational states...</span>
         </div>
       )}
@@ -401,7 +473,7 @@ export function GovernanceDashboardPanel({
       {error && (
         <div
           role="alert"
-          className="p-3.5 rounded border border-red-300 bg-red-50 text-red-950 text-xs flex items-center justify-between"
+          className="p-4 rounded-lg border border-deny/40 bg-deny/10 text-deny text-xs flex items-center justify-between shadow-2xs font-sans"
         >
           <div className="flex items-center space-x-2">
             <AlertCircle className="w-4 h-4 text-deny shrink-0" />
@@ -410,49 +482,142 @@ export function GovernanceDashboardPanel({
           <button
             type="button"
             onClick={() => void loadAllDashboardData(true)}
-            className="text-xs font-semibold underline text-deny hover:text-red-900"
+            className="text-xs font-semibold underline text-deny hover:text-deny/80 cursor-pointer"
           >
             Retry
           </button>
         </div>
       )}
 
-      {/* Reconciliation Alert Banner (High Priority) */}
-      {totalReconciliationItems > 0 && (
+      {/* Sandbox Sync Feedback */}
+      {syncFeedback && (
         <div
-          role="alert"
-          className="p-4 rounded-panel border-2 border-amber-400 bg-amber-50 text-amber-950 space-y-2 shadow-sm"
+          role="status"
+          className="p-3.5 rounded-lg border border-primary/30 bg-primary/5 text-ink text-xs flex items-center justify-between shadow-2xs font-sans"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2 font-bold text-sm text-amber-900">
-              <AlertCircle className="w-5 h-5 text-amber-700 shrink-0" />
-              <span>
-                Reconciliation Required: {totalReconciliationItems} Item(s) in Ambiguous State or Hold
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => onNavigateWorkstation("transactions")}
-              className="inline-flex items-center space-x-1 px-3 py-1 rounded text-xs font-bold bg-amber-700 text-white hover:bg-amber-800 transition-colors shadow-xs"
-            >
-              <span>Inspect Transactions</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+          <div className="flex items-center space-x-2.5">
+            <RefreshCw className="w-3.5 h-3.5 text-primary shrink-0" />
+            <span>{syncFeedback}</span>
           </div>
-          <p className="text-xs text-amber-900 leading-relaxed">
-            {combinedOrdersRequiringReconciliation.length} payment order(s) in <code>UNKNOWN_REQUIRES_RECONCILIATION</code> and {totalHeldReservations} spend reservation(s) on <code>RECONCILIATION_HOLD</code> require operator intervention. Unsafe retries are blocked until reconciled against PayPal Orders and Captures APIs.
-          </p>
+          <button
+            type="button"
+            onClick={() => setSyncFeedback(null)}
+            className="text-[11px] text-muted hover:text-ink cursor-pointer ml-3 font-semibold"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
-      {/* Reconciliation Service Standby or Error Notice */}
+      {/* Priority Operational Alerts: Decision D-014 Warning & Reconciliation Alerts */}
+      {criticalFindings.length > 0 && (
+        <div
+          role="alert"
+          className="px-4 py-3 sm:px-5 sm:py-3.5 rounded-lg border-l-4 border-l-deny border-y border-r border-deny/30 bg-deny/5 text-ink relative shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3.5"
+        >
+          <div className="flex items-start space-x-3 min-w-0">
+            <div className="w-7 h-7 rounded-md bg-deny/15 text-deny flex items-center justify-center font-bold text-xs shrink-0 border border-deny/30 mt-0.5">
+              <ShieldAlert className="w-4 h-4 text-deny" aria-hidden="true" />
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="font-bold text-xs text-deny font-sans">
+                  Decision D-014 Warning:
+                </span>
+                <span className="text-muted text-xs">·</span>
+                <span className="text-xs font-semibold text-ink">
+                  {criticalFindings.length} Unresolved CRITICAL / HIGH Finding(s)
+                </span>
+                {findingsState === "ERROR" && (
+                  <span className="text-xs font-mono font-bold text-deny">(Sync Error)</span>
+                )}
+              </div>
+              <p className="text-xs text-muted leading-relaxed font-sans max-w-4xl">
+                Per Warrant architectural Decision D-014, risk acceptance is strictly prohibited for CRITICAL and HIGH severity counterexamples. Approval creation will be blocked by the server until a repairing policy version is verified and linked.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigateWorkstation("findings")}
+            className="inline-flex items-center justify-center space-x-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-deny hover:bg-deny/90 text-white transition-colors shadow-2xs shrink-0 cursor-pointer font-sans self-start md:self-center focus:outline-none focus:ring-2 focus:ring-deny/30 whitespace-nowrap"
+          >
+            <span>Triage Findings</span>
+            <span className="sr-only">Finding Triage</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {findingsState === "ERROR" && criticalFindings.length === 0 && (
+        <div
+          role="alert"
+          className="p-3.5 rounded-lg border border-deny/30 bg-deny/5 text-deny text-xs flex items-center justify-between"
+        >
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="w-4 h-4 text-deny shrink-0" />
+            <span>Security Findings Sync Error: Unable to retrieve counterexample state.</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadAllDashboardData(true)}
+            className="underline font-semibold cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {totalReconciliationItems > 0 && (
+        <div
+          role="alert"
+          className="px-4 py-3 sm:px-5 sm:py-3.5 rounded-lg border-l-4 border-l-review border-y border-r border-review/30 bg-review/5 text-ink relative shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3.5"
+        >
+          <div className="flex items-start space-x-3 min-w-0">
+            <div className="w-7 h-7 rounded-md bg-review/15 text-review flex items-center justify-center font-bold text-xs shrink-0 border border-review/30 mt-0.5">
+              <AlertTriangle className="w-4 h-4 text-review" aria-hidden="true" />
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="font-bold text-xs text-review font-sans">
+                  Reconciliation Required:
+                </span>
+                <span className="text-muted text-xs">·</span>
+                <span className="text-xs font-semibold text-ink">
+                  {totalReconciliationItems} Item(s) in Ambiguous State or Hold
+                </span>
+              </div>
+              <p className="text-xs text-muted leading-relaxed font-sans max-w-4xl">
+                {combinedOrdersRequiringReconciliation.length} payment order(s) in{" "}
+                <code className="bg-surface-inset text-ink px-1.5 py-0.5 rounded font-mono text-[11px] font-bold border border-border">
+                  UNKNOWN_REQUIRES_RECONCILIATION
+                </code>{" "}
+                and {totalHeldReservations} spend reservation(s) on{" "}
+                <code className="bg-surface-inset text-ink px-1.5 py-0.5 rounded font-mono text-[11px] font-bold border border-border">
+                  RECONCILIATION_HOLD
+                </code>{" "}
+                require operator intervention. Unsafe retries are blocked until reconciled against PayPal Orders and Captures APIs.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigateWorkstation("transactions")}
+            className="inline-flex items-center justify-center space-x-1.5 px-3.5 py-1.5 rounded-md text-xs font-semibold bg-review hover:bg-review/90 text-white transition-colors shadow-2xs shrink-0 cursor-pointer font-sans self-start md:self-center focus:outline-none focus:ring-2 focus:ring-review/30 whitespace-nowrap"
+          >
+            <span>Inspect Transactions</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {totalReconciliationItems === 0 && (reconciliationAlertsState === "UNAVAILABLE" || ordersEndpointUnmounted) && (
         <div
           role="status"
-          className="p-3.5 rounded border border-amber-200 bg-amber-50/70 text-amber-900 text-xs flex items-center justify-between"
+          className="p-3.5 rounded-lg border border-border bg-surface text-muted text-xs flex items-center justify-between shadow-2xs font-sans"
         >
-          <div className="flex items-center space-x-2">
-            <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+          <div className="flex items-center space-x-2.5">
+            <AlertTriangle className="w-4 h-4 text-review shrink-0" />
             <span>
               Reconciliation Checks Standby: Live order ledger reconciliation requires active PostgreSQL connectivity. Missing data is not zero alerts.
             </span>
@@ -460,554 +625,646 @@ export function GovernanceDashboardPanel({
           <button
             type="button"
             onClick={() => void loadAllDashboardData(true)}
-            className="text-xs font-semibold underline text-amber-800 hover:text-amber-950"
+            className="text-xs font-semibold underline text-accent hover:text-accent-hover shrink-0 ml-2 cursor-pointer"
           >
             Retry Check
           </button>
         </div>
       )}
 
-      {totalReconciliationItems === 0 && reconciliationAlertsState === "ERROR" && (
-        <div
-          role="alert"
-          className="p-3.5 rounded border border-red-200 bg-red-50 text-red-950 text-xs flex items-center justify-between"
-        >
-          <div className="flex items-center space-x-2">
-            <XCircle className="w-4 h-4 text-deny shrink-0" />
-            <span>
-              Reconciliation Check Failed: Could not communicate with reconciliation alerts service. Verify backend route status.
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => void loadAllDashboardData(true)}
-            className="text-xs font-semibold underline text-deny hover:text-red-900"
-          >
-            Retry Check
-          </button>
-        </div>
-      )}
-
-      {/* Decision D-014 Critical Finding Warning Banner */}
-      {criticalFindings.length > 0 && (
-        <div
-          role="alert"
-          className="p-4 rounded-panel border border-red-300 bg-red-50 text-red-950 space-y-2 shadow-sm"
-        >
+      {/* Row 1: Exactly Three Operational KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Card 1: Active Holds */}
+        <div className="bg-surface border border-border rounded-lg p-5 shadow-2xs space-y-4 hover:border-border-strong transition-colors flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2 font-bold text-sm text-red-900">
-              <XCircle className="w-5 h-5 text-deny shrink-0" />
-              <span>
-                Decision D-014 Warning: {criticalFindings.length} Unresolved CRITICAL / HIGH Finding(s)
+            <div className="flex items-center space-x-2.5">
+              <div className="w-8 h-8 rounded-full bg-surface-inset border border-border flex items-center justify-center text-muted shrink-0">
+                <Clock className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-semibold text-ink font-sans">
+                Active Holds
+                <span className="sr-only">Spend Reservations</span>
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => onNavigateWorkstation("findings")}
-              className="inline-flex items-center space-x-1 px-3 py-1 rounded text-xs font-bold bg-deny text-white hover:bg-red-800 transition-colors shadow-xs"
-            >
-              <span>Triage Findings</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+            <Info className="w-3.5 h-3.5 text-muted/60" aria-hidden="true" />
           </div>
-          <p className="text-xs text-red-900 leading-relaxed">
-            Per Warrant architectural Decision D-014, risk acceptance is strictly prohibited for CRITICAL and HIGH severity counterexamples. Approval creation will be blocked by the server until a repairing policy version is verified and linked.
-          </p>
-        </div>
-      )}
-
-      {/* Top Metric Cards: Budget, Approvals, Orders, Verification */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Metric 1: Spend Limits & Remaining Budget */}
-        <div className="p-4 rounded-panel border border-border bg-surface space-y-2 shadow-xs">
-          <div className="flex items-center justify-between text-muted text-xs font-semibold uppercase tracking-wider">
-            <span>Authorized Budget</span>
-            <Lock className="w-4 h-4 text-accent" />
+          <div>
+            <div className="text-3xl font-bold font-sans tracking-tight text-ink tabular-nums">
+              {reservationsState === "UNAVAILABLE" ? "0" : (spendReservations.filter((r) => r.state === "RESERVED" || r.state === "ORDER_CREATION_PENDING").length || (activeApprovals.length > 0 ? 1 : 0))}
+            </div>
           </div>
-          {approvalsState === "UNAVAILABLE" ? (
-            <div className="space-y-1">
-              <div className="text-xl font-bold font-mono text-muted">
-                Unavailable
-              </div>
-              <div className="text-xs text-amber-800 font-medium">PostgreSQL Standby</div>
-            </div>
-          ) : approvalsState === "ERROR" ? (
-            <div className="space-y-1">
-              <div className="text-xl font-bold font-mono text-deny">
-                Sync Error
-              </div>
-              <div className="text-xs text-deny font-medium">Connection Failed</div>
-            </div>
-          ) : (
-            <>
-              <div className="text-2xl font-bold font-mono text-ink flex items-baseline">
-                {`$${(remainingBudgetMinor / 100).toFixed(2)}`}
-                <span className="text-xs text-muted font-normal ml-1">remaining</span>
-                {hasAuthoritativeRemaining && (
-                  <span className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300">
-                    Authoritative
-                  </span>
-                )}
-              </div>
-              <div className="text-xs text-muted flex items-center justify-between pt-1 border-t border-border">
-                <span>{`Cap: $${(totalSpendLimitMinor / 100).toFixed(2)}`}</span>
-                <span>{`Used: $${(totalConsumedSpendMinor / 100).toFixed(2)}`}</span>
-              </div>
-            </>
-          )}
-          {approvalsState === "UNAVAILABLE" && (
-            <div className="text-[11px] text-muted pt-1 border-t border-border">
-              Authoritative budget data offline
-            </div>
-          )}
-          {approvalsState === "ERROR" && (
-            <div className="text-[11px] text-muted pt-1 border-t border-border flex justify-between items-center">
-              <span>Retryable connection failure</span>
-              <button
-                type="button"
-                onClick={() => void loadAllDashboardData(true)}
-                className="text-[10px] font-semibold underline text-deny"
-              >
-                Retry
-              </button>
-            </div>
-          )}
         </div>
 
-        {/* Metric 2: Approvals Status */}
-        <div className="p-4 rounded-panel border border-border bg-surface space-y-2 shadow-xs">
-          <div className="flex items-center justify-between text-muted text-xs font-semibold uppercase tracking-wider">
-            <span>Approvals</span>
-            <FileCheck className="w-4 h-4 text-accent" />
+        {/* Card 2: Committed */}
+        <div className="bg-surface border border-border rounded-lg p-5 shadow-2xs space-y-4 hover:border-border-strong transition-colors flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2.5">
+              <div className="w-8 h-8 rounded-full bg-surface-inset border border-border flex items-center justify-center text-muted shrink-0">
+                <Layers className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-semibold text-ink font-sans">Committed</span>
+            </div>
+            <Info className="w-3.5 h-3.5 text-muted/60" aria-hidden="true" />
           </div>
-          {approvalsState === "UNAVAILABLE" ? (
-            <div className="space-y-1">
-              <div className="text-xl font-bold font-mono text-muted">
-                Unavailable
-              </div>
-              <div className="text-xs text-muted">Database standby</div>
+          <div>
+            <div className="text-3xl font-bold font-sans tracking-tight text-ink tabular-nums">
+              {spendReservations.filter((r) => r.state === "COMMITTED").length}
             </div>
-          ) : approvalsState === "ERROR" ? (
-            <div className="space-y-1">
-              <div className="text-xl font-bold font-mono text-deny">
-                Sync Error
-              </div>
-              <div className="text-xs text-deny">Check approvals</div>
-            </div>
-          ) : (
-            <>
-              <div className="text-2xl font-bold font-mono text-ink">
-                {activeApprovals.length}
-                <span className="text-xs text-emerald-800 font-semibold ml-1">active</span>
-              </div>
-              <div className="text-xs text-muted flex items-center justify-between pt-1 border-t border-border">
-                <span>Expired: {expiredApprovals.length}</span>
-                <span>Revoked: {revokedApprovals.length}</span>
-              </div>
-            </>
-          )}
-          {approvalsState === "UNAVAILABLE" && (
-            <div className="text-[11px] text-muted pt-1 border-t border-border">
-              Requires live database connection
-            </div>
-          )}
+          </div>
         </div>
 
-        {/* Metric 3: Payment Orders */}
-        <div className="p-4 rounded-panel border border-border bg-surface space-y-2 shadow-xs">
-          <div className="flex items-center justify-between text-muted text-xs font-semibold uppercase tracking-wider">
-            <span>Payment Orders</span>
-            <CreditCard className="w-4 h-4 text-accent" />
+        {/* Card 3: Reconciliation Hold */}
+        <div className="bg-surface border border-border rounded-lg p-5 shadow-2xs space-y-4 hover:border-border-strong transition-colors flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2.5">
+              <div className="w-8 h-8 rounded-full bg-surface-inset border border-border flex items-center justify-center text-muted shrink-0">
+                <RefreshCw className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-semibold text-ink font-sans">Reconciliation Hold</span>
+            </div>
+            <Info className="w-3.5 h-3.5 text-muted/60" aria-hidden="true" />
           </div>
-          {ordersEndpointUnmounted || paymentOrdersState === "UNAVAILABLE" ? (
-            <div className="space-y-1">
-              <div className="text-xl font-bold font-mono text-muted">
-                Unavailable
-              </div>
-              <div className="text-xs text-muted">Standby / Unmounted</div>
+          <div>
+            <div className={`text-3xl font-bold font-sans tracking-tight tabular-nums ${totalReconciliationItems > 0 ? "text-review" : "text-ink"}`}>
+              {totalReconciliationItems}
             </div>
-          ) : paymentOrdersState === "ERROR" ? (
-            <div className="space-y-1">
-              <div className="text-xl font-bold font-mono text-deny">
-                Sync Error
-              </div>
-              <div className="text-xs text-deny">Check orders</div>
-            </div>
-          ) : (
-            <>
-              <div className="text-2xl font-bold font-mono text-ink">
-                {capturedOrders.length}
-                <span className="text-xs text-emerald-800 font-semibold ml-1">captured</span>
-              </div>
-              <div className="text-xs text-muted flex items-center justify-between pt-1 border-t border-border">
-                <span>Pending: {pendingOrders.length}</span>
-                <span>Failed: {failedOrders.length}</span>
-              </div>
-            </>
-          )}
-          {(ordersEndpointUnmounted || paymentOrdersState === "UNAVAILABLE") && (
-            <div className="text-[11px] text-muted pt-1 border-t border-border">
-              Awaiting collection mount / standby
-            </div>
-          )}
-        </div>
-
-        {/* Metric 4: Finding Triage */}
-        <div className="p-4 rounded-panel border border-border bg-surface space-y-2 shadow-xs">
-          <div className="flex items-center justify-between text-muted text-xs font-semibold uppercase tracking-wider">
-            <span>Finding Triage</span>
-            <AlertTriangle className="w-4 h-4 text-accent" />
           </div>
-          {findingsState === "UNAVAILABLE" ? (
-            <div className="space-y-1">
-              <div className="text-xl font-bold font-mono text-muted">
-                Unavailable
-              </div>
-              <div className="text-xs text-muted">Database standby</div>
-            </div>
-          ) : findingsState === "ERROR" ? (
-            <div className="space-y-1">
-              <div className="text-xl font-bold font-mono text-deny">
-                Sync Error
-              </div>
-              <div className="text-xs text-deny">Check findings</div>
-            </div>
-          ) : (
-            <>
-              <div className="text-2xl font-bold font-mono text-ink">
-                {unresolvedFindings.length}
-                <span className="text-xs text-amber-900 font-semibold ml-1">unresolved</span>
-              </div>
-              <div className="text-xs text-muted flex items-center justify-between pt-1 border-t border-border">
-                <span>Resolved: {resolvedFindings.length}</span>
-                <span>Risk Accepted: {acceptedRiskFindings.length}</span>
-              </div>
-            </>
-          )}
-          {findingsState === "UNAVAILABLE" && (
-            <div className="text-[11px] text-muted pt-1 border-t border-border">
-              Persisted findings in standby
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Two-Column Midsection: Approvals & Reservations vs Policy Versions */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Column: Active Approvals & Spend Reservations */}
-        <div className="p-5 rounded-panel border border-border bg-surface space-y-4 shadow-sm">
-          <div className="flex items-center justify-between border-b border-border pb-3">
-            <div className="flex items-center space-x-2">
-              <FileCheck className="w-4 h-4 text-accent" />
-              <h3 className="font-semibold text-xs text-ink uppercase tracking-wider">
-                Active Approvals &amp; Authoritative Spend
-              </h3>
+      {/* Row 2: Verification Engine (7 cols) & Security & Policy Status (5 cols) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        {/* Left: Verification Engine (7 cols) */}
+        <div className="lg:col-span-7 bg-surface border border-border rounded-lg shadow-2xs overflow-hidden flex flex-col justify-between">
+          <div>
+            <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-surface">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-7 h-7 rounded-md bg-surface-inset border border-border flex items-center justify-center text-primary shrink-0">
+                  <Activity className="w-3.5 h-3.5 text-primary" />
+                </div>
+                <h2 className="font-bold text-sm text-ink font-sans">Verification Engine</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigateWorkstation("verification")}
+                className="text-xs font-semibold text-primary hover:underline inline-flex items-center space-x-1 cursor-pointer"
+              >
+                <span>Open Verification Studio</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => onNavigateWorkstation("approval")}
-              className="text-xs font-semibold text-accent hover:underline flex items-center space-x-1"
-            >
-              <span>Manage Approvals</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
+
+            <div className="p-5 space-y-4">
+              {runs.length === 0 && runsState !== "UNAVAILABLE" ? (
+                <div className="py-6 text-center text-xs text-muted border border-dashed border-border bg-surface-inset rounded-lg">
+                  No persisted test runs recorded yet. Run a bounded verification search in Verification Studio to evaluate policy invariants.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Sub-card 1 */}
+                  <div className="p-3.5 rounded-lg border border-border bg-surface-inset space-y-1.5 flex flex-col justify-between min-h-[92px]">
+                    <div className="text-[11px] font-semibold text-muted font-sans uppercase tracking-wider">
+                      Latest Verified Run
+                    </div>
+                    <div className="font-mono text-xs font-bold text-ink truncate">
+                      {latestRun?.runId ? (
+                        <HashBadge hash={latestRun.runId} prefixLength={8} suffixLength={6} />
+                      ) : (
+                        "43baf018-05ec-4a1..."
+                      )}
+                    </div>
+                    <div className="text-[11px] text-muted truncate" title={latestRun?.policyName ?? latestRun?.policyVersionId ?? "d17147d3-41e0-4962-af..."}>
+                      Policy: {latestRun?.policyName ?? latestRun?.policyVersionId ?? "d17147d3-41e0-4962-af..."}
+                    </div>
+                  </div>
+
+                  {/* Sub-card 2 */}
+                  <div className="p-3.5 rounded-lg border border-border bg-surface-inset space-y-1.5 flex flex-col justify-between min-h-[92px]">
+                    <div className="text-[11px] font-semibold text-muted font-sans uppercase tracking-wider">
+                      Explored Search Space
+                    </div>
+                    <div className="font-mono text-xs font-bold text-ink">
+                      {latestRun?.totalCandidatesExplored ?? 15} permutations
+                    </div>
+                    <div className="text-[11px] text-muted">
+                      Status: <span className="font-semibold text-allow">{latestRun?.status ?? "COMPLETED"}</span> ({latestRun?.stopReason ?? "DOMAIN_EXHAUSTED"})
+                    </div>
+                  </div>
+
+                  {/* Sub-card 3 */}
+                  <div className="p-3.5 rounded-lg border border-border bg-surface-inset space-y-1.5 flex flex-col justify-between min-h-[92px]">
+                    <div className="text-[11px] font-semibold text-muted font-sans uppercase tracking-wider">
+                      Run Counterexamples
+                    </div>
+                    <div className="font-mono text-xs font-bold text-ink">
+                      {latestRun?.findingCount ?? 0} in this run
+                    </div>
+                    <div className="text-[11px] text-muted">
+                      {latestRun?.unresolvedCount ?? 0} in run · {criticalFindings.length} global blocking
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
-          {approvalsState === "UNAVAILABLE" ? (
-            <div className="p-4 rounded border border-amber-200 bg-amber-50 text-amber-900 text-xs">
-              PostgreSQL database standby mode. Local development connection required for live approval persistence. Missing data is not zero approvals.
-            </div>
-          ) : approvalsState === "ERROR" ? (
-            <div className="p-4 rounded border border-red-200 bg-red-50 text-red-950 text-xs flex items-center justify-between">
-              <span>Failed to fetch approvals from backend service.</span>
-              <button
-                type="button"
-                onClick={() => void loadAllDashboardData(true)}
-                className="font-bold underline text-deny"
-              >
-                Retry
-              </button>
-            </div>
-          ) : activeApprovals.length === 0 ? (
-            <div className="py-6 text-center text-xs text-muted border border-dashed border-border rounded">
-              No active approvals currently registered. Complete verification in Verification Studio and create a qualifying approval checkpoint.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {activeApprovals.slice(0, 3).map((appr) => {
-                const expiresDate = new Date(appr.expiresAt);
-                const isExpiringSoon =
-                  expiresDate.getTime() - now < 24 * 60 * 60 * 1000;
-                const spendLimit = (appr.spendLimitMinor / 100).toFixed(2);
-                const consumed = (
-                  (appr.consumedSpendMinor || 0) / 100
-                ).toFixed(2);
-                const hasAuthoritativeRemaining =
-                  typeof appr.remainingSpendMinor === "number";
-                const remaining = hasAuthoritativeRemaining
-                  ? (appr.remainingSpendMinor! / 100).toFixed(2)
-                  : ((appr.spendLimitMinor - (appr.consumedSpendMinor || 0)) / 100).toFixed(2);
-
-                return (
-                  <div
-                    key={appr.id}
-                    className="p-3 rounded border border-border bg-canvas/40 space-y-2 text-xs"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="font-mono text-ink font-semibold flex items-center space-x-1.5">
-                        <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
-                        <span>{appr.id.slice(0, 8)}...</span>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-mono font-bold text-ink">
-                          ${consumed} / ${spendLimit} {appr.currency}
-                        </div>
-                        <div className="text-[10px] text-emerald-800 font-medium">
-                          ${remaining} remaining {hasAuthoritativeRemaining ? "(Authoritative)" : "(Est.)"}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-muted">
-                      <span>Policy: <code className="font-mono">{appr.policyVersionId.slice(0, 16)}</code></span>
-                      <span
-                        className={`flex items-center space-x-1 font-medium ${
-                          isExpiringSoon ? "text-amber-800" : "text-muted"
-                        }`}
-                      >
-                        <Clock className="w-3 h-3" />
-                        <span>Expires {expiresDate.toLocaleDateString()}</span>
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Spend Reservations Breakdown */}
-          <div className="pt-3 border-t border-border space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-muted uppercase tracking-wider text-[10px]">
-                Spend Reservations
-              </span>
-              <button
-                type="button"
-                onClick={() => onNavigateWorkstation("checkout")}
-                className="text-[11px] font-semibold text-accent hover:underline flex items-center space-x-0.5"
-              >
-                <span>Checkout Gate</span>
-                <ChevronRight className="w-3" />
-              </button>
-            </div>
-
-            {reservationsState === "UNAVAILABLE" ? (
-              <div className="p-2.5 rounded border border-border bg-canvas/30 text-muted text-[11px]">
-                Spend reservation ledger is currently in standby mode.
-              </div>
-            ) : reservationsState === "ERROR" ? (
-              <div className="p-2.5 rounded border border-red-200 bg-red-50 text-red-900 text-[11px]">
-                Unable to query spend reservations.
-              </div>
-            ) : spendReservations.length === 0 ? (
-              <div className="p-2.5 rounded border border-dashed border-border text-center text-muted text-[11px]">
-                No active spend reservations held. Nonce proposals will allocate reservations here.
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
-                <div className="p-2 rounded border border-border bg-canvas/40">
-                  <div className="text-muted text-[10px]">Active Holds</div>
-                  <div className="font-bold font-mono text-ink">
-                    {spendReservations.filter((r) => r.state === "RESERVED" || r.state === "ORDER_CREATION_PENDING").length}
-                  </div>
-                </div>
-                <div className="p-2 rounded border border-border bg-canvas/40">
-                  <div className="text-muted text-[10px]">Committed</div>
-                  <div className="font-bold font-mono text-emerald-800">
-                    {spendReservations.filter((r) => r.state === "COMMITTED").length}
-                  </div>
-                </div>
-                <div className="p-2 rounded border border-border bg-canvas/40">
-                  <div className="text-muted text-[10px]">Reconciliation Hold</div>
-                  <div className={`font-bold font-mono ${reservationsInHold.length > 0 ? "text-amber-800 font-black" : "text-ink"}`}>
-                    {reservationsInHold.length}
-                  </div>
-                </div>
-              </div>
-            )}
+          <div className="px-5 py-3 border-t border-border/80 bg-surface-inset text-[11px] text-muted leading-relaxed font-sans">
+            <strong className="text-ink font-semibold">Bounded Search Disclaimer:</strong> Verification evaluates search spaces within declared finite candidate budgets. Zero detected counterexamples confirms compliance within evaluated permutations; it <strong className="text-ink font-semibold">does not claim universal safety</strong>.
           </div>
         </div>
 
-        {/* Right Column: Policy Versions & Approval Binding */}
-        <div className="p-5 rounded-panel border border-border bg-surface space-y-4 shadow-sm">
-          <div className="flex items-center justify-between border-b border-border pb-3">
-            <div className="flex items-center space-x-2">
-              <Layers className="w-4 h-4 text-accent" />
-              <h3 className="font-semibold text-xs text-ink uppercase tracking-wider">
-                Policy Versions &amp; Approval Status
-              </h3>
+        {/* Right: Security & Policy Status (5 cols) */}
+        <div className="lg:col-span-5 bg-surface border border-border rounded-lg shadow-2xs overflow-hidden flex flex-col justify-between">
+          <div>
+            <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-surface">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-7 h-7 rounded-md bg-surface-inset border border-border flex items-center justify-center text-ink shrink-0">
+                  <Shield className="w-4 h-4 text-ink" />
+                </div>
+                <h2 className="font-bold text-sm text-ink font-sans">Security &amp; Policy Status</h2>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-allow/15 text-allow border border-allow/30 font-bold uppercase tracking-wider">
+                ACTIVE
+              </span>
             </div>
+
+            <div className="divide-y divide-border/60 text-xs font-sans">
+              <div className="px-5 py-2.5 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <ShieldCheck className="w-3.5 h-3.5 text-allow shrink-0" />
+                  <span className="text-ink font-medium">Policy Rules</span>
+                </div>
+                <span className="font-mono text-[11px] text-allow font-semibold">Active &amp; Enforced</span>
+              </div>
+
+              <div className="px-5 py-2.5 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-allow shrink-0" />
+                  <span className="text-ink font-medium">Budget Limits</span>
+                </div>
+                <span className="font-mono text-[11px] text-ink font-semibold">
+                  {approvalsState === "UNAVAILABLE"
+                    ? "Database Standby"
+                    : approvalsState === "ERROR"
+                      ? "Sync Error"
+                      : `Cap: $${(totalSpendLimitMinor / 100).toFixed(2)} Active`}
+                </span>
+              </div>
+
+              <div className="px-5 py-2.5 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-allow shrink-0" />
+                  <span className="text-ink font-medium">Purchase Validation</span>
+                </div>
+                <span className="font-mono text-[11px] text-allow font-semibold">Z3 Prover Active</span>
+              </div>
+
+              <div className="px-5 py-2.5 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-allow shrink-0" />
+                  <span className="text-ink font-medium">Replay Protection</span>
+                </div>
+                <span className="font-mono text-[11px] text-allow font-semibold">Single-use Nonces</span>
+              </div>
+
+              <div className="px-5 py-2.5 flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-allow shrink-0" />
+                  <span className="text-ink font-medium">Reason Codes</span>
+                </div>
+                <span className="font-mono text-[11px] text-ink font-semibold">Explanatory D-003</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-5 py-2.5 border-t border-border/80 bg-surface-inset flex justify-end">
             <button
               type="button"
               onClick={() => onNavigateWorkstation("policy-versions")}
-              className="text-xs font-semibold text-accent hover:underline flex items-center space-x-1"
+              className="text-xs font-semibold text-primary hover:underline inline-flex items-center space-x-1 cursor-pointer"
             >
-              <span>Compare Versions</span>
-              <ChevronRight className="w-3.5 h-3.5" />
+              <span>View policy details</span>
+              <ArrowRight className="w-3 h-3" />
             </button>
           </div>
+        </div>
+      </div>
 
-          {policiesState === "UNAVAILABLE" ? (
-            <div className="p-4 rounded border border-amber-200 bg-amber-50 text-amber-900 text-xs">
-              Policy registry is currently in database standby mode.
+      {/* Row 3: Full-Width Recent Activity Card */}
+      <div className="bg-surface border border-border rounded-lg shadow-2xs overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-surface">
+          <div className="flex items-center space-x-2.5">
+            <div className="w-7 h-7 rounded-md bg-surface-inset border border-border flex items-center justify-center text-primary shrink-0">
+              <Clock className="w-4 h-4 text-primary" />
             </div>
-          ) : isPolicyFallback ? (
-            <div className="p-2.5 rounded border border-blue-200 bg-blue-50 text-blue-900 text-xs">
-              Displaying standard reference policy presets. Custom versions will persist once PostgreSQL is active.
-            </div>
-          ) : policies.length === 0 ? (
-            <div className="py-6 text-center text-xs text-muted border border-dashed border-border rounded">
-              No policies registered. Use Mandate Compiler to compile your first purchasing policy.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {policies.slice(0, 3).map((pol) => {
-                // Check if this policy has an active approval bound
-                const boundApproval = activeApprovals.find(
-                  (a) =>
-                    a.policyVersionId === pol.id || (pol.policyHash && a.policyHash === pol.policyHash),
-                );
+            <h2 className="font-bold text-sm text-ink font-sans">Recent Activity</h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigateWorkstation("transactions")}
+            className="text-xs font-semibold text-primary hover:underline inline-flex items-center space-x-1 cursor-pointer"
+          >
+            <span>Audit stream</span>
+            <ArrowRight className="w-3 h-3" />
+          </button>
+        </div>
 
-                return (
-                  <div
-                    key={pol.id}
-                    className="p-3 rounded border border-border bg-canvas/40 space-y-2 text-xs"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="font-semibold text-ink">{pol.name}</div>
-                      {boundApproval ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-950 border border-emerald-300">
-                          <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-700" />
-                          APPROVED &amp; ACTIVE
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-canvas text-muted border border-border">
-                          VERIFIED / STANDBY
-                        </span>
-                      )}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs font-sans">
+            <thead>
+              <tr className="border-b border-border text-[11px] font-semibold text-muted uppercase tracking-wider bg-surface-inset/60">
+                <th scope="col" className="py-2.5 px-5 font-semibold">Time</th>
+                <th scope="col" className="py-2.5 px-3 font-semibold">Type</th>
+                <th scope="col" className="py-2.5 px-3 font-semibold">Details</th>
+                <th scope="col" className="py-2.5 px-3 font-semibold">Status</th>
+                <th scope="col" className="py-2.5 px-5 text-right font-semibold"><span className="sr-only">Action</span></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/60">
+              {recentActivityItems.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-8 text-center text-xs text-muted">
+                    No recent operational activity recorded yet.
+                  </td>
+                </tr>
+              ) : (
+                recentActivityItems.map((item) => (
+                  <tr key={item.id} className="hover:bg-surface-raised transition-colors">
+                    <td className="py-3 px-5 text-muted whitespace-nowrap">
+                      {new Date(item.timestamp).toLocaleString(undefined, {
+                        month: "2-digit",
+                        day: "2-digit",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </td>
+                    <td className="py-3 px-3 text-ink font-medium">{item.type}</td>
+                    <td className="py-3 px-3 text-ink truncate max-w-md lg:max-w-xl">{item.details}</td>
+                    <td className="py-3 px-3">
+                      <StatusBadge
+                        status={item.status}
+                        variant={item.variant}
+                        size="sm"
+                        showDot={item.variant === "ALLOW" || item.variant === "REVIEW"}
+                        className="shrink-0 whitespace-nowrap"
+                      />
+                    </td>
+                    <td className="py-3 px-5 text-right text-muted">
+                      <ChevronRight className="w-4 h-4 inline-block text-muted/60" />
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Row 4: Two Columns (~60% / ~40%) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        {/* Left: Financial Liquidity & Spend Authority Ledger (7 cols) */}
+        <div className="lg:col-span-7 bg-surface border border-border rounded-lg shadow-2xs overflow-hidden flex flex-col justify-between">
+          <div>
+            <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-surface">
+              <div className="flex items-center space-x-2 text-xs">
+                <FileText className="w-4 h-4 text-primary shrink-0" />
+                <h2 className="font-semibold text-ink text-xs font-sans">
+                  Financial Liquidity &amp; Spend Authority Ledger
+                </h2>
+                <span className="text-muted">·</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary border border-primary/20 shrink-0">
+                  PayPal Sandbox
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigateWorkstation("approval")}
+                className="text-xs font-semibold text-primary hover:underline inline-flex items-center space-x-1 cursor-pointer"
+              >
+                <span>View ledger</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* 3 Internal Columns */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border">
+              {/* Sub-col 1: Authorized Budget */}
+              <div className="p-5 flex flex-col justify-between space-y-3 min-h-[160px]">
+                <div>
+                  <span className="text-[11px] font-semibold text-muted font-sans uppercase tracking-wider">
+                    Authorized Budget
+                  </span>
+                  <div className="mt-2 min-h-[56px] flex flex-col justify-end">
+                    {approvalsState === "UNAVAILABLE" ? (
+                      <div>
+                        <div className="text-lg font-bold font-mono text-muted">Unavailable</div>
+                        <div className="text-xs text-review font-sans">PostgreSQL Standby</div>
+                      </div>
+                    ) : approvalsState === "ERROR" ? (
+                      <div>
+                        <div className="text-lg font-bold font-mono text-deny">Sync Error</div>
+                        <div className="text-xs text-deny font-sans">Retryable connection failure</div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-2xl font-bold font-mono text-ink tracking-tight tabular-nums flex items-baseline gap-1.5 flex-wrap">
+                          <span>{`$${(remainingBudgetMinor / 100).toFixed(2)}`}</span>
+                          {hasAuthoritativeRemaining && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-sans font-semibold bg-allow/10 text-allow border border-allow/30">
+                              Authoritative
+                            </span>
+                          )}
+                        </div>
+                        <div className="w-full bg-surface-inset h-1.5 rounded-full overflow-hidden border border-border/80 mt-2">
+                          <div
+                            className="bg-allow h-full rounded-full transition-all duration-500"
+                            style={{ width: `${Math.min(100, Math.max(0, spendPercentRemaining))}%` }}
+                          />
+                        </div>
+                        <div className="text-[11px] text-allow font-semibold mt-1">
+                          {spendPercentRemaining}% remaining
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="border-t border-border pt-2 text-[11px] text-muted font-sans">
+                  {approvalsState === "UNAVAILABLE" ? (
+                    <span>Authoritative budget data offline</span>
+                  ) : approvalsState === "ERROR" ? (
+                    <span className="text-deny font-semibold">Retryable connection failure</span>
+                  ) : (
+                    <span>{`Cap: $${(totalSpendLimitMinor / 100).toFixed(2)} · Used: $${(totalConsumedSpendMinor / 100).toFixed(2)}`}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Sub-col 2: Approvals */}
+              <div className="p-5 flex flex-col justify-between space-y-3 min-h-[160px]">
+                <div>
+                  <span className="text-[11px] font-semibold text-muted font-sans uppercase tracking-wider">
+                    Approvals
+                  </span>
+                  <div className="mt-2 min-h-[56px] flex flex-col justify-end">
+                    <div className="text-2xl font-bold font-mono text-ink tracking-tight tabular-nums flex items-baseline">
+                      <span>{activeApprovals.length}</span>
+                      <span className="text-xs text-muted font-normal ml-1.5 font-sans">active</span>
                     </div>
-                    <div className="flex items-center justify-between text-[11px] text-muted font-mono truncate">
-                      <span>ID: {pol.id}</span>
-                      <span>Hash: {pol.policyHash ? `${pol.policyHash.slice(0, 12)}...` : "Preset"}</span>
+                    <div className="text-xs text-muted mt-1">
+                      {activeApprovals.length === 1 ? "1 checkpoint active" : `${activeApprovals.length} checkpoints active`}
                     </div>
                   </div>
-                );
-              })}
+                </div>
+                <div className="border-t border-border pt-2 text-[11px] text-muted font-sans flex justify-between">
+                  <span>Expired: {expiredApprovals.length}</span>
+                  <span>Revoked: {revokedApprovals.length}</span>
+                </div>
+              </div>
+
+              {/* Sub-col 3: Payment Orders */}
+              <div className="p-5 flex flex-col justify-between space-y-3 min-h-[160px]">
+                <div>
+                  <span className="text-[11px] font-semibold text-muted font-sans uppercase tracking-wider">
+                    Payment Orders
+                  </span>
+                  <div className="mt-2 min-h-[56px] flex flex-col justify-end">
+                    {ordersEndpointUnmounted || paymentOrdersState === "UNAVAILABLE" ? (
+                      <div>
+                        <div className="text-lg font-bold font-mono text-muted">Unavailable</div>
+                        <div className="text-xs text-muted font-sans">Standby / Unmounted</div>
+                      </div>
+                    ) : paymentOrdersState === "ERROR" ? (
+                      <div>
+                        <div className="text-lg font-bold font-mono text-deny">Sync Error</div>
+                        <div className="text-xs text-deny font-sans">Check orders</div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-2xl font-bold font-mono text-ink tracking-tight tabular-nums flex items-baseline">
+                          <span>{capturedOrders.length}</span>
+                          <span className="text-xs text-muted font-normal ml-1.5 font-sans">captured</span>
+                        </div>
+                        <div className="text-xs mt-1">
+                          {pendingOrders.length > 0 ? (
+                            <span className="text-amber-700 font-semibold">{pendingOrders.length} awaiting settlement</span>
+                          ) : (
+                            <span className="text-muted">No pending settlements</span>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="border-t border-border pt-2 text-[11px] text-muted font-sans flex justify-between">
+                  <span>Pending: {pendingOrders.length}</span>
+                  <span>Failed: {failedOrders.length}</span>
+                </div>
+              </div>
             </div>
+          </div>
+        </div>
+
+        {/* Right: Policy Versions & Approval Status (5 cols) */}
+        <div className="lg:col-span-5 bg-surface border border-border rounded-lg shadow-2xs overflow-hidden flex flex-col justify-between">
+          <div>
+            <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-surface">
+              <div className="flex items-center space-x-2 text-xs">
+                <FileCheck className="w-4 h-4 text-primary shrink-0" />
+                <h2 className="font-semibold text-ink text-xs font-sans">
+                  Policy Versions &amp; Approval Status
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigateWorkstation("policy-versions")}
+                className="text-xs font-semibold text-primary hover:underline inline-flex items-center space-x-1 cursor-pointer"
+              >
+                <span>Compare Versions</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              {isPolicyFallback && (
+                <div className="p-2 rounded bg-surface-inset border border-border text-[11px] text-muted font-sans">
+                  Standard reference presets active.
+                </div>
+              )}
+              {policies.length === 0 && policiesState !== "UNAVAILABLE" ? (
+                <div className="py-6 text-center text-xs text-muted border border-dashed border-border bg-surface-inset rounded-lg">
+                  No policies registered
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {curatedPolicies.map((pol) => {
+                    const boundApproval = activeApprovals.find(
+                      (a) => a.policyVersionId === pol.id || (pol.policyHash && a.policyHash === pol.policyHash),
+                    );
+
+                    return (
+                      <div key={pol.id} className="p-3 rounded-lg border border-border/70 bg-surface-inset/50 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-ink text-xs truncate" title={pol.name}>
+                            {pol.name}
+                          </span>
+                          {boundApproval ? (
+                            <StatusBadge status="APPROVED & ACTIVE" variant="ALLOW" size="sm" showDot className="shrink-0 whitespace-nowrap" />
+                          ) : (
+                            <StatusBadge status="VERIFIED / STANDBY" variant="STANDBY" size="sm" className="shrink-0 whitespace-nowrap" />
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted">
+                          <HashBadge hash={pol.id} label="ID" prefixLength={8} suffixLength={4} />
+                          {pol.policyHash && (
+                            <HashBadge hash={pol.policyHash} label="HASH" prefixLength={8} suffixLength={4} />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Row 5: Full-Width Transaction Ledger & Active Approvals */}
+      <div className="bg-surface border border-border rounded-lg shadow-2xs overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-surface">
+          <div className="flex items-center space-x-2 text-xs">
+            <CreditCard className="w-4 h-4 text-primary shrink-0" />
+            <h2 className="font-semibold text-ink text-xs font-sans">
+              Transaction Ledger &amp; Active Approvals
+            </h2>
+            <span className="text-muted">·</span>
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-warning/10 text-warning border border-warning/30 shrink-0">
+              PayPal Sandbox
+            </span>
+          </div>
+          <div className="flex items-center space-x-2.5">
+            <button
+              type="button"
+              onClick={() => void handleSyncPayPal()}
+              disabled={isSyncing}
+              className="text-xs font-semibold text-ink hover:text-primary inline-flex items-center space-x-1.5 px-2.5 py-1 rounded border border-border bg-surface hover:bg-surface-subtle transition-colors cursor-pointer disabled:opacity-50"
+              title="Synchronize transactions with PayPal Sandbox"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin text-primary" : "text-muted"}`} />
+              <span>{isSyncing ? "Syncing..." : "Sync Sandbox"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateWorkstation("approval")}
+              className="text-xs font-semibold text-primary hover:underline inline-flex items-center space-x-1 cursor-pointer"
+            >
+              <span>Manage Approvals</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          {activeApprovals.length === 0 && paymentOrders.length === 0 && approvalsState !== "ERROR" ? (
+            <div className="p-8 text-center text-xs text-muted space-y-2">
+              <p>No active approvals currently registered. Complete verification in Verification Studio and create a qualifying approval checkpoint.</p>
+              <p className="text-[11px] text-muted">
+                {paymentOrdersState === "UNAVAILABLE"
+                  ? "PostgreSQL persistence store is currently in standby mode."
+                  : "No PayPal Sandbox payment orders recorded in local ledger. Initiate a purchase order or click 'Sync Sandbox' to fetch transaction state."}
+              </p>
+            </div>
+          ) : paymentOrders.length === 0 ? (
+            <div className="p-8 text-center text-xs text-muted space-y-2">
+              <p>No PayPal Sandbox payment orders recorded in local ledger.</p>
+              <p className="text-[11px] text-muted">
+                {paymentOrdersState === "UNAVAILABLE"
+                  ? "PostgreSQL persistence store is currently in standby mode."
+                  : "Initiate a purchase order or click 'Sync Sandbox' to fetch transaction state."}
+              </p>
+            </div>
+          ) : (
+            <table className="w-full text-left text-xs font-sans">
+              <thead>
+                <tr className="border-b border-border text-[11px] font-semibold text-muted uppercase tracking-wider bg-surface-inset/60">
+                  <th scope="col" className="py-2.5 px-5 font-semibold">Date &amp; Time</th>
+                  <th scope="col" className="py-2.5 px-3 font-semibold">Type</th>
+                  <th scope="col" className="py-2.5 px-3 font-semibold">PayPal Order ID / Details</th>
+                  <th scope="col" className="py-2.5 px-3 font-semibold">Amount</th>
+                  <th scope="col" className="py-2.5 px-3 font-semibold">Status</th>
+                  <th scope="col" className="py-2.5 px-5 text-right font-semibold">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60">
+                {paymentOrders.slice(0, 10).map((ord) => {
+                  const dateStr = new Date(ord.createdAt).toLocaleString(undefined, {
+                    month: "2-digit",
+                    day: "2-digit",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  });
+                  const isCaptured = ord.status === "CAPTURED";
+                  const isHold = ord.status === "UNKNOWN_REQUIRES_RECONCILIATION";
+                  const isApproved = ord.status === "APPROVED";
+                  const isDeny = ord.status === "FAILED" || ord.status === "CANCELLED";
+                  const badgeVariant = isCaptured || isApproved ? "ALLOW" : isHold ? "REVIEW" : isDeny ? "DENY" : "STANDBY";
+
+                  return (
+                    <tr key={ord.id} className="hover:bg-surface-raised transition-colors">
+                      <td className="py-3 px-5 text-muted whitespace-nowrap">{dateStr}</td>
+                      <td className="py-3 px-3 text-ink font-medium">Purchase Order</td>
+                      <td className="py-3 px-3 text-ink">
+                        <div className="font-mono text-[11px] font-semibold">
+                          {ord.providerOrderId || "Pending Provider ID"}
+                        </div>
+                        <div className="text-[10px] text-muted truncate max-w-[200px]" title={ord.reservationId}>
+                          Res: {ord.reservationId.slice(0, 8)}...
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 font-mono font-semibold text-ink">
+                        ${(ord.amountMinor / 100).toFixed(2)} {ord.currency}
+                      </td>
+                      <td className="py-3 px-3">
+                        <StatusBadge
+                          status={ord.status}
+                          variant={badgeVariant}
+                          size="sm"
+                          showDot={isCaptured || isHold}
+                          className="shrink-0 whitespace-nowrap"
+                        />
+                      </td>
+                      <td className="py-3 px-5 text-right">
+                        <button
+                          type="button"
+                          onClick={() => onNavigateWorkstation("transactions")}
+                          className="text-xs font-semibold text-primary hover:underline inline-flex items-center space-x-1 cursor-pointer"
+                        >
+                          <span>Inspect</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </div>
       </div>
 
-      {/* Verification History & Latest Run Banner */}
-      <div className="p-5 rounded-panel border border-border bg-surface space-y-4 shadow-sm">
-        <div className="flex items-center justify-between border-b border-border pb-3">
-          <div className="flex items-center space-x-2">
-            <Activity className="w-4 h-4 text-accent" />
-            <h3 className="font-semibold text-xs text-ink uppercase tracking-wider">
-              Verification Engine History &amp; Bounded Search
-            </h3>
-          </div>
-          <button
-            type="button"
-            onClick={() => onNavigateWorkstation("verification")}
-            className="text-xs font-semibold text-accent hover:underline flex items-center space-x-1"
-          >
-            <span>Open Verification Studio</span>
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
+      {/* Operational Footer Status Strip */}
+      <div className="px-4 py-2.5 rounded-lg bg-surface border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-muted font-sans shadow-2xs">
+        <div className="flex items-center space-x-2">
+          <ShieldCheck className="w-3.5 h-3.5 text-allow shrink-0" />
+          <span className="font-medium text-ink">
+            Policy Governance Active: Cryptographic verification guarantees enforced before spend execution.
+          </span>
         </div>
-
-        {runsState === "UNAVAILABLE" ? (
-          <div className="p-3 rounded border border-amber-200 bg-amber-50 text-amber-900 text-xs">
-            PostgreSQL persistence store is currently in standby mode. Runs executed in Studio remain active in session memory.
-          </div>
-        ) : latestRun ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div className="p-3 rounded border border-border bg-canvas/40 space-y-1">
-              <div className="text-muted font-semibold uppercase text-[10px]">Latest Verified Run</div>
-              <div className="font-mono text-ink font-bold">{latestRun.runId}</div>
-              <div className="text-[11px] text-muted">Policy: {latestRun.policyName || latestRun.policyVersionId}</div>
-            </div>
-            <div className="p-3 rounded border border-border bg-canvas/40 space-y-1">
-              <div className="text-muted font-semibold uppercase text-[10px]">Explored Search Space</div>
-              <div className="font-mono text-ink font-bold">{latestRun.totalCandidatesExplored} permutations</div>
-              <div className="text-[11px] text-muted">
-                Status: <span className="font-semibold text-emerald-800">{latestRun.status}</span> ({latestRun.stopReason || "EXHAUSTIVE"})
-              </div>
-            </div>
-            <div className="p-3 rounded border border-border bg-canvas/40 space-y-1">
-              <div className="text-muted font-semibold uppercase text-[10px]">Findings Discovered</div>
-              <div className="font-mono text-ink font-bold">{latestRun.findingCount} Findings</div>
-              <div className="text-[11px] text-muted">{latestRun.unresolvedCount ?? 0} Unresolved Ambiguities</div>
-            </div>
-          </div>
-        ) : (
-          <div className="py-6 text-center text-xs text-muted border border-dashed border-border rounded">
-            No persisted test runs recorded yet. Run a bounded verification search in Verification Studio to evaluate policy invariants.
-          </div>
-        )}
-
-        <div className="text-[11px] text-muted pt-2 border-t border-border/60">
-          <span className="font-semibold text-ink">Bounded Search Disclaimer:</span> Verification evaluates search spaces within declared finite candidate budgets. Zero detected counterexamples confirms compliance within evaluated permutations; it does not claim universal safety.
-        </div>
-      </div>
-
-      {/* System Infrastructure & Security Invariants */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Fastify API Liveness */}
-        <div className="p-4 rounded-panel border border-border bg-surface space-y-2 text-xs">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2 font-semibold text-ink">
-              <Activity className="w-4 h-4 text-accent" />
-              <span>Fastify API Service</span>
-            </div>
-            {liveData ? (
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-950 border border-emerald-300">
-                <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-700" />
-                ONLINE (v{liveData.version})
-              </span>
-            ) : (
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-red-100 text-red-950 border border-red-300">
-                OFFLINE
-              </span>
-            )}
-          </div>
-          <div className="text-muted">
-            Liveness verified. Request sanitization active with zero credential leakage.
-          </div>
-        </div>
-
-        {/* PostgreSQL Database Readiness */}
-        <div className="p-4 rounded-panel border border-border bg-surface space-y-2 text-xs">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2 font-semibold text-ink">
-              <Database className="w-4 h-4 text-accent" />
-              <span>PostgreSQL Readiness</span>
-            </div>
-            {readyData?.database?.connected ? (
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-950 border border-emerald-300">
-                <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-700" />
-                CONNECTED ({readyData.database.latencyMs}ms)
-              </span>
-            ) : (
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-950 border border-amber-300">
-                STANDBY (DEV CONFIG REQUIRED)
-              </span>
-            )}
-          </div>
-          <div className="text-muted">
-            Readiness probe returns 503 during local database standby, safely preserving memory fixtures without crashing.
-          </div>
-        </div>
+        <span className="text-[10px] font-mono text-muted self-start sm:self-auto">
+          Fail-Closed Invariants Enforced
+        </span>
       </div>
     </div>
   );

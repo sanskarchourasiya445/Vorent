@@ -144,7 +144,7 @@ export function compileIntent(request: CompileIntentRequest): CompileIntentRespo
 
   // Patterns for whole-cart / total budget limits
   const cartLimitRegexes = [
-    /(?:total\s+budget|cart\s+total|max(?:imum)?\s+cart(?:\s+spend)?|total\s+spend|spend\s+limit|overall\s+cap|total\s+of)\s*(?:is|of|:)?\s*[\$€£]?\s*(\d+(?:\.\d{1,2})?)/i,
+    /(?:total\s+budget|cart\s+total|max(?:imum)?\s+(?:cart\s+)?spend|max(?:imum)?\s+cart|total\s+spend|spend\s+limit|overall\s+cap|total\s+of)\s*(?:is|of|:)?\s*[\$€£]?\s*(\d+(?:\.\d{1,2})?)/i,
     /up\s+to\s+[\$€£]?\s*(\d+(?:\.\d{1,2})?)\s*(?:in\s+total|total|overall|across\s+the\s+cart|cumulative)/i,
     /(?:budget|cap)\s*(?:is|of|:)\s*[\$€£]?\s*(\d+(?:\.\d{1,2})?)/i,
   ];
@@ -206,8 +206,8 @@ export function compileIntent(request: CompileIntentRequest): CompileIntentRespo
   }
 
   for (const [kw, normalizedCat] of Object.entries(PROHIBITED_KEYWORDS)) {
-    // Look for phrases like "no <kw>", "not <kw>", "prohibit all <kw>", "exclude <kw>", "never <kw>", "disallow <kw>"
-    const negatedRegex = new RegExp(`(?:no|not|(?:strictly\\s+)?prohibit(?:ed)?|exclude|disallow|never|without|ban|block(?:ed)?)\\s+(?:all\\s+|any\\s+|every\\s+)?(?:${kw})`, "i");
+    // Look for phrases like "no <kw>", "not <kw>", "prohibit all <kw>", "forbid <kw>", "exclude <kw>", "never <kw>", "disallow <kw>"
+    const negatedRegex = new RegExp(`(?:no|not|(?:strictly\\s+)?(?:prohibit(?:ed)?|forbid(?:den)?)|exclude|disallow|never|without|ban|block(?:ed)?)\\s+(?:all\\s+|any\\s+|every\\s+)?(?:${kw})`, "i");
     if (negatedRegex.test(lowerText) || lowerText.includes(`no ${kw}`)) {
       prohibitedCategoriesSet.add(normalizedCat);
       parsedClauses.push(`Prohibited: ${normalizedCat}`);

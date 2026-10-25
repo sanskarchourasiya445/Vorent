@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { pool, db } from "../db/index.js";
 import { buildServer } from "../server.js";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { eq } from "drizzle-orm";
+import { eq, getTableName } from "drizzle-orm";
 import {
   policies,
   policyVersions,
@@ -39,8 +39,254 @@ import type { FastifyInstance } from "fastify";
  * Invariant 7: Pre-PayPal Fail-Closed Boundary -> Zero PayPal Calls
  * Invariant 8: Zero Trust for Client Claims & Redirects -> Server Verification Only
  */
+function evaluateCondition(condition: any, item: any): boolean {
+  if (!condition) return true;
+  if (typeof condition === "function") return condition(item);
+  if (condition.fn) return condition.fn(item);
+
+  if (condition.queryChunks) {
+    const chunks = condition.queryChunks;
+    for (const chunk of chunks) {
+      if (chunk && chunk.queryChunks && Array.isArray(chunk.queryChunks)) {
+        const hasAnd = chunk.queryChunks.some(
+          (c: any) =>
+            (typeof c === "string" && c.toLowerCase().includes("and")) ||
+            (c?.value && Array.isArray(c.value) && c.value.some((v: any) => typeof v === "string" && v.toLowerCase().includes("and")))
+        );
+        if (hasAnd) {
+          const subSqls = chunk.queryChunks.filter((c: any) => c && c.queryChunks);
+          return subSqls.every((s: any) => evaluateCondition(s, item));
+        }
+      }
+    }
+
+    const isNullOp = chunks.some(
+      (c: any) =>
+        (typeof c === "string" && c.toLowerCase().includes("is null")) ||
+        (c?.value && Array.isArray(c.value) && c.value.some((v: any) => typeof v === "string" && v.toLowerCase().includes("is null")))
+    );
+    if (isNullOp) {
+      const col = chunks.find((c: any) => c && c.name);
+      if (col) {
+        let propKey = col.name;
+        if (col.table) {
+          for (const key of Object.keys(col.table)) {
+            if (col.table[key] === col) {
+              propKey = key;
+              break;
+            }
+          }
+        }
+        return item[propKey] === null || item[col.name] === null || item[propKey] === undefined;
+      }
+    }
+
+    const inOp = chunks.some(
+      (c: any) =>
+        (typeof c === "string" && c.toLowerCase().includes("in")) ||
+        (c?.value && Array.isArray(c.value) && c.value.some((v: any) => typeof v === "string" && v.toLowerCase().includes("in")))
+    );
+    if (inOp) {
+      const col = chunks.find((c: any) => c && c.name);
+      const arrVal = chunks.find((c: any, idx: number) => idx > 1 && (!c || c.constructor?.name !== "StringChunk"));
+      let arr: any[] = [];
+      if (Array.isArray(arrVal)) {
+        arr = arrVal.map((x: any) => (x && typeof x === "object" && "value" in x ? x.value : x));
+      } else if (arrVal && Array.isArray(arrVal.values || arrVal.value)) {
+        arr = arrVal.values || arrVal.value;
+      }
+      if (col) {
+        let propKey = col.name;
+        if (col.table) {
+          for (const key of Object.keys(col.table)) {
+            if (col.table[key] === col) {
+              propKey = key;
+              break;
+            }
+          }
+        }
+        const val = item[propKey] ?? item[col.name];
+        return arr.includes(val);
+      }
+    }
+
+    const eqOp = chunks.some(
+      (c: any) =>
+        (typeof c === "string" && c.toLowerCase().includes("=")) ||
+        (c?.value && Array.isArray(c.value) && c.value.some((v: any) => typeof v === "string" && v.toLowerCase().includes("=")))
+    );
+    if (eqOp) {
+      const col = chunks.find((c: any) => c && c.name);
+      const rawVal = chunks.find((c: any, idx: number) => idx > 1 && (!c || c.constructor?.name !== "StringChunk"));
+      if (col && rawVal !== undefined) {
+        const targetVal = rawVal && typeof rawVal === "object" && "value" in rawVal ? rawVal.value : rawVal;
+        let propKey = col.name;
+        if (col.table) {
+          for (const key of Object.keys(col.table)) {
+            if (col.table[key] === col) {
+              propKey = key;
+              break;
+            }
+          }
+        }
+        return item[propKey] === targetVal || item[col.name] === targetVal;
+      }
+    }
+  }
+
+  return true;
+}
+
+function createMockDb() {
+  const usersStore: any[] = [{ id: "default_test_user_id", email: "operator@warrant.local", role: "APPROVER" }];
+  const policiesStore: any[] = [];
+  const policyVersionsStore: any[] = [];
+  const testRunsStore: any[] = [];
+  const approvalsStore: any[] = [];
+  const checkoutNoncesStore: any[] = [];
+  const checkoutProposalsStore: any[] = [];
+  const spendReservationsStore: any[] = [];
+  const findingsStore: any[] = [];
+
+  const getStore = (table: any): any[] => {
+    try {
+      const name = getTableName(table);
+      if (name === "users") return usersStore;
+      if (name === "policies") return policiesStore;
+      if (name === "policy_versions") return policyVersionsStore;
+      if (name === "test_runs") return testRunsStore;
+      if (name === "approvals") return approvalsStore;
+      if (name === "checkout_nonces") return checkoutNoncesStore;
+      if (name === "checkout_proposals") return checkoutProposalsStore;
+      if (name === "spend_reservations") return spendReservationsStore;
+      if (name === "findings") return findingsStore;
+    } catch {
+      // fallback
+    }
+    const name = table?._?.name || table?.name || (typeof table === "string" ? table : "");
+    if (name === "users") return usersStore;
+    if (name === "policies") return policiesStore;
+    if (name === "policy_versions") return policyVersionsStore;
+    if (name === "test_runs") return testRunsStore;
+    if (name === "approvals") return approvalsStore;
+    if (name === "checkout_nonces") return checkoutNoncesStore;
+    if (name === "checkout_proposals") return checkoutProposalsStore;
+    if (name === "spend_reservations") return spendReservationsStore;
+    if (name === "findings") return findingsStore;
+    return [];
+  };
+
+  const createQueryBuilder = () => {
+    let currentStore: any[] = [];
+    let whereFilter: ((item: any) => boolean) | null = null;
+
+    const builder: any = {
+      from(table: any) {
+        currentStore = getStore(table);
+        return builder;
+      },
+      select(_fields?: any) {
+        return builder;
+      },
+      where(condition: any) {
+        whereFilter = (item: any) => evaluateCondition(condition, item);
+        return builder;
+      },
+      leftJoin(_table: any, _cond: any) {
+        return builder;
+      },
+      for(_mode: string) {
+        return builder;
+      },
+      limit(_n: number) {
+        return builder;
+      },
+      insert(table: any) {
+        currentStore = getStore(table);
+        return {
+          values(val: any) {
+            const row = { ...val };
+            currentStore.push(row);
+            return {
+              returning: async () => [row],
+              then: (resolve: any) => resolve([row]),
+            };
+          },
+        };
+      },
+      update(table: any) {
+        currentStore = getStore(table);
+        return {
+          set(changes: any) {
+            return {
+              where(cond: any) {
+                const affected: any[] = [];
+                for (const item of currentStore) {
+                  const match = evaluateCondition(cond, item);
+                  if (match) {
+                    Object.assign(item, changes);
+                    affected.push(item);
+                  }
+                }
+                return {
+                  returning: async () => affected,
+                  then: (resolve: any) => resolve(affected),
+                };
+              },
+            };
+          },
+        };
+      },
+      delete(table: any) {
+        currentStore = getStore(table);
+        return {
+          where(cond: any) {
+            const remaining = currentStore.filter((item) => !evaluateCondition(cond, item));
+            currentStore.length = 0;
+            currentStore.push(...remaining);
+            return Promise.resolve();
+          },
+        };
+      },
+      then(resolve: any) {
+        let results = [...currentStore];
+        if (whereFilter) {
+          results = results.filter(whereFilter);
+        }
+        return resolve(results);
+      },
+    };
+
+    return builder;
+  };
+
+  const mockDbInstance: any = {
+    _stores: {
+      usersStore,
+      policiesStore,
+      policyVersionsStore,
+      testRunsStore,
+      approvalsStore,
+      checkoutNoncesStore,
+      checkoutProposalsStore,
+      spendReservationsStore,
+      findingsStore,
+    },
+    select: () => createQueryBuilder(),
+    insert: (table: any) => createQueryBuilder().insert(table),
+    update: (table: any) => createQueryBuilder().update(table),
+    delete: (table: any) => createQueryBuilder().delete(table),
+    transaction: async (cb: any) => {
+      return await cb(mockDbInstance);
+    },
+  };
+
+  return mockDbInstance;
+}
+
 describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
   let isDbLive = false;
+  let activeDb: any;
   let server: FastifyInstance;
   const createdPolicyIds: string[] = [];
   const createdRunIds: string[] = [];
@@ -79,6 +325,8 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
       isDbLive = false;
     }
 
+    activeDb = isDbLive ? db : createMockDb();
+
     server = await buildServer({
       checkDb: async () => ({
         configured: true,
@@ -115,11 +363,11 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
 
   // Helper to create a fully verified policy + approval record
   async function setupApprovedPolicy(spendLimitMinor = 150000) {
-    const ownerId = await ensureDefaultUser(db);
+    const ownerId = isDbLive ? await ensureDefaultUser(activeDb) : "default_test_user_id";
     const policyId = randomUUID();
-    createdPolicyIds.push(policyId);
+    if (isDbLive) createdPolicyIds.push(policyId);
 
-    const [policy] = await db
+    const [policy] = await activeDb
       .insert(policies)
       .values({
         id: policyId,
@@ -133,7 +381,7 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
     const policyVersionId = randomUUID();
     const policyHash = computePolicyHash(canonicalPolicy);
 
-    const [version] = await db
+    const [version] = await activeDb
       .insert(policyVersions)
       .values({
         id: policyVersionId,
@@ -152,9 +400,9 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
     if (!version) throw new Error("PolicyVersion insert failed");
 
     const runId = randomUUID();
-    createdRunIds.push(runId);
+    if (isDbLive) createdRunIds.push(runId);
 
-    const [run] = await db
+    const [run] = await activeDb
       .insert(testRuns)
       .values({
         id: runId,
@@ -174,9 +422,9 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
     if (!run) throw new Error("TestRun insert failed");
 
     const approvalId = randomUUID();
-    createdApprovalIds.push(approvalId);
+    if (isDbLive) createdApprovalIds.push(approvalId);
 
-    const [approval] = await db
+    const [approval] = await activeDb
       .insert(approvals)
       .values({
         id: approvalId,
@@ -196,14 +444,10 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
   }
 
   // --- INVARIANT 1: Post-Approval Amount Tampering -> Blocked ---
-  it("Invariant 1: Post-approval amount tampering is blocked server-side (DENY: SPEND_LIMIT_EXCEEDED)", async (ctx) => {
-    if (!isDbLive) {
-      ctx.skip();
-      return;
-    }
+  it("Invariant 1: Post-approval amount tampering is blocked server-side (DENY: SPEND_LIMIT_EXCEEDED)", async () => {
     const { ownerId, version, policyHash, approval } = await setupApprovedPolicy(5000); // $50 limit
 
-    const nonce = await issueCheckoutNonce(db, {
+    const nonce = await issueCheckoutNonce(activeDb, {
       ownerId,
       approvalId: approval.id,
       policyVersionId: version.id,
@@ -224,7 +468,7 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
       ],
     };
 
-    const result = await submitCheckoutProposal(db, {
+    const result = await submitCheckoutProposal(activeDb, {
       ownerId,
       approvalId: approval.id,
       policyVersionId: version.id,
@@ -240,14 +484,10 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
   });
 
   // --- INVARIANT 2: Post-Approval SKU / Category Swap -> Blocked ---
-  it("Invariant 2: Post-approval SKU/category swap to prohibited item is blocked (DENY: PROHIBITED_CATEGORY)", async (ctx) => {
-    if (!isDbLive) {
-      ctx.skip();
-      return;
-    }
+  it("Invariant 2: Post-approval SKU/category swap to prohibited item is blocked (DENY: PROHIBITED_CATEGORY)", async () => {
     const { ownerId, version, policyHash, approval } = await setupApprovedPolicy();
 
-    const nonce = await issueCheckoutNonce(db, {
+    const nonce = await issueCheckoutNonce(activeDb, {
       ownerId,
       approvalId: approval.id,
       policyVersionId: version.id,
@@ -268,7 +508,7 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
       ],
     };
 
-    const result = await submitCheckoutProposal(db, {
+    const result = await submitCheckoutProposal(activeDb, {
       ownerId,
       approvalId: approval.id,
       policyVersionId: version.id,
@@ -285,17 +525,13 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
   });
 
   // --- INVARIANT 3: Policy Mutation Invalidation -> STALE -> Blocked ---
-  it("Invariant 3: Policy mutation after approval invalidates approval with STALE hash mismatch", async (ctx) => {
-    if (!isDbLive) {
-      ctx.skip();
-      return;
-    }
+  it("Invariant 3: Policy mutation after approval invalidates approval with STALE hash mismatch", async () => {
     const { ownerId, version, policyHash, approval } = await setupApprovedPolicy();
 
     // Now policy is modified: a new hash is generated
     const mutatedHash = "f".repeat(64);
 
-    const nonce = await issueCheckoutNonce(db, {
+    const nonce = await issueCheckoutNonce(activeDb, {
       ownerId,
       approvalId: approval.id,
       policyVersionId: version.id,
@@ -304,7 +540,7 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
 
     // Proposal submitted with mutated hash should be rejected
     await expect(
-      submitCheckoutProposal(db, {
+      submitCheckoutProposal(activeDb, {
         ownerId,
         approvalId: approval.id,
         policyVersionId: version.id,
@@ -320,16 +556,12 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
   });
 
   // --- INVARIANT 4: Incomplete Verification Guard -> Approval Blocked ---
-  it("Invariant 4: Incomplete or failed verification run rejects approval creation (Decision D-014)", async (ctx) => {
-    if (!isDbLive) {
-      ctx.skip();
-      return;
-    }
-    const ownerId = await ensureDefaultUser(db);
+  it("Invariant 4: Incomplete or failed verification run rejects approval creation (Decision D-014)", async () => {
+    const ownerId = isDbLive ? await ensureDefaultUser(activeDb) : "default_test_user_id";
     const policyId = randomUUID();
-    createdPolicyIds.push(policyId);
+    if (isDbLive) createdPolicyIds.push(policyId);
 
-    const [policy] = await db
+    const [policy] = await activeDb
       .insert(policies)
       .values({
         id: policyId,
@@ -343,7 +575,7 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
     const policyVersionId = randomUUID();
     const policyHash = computePolicyHash(canonicalPolicy);
 
-    const [version] = await db
+    const [version] = await activeDb
       .insert(policyVersions)
       .values({
         id: policyVersionId,
@@ -362,10 +594,10 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
     if (!version) throw new Error("Version insert failed");
 
     const runId = randomUUID();
-    createdRunIds.push(runId);
+    if (isDbLive) createdRunIds.push(runId);
 
     // Incomplete run (ABORTED)
-    await db.insert(testRuns).values({
+    await activeDb.insert(testRuns).values({
       id: runId,
       ownerId,
       policyVersionId: version.id,
@@ -382,7 +614,7 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
 
     await expect(
       createApproval(
-        db,
+        activeDb,
         {
           policyVersionId: version.id,
           policyHash,
@@ -399,7 +631,7 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
   // --- INVARIANT 5: Single-Use Nonce Replay -> Blocked (Real PostgreSQL) ---
   it("Invariant 5 [REAL-PG]: Single-use cryptographic nonce replay is rejected by database engine", async (ctx) => {
     if (!isDbLive) {
-      ctx.skip();
+      ctx.skip("Active PostgreSQL engine required for real row-lock concurrency and unique constraint collision proof");
       return;
     }
     const { ownerId, version, policyHash, approval } = await setupApprovedPolicy();
@@ -445,7 +677,7 @@ describe("Canonical 8 Must-Pass Invariant Test Suite", () => {
   // --- INVARIANT 6: Atomic Parallel Spend Serialization -> Blocked (Real PostgreSQL) ---
   it("Invariant 6 [REAL-PG]: Parallel checkouts exceeding budget serialize via row lock; second fails", async (ctx) => {
     if (!isDbLive) {
-      ctx.skip();
+      ctx.skip("Active PostgreSQL engine required for real row-lock concurrency and unique constraint collision proof");
       return;
     }
     // Budget $100.00 (10,000 minor)

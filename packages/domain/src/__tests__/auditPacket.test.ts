@@ -76,6 +76,55 @@ describe("auditPacket Domain Functions", () => {
     expect(canonicalJsonStringify(objA)).toBe('{"a":2,"m":{"x":"world","y":"hello"},"z":1}');
   });
 
+  it("handles multi-level nested objects and arrays of disordered objects deterministically", () => {
+    const nestedA = {
+      level1: {
+        z: 99,
+        a: {
+          innerZ: true,
+          innerA: [
+            { k2: "b", k1: "a" },
+            { beta: 2, alpha: 1 },
+          ],
+        },
+      },
+      topZ: "last",
+      topA: "first",
+    };
+    const nestedB = {
+      topA: "first",
+      level1: {
+        a: {
+          innerA: [
+            { k1: "a", k2: "b" },
+            { alpha: 1, beta: 2 },
+          ],
+          innerZ: true,
+        },
+        z: 99,
+      },
+      topZ: "last",
+    };
+    expect(canonicalJsonStringify(nestedA)).toBe(canonicalJsonStringify(nestedB));
+  });
+
+  it("handles Unicode strings including accents, CJK, and emojis deterministically", () => {
+    const unicodeObjA = {
+      desc: "Vérification de sécurité 🔒",
+      notes: "監査証跡：東京",
+      id: "unicode_001",
+    };
+    const unicodeObjB = {
+      id: "unicode_001",
+      notes: "監査証跡：東京",
+      desc: "Vérification de sécurité 🔒",
+    };
+    const canonicalA = canonicalJsonStringify(unicodeObjA);
+    const canonicalB = canonicalJsonStringify(unicodeObjB);
+    expect(canonicalA).toBe(canonicalB);
+    expect(computeEvidencePacketHash(unicodeObjA as any)).toBe(computeEvidencePacketHash(unicodeObjB as any));
+  });
+
   it("omits undefined properties in canonical JSON", () => {
     const objWithUndefined = { a: 1, b: undefined, c: "test" };
     expect(canonicalJsonStringify(objWithUndefined)).toBe('{"a":1,"c":"test"}');

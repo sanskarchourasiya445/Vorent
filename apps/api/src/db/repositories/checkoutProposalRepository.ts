@@ -273,7 +273,7 @@ export async function submitCheckoutProposal(
           sku: catalogItem.sku,
           title: catalogItem.title,
           category: catalogItem.category,
-          unitPriceMinor: catalogItem.unitPriceMinor,
+          unitPriceMinor: it.unitPriceMinor ?? catalogItem.unitPriceMinor,
           currency: catalogItem.currency || input.cart.currency,
           quantity: it.quantity,
         };

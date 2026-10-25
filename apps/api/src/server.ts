@@ -9,15 +9,17 @@ import { policyWorkflowRoutes } from "./routes/policyWorkflow.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { checkoutRoutes } from "./routes/checkout.js";
 import { paymentOrderRoutes, type PaymentOrderRoutesOptions } from "./routes/paymentOrders.js";
+import { paypalRoutes, type PayPalRoutesOptions } from "./routes/paypal.js";
 import { webhookRoutes, type WebhookRoutesOptions } from "./routes/webhooks.js";
 import { findingRoutes } from "./routes/findings.js";
 import { evaluationRoutes } from "./routes/evaluation.js";
 import { auditEventRoutes } from "./routes/auditEvents.js";
 import { evidencePacketRoutes } from "./routes/evidencePackets.js";
+import { authRoutes } from "./routes/auth.js";
 import { env } from "./config/env.js";
 import { pool } from "./db/index.js";
 
-export interface ServerOptions extends HealthRoutesOptions, PaymentOrderRoutesOptions, WebhookRoutesOptions {
+export interface ServerOptions extends HealthRoutesOptions, PaymentOrderRoutesOptions, PayPalRoutesOptions, WebhookRoutesOptions {
   logStream?: NodeJS.WritableStream;
 }
 
@@ -93,15 +95,21 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
   // Standard route definitions: canonical prefix and backward-compatibility aliases
   // Note: /api/v1/* and /api/audit-packets are preserved for client and test compatibility (LEAN-005)
   const apiRouteDefinitions = [
+    { plugin: authRoutes, prefixes: ["/api/auth", "/api/v1/auth"] },
     { plugin: verificationRoutes, prefixes: ["/api/verification", "/api/v1/verification"] },
     { plugin: policyRoutes, prefixes: ["/api/policies", "/api/v1/policies"] },
-    { plugin: policyWorkflowRoutes, prefixes: ["/api/policies", "/api/v1/policies"] },
+    { plugin: policyWorkflowRoutes, prefixes: ["/api/policies", "/api/v1/policies", "/api/mandates", "/api/v1/mandates"] },
     { plugin: approvalRoutes, prefixes: ["/api/approvals", "/api/v1/approvals"] },
     { plugin: checkoutRoutes, prefixes: ["/api/checkout", "/api/v1/checkout"] },
     { plugin: findingRoutes, prefixes: ["/api/findings", "/api/v1/findings"] },
     {
       plugin: paymentOrderRoutes,
       prefixes: ["/api/payment-orders", "/api/v1/payment-orders"],
+      opts: { paypalService: options.paypalService },
+    },
+    {
+      plugin: paypalRoutes,
+      prefixes: ["/api/paypal", "/api/v1/paypal"],
       opts: { paypalService: options.paypalService },
     },
     {

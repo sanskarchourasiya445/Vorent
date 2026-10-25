@@ -3,6 +3,7 @@ import type { VerificationFinding } from "../../types/verification";
 import { DecisionResultCard } from "../features/DecisionResultCard";
 import { adaptEvaluationResultToDecisionCardProps } from "../../utils/decisionAdapter";
 import { resolveFinding, acceptFindingRisk } from "../../api/findingsService";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import {
   X,
   AlertTriangle,
@@ -15,6 +16,7 @@ import {
   ShieldCheck,
   RefreshCw,
   AlertCircle,
+  ShieldAlert,
 } from "lucide-react";
 
 interface FindingDetailModalProps {
@@ -38,6 +40,29 @@ export function FindingDetailModal({
 }: FindingDetailModalProps) {
   const [copiedJson, setCopiedJson] = useState(false);
 
+  // Focus trap hook ensures keyboard navigation stays inside modal and restores focus on close
+  const modalContainerRef = useFocusTrap(Boolean(finding), onClose);
+
+  // Local resolution state to ensure strict React immutability (no direct prop mutations)
+  const [resolutionStatus, setResolutionStatus] = useState<string | undefined>(
+    finding?.resolutionStatus ?? undefined,
+  );
+  const [resolvedByVersion, setResolvedByVersion] = useState<string | null | undefined>(
+    finding?.resolvedByVersionId,
+  );
+  const [resolutionNoteDisplay, setResolutionNoteDisplay] = useState<string | null | undefined>(
+    finding?.resolutionNote,
+  );
+
+  // Sync local state if finding prop changes
+  useEffect(() => {
+    if (finding) {
+      setResolutionStatus(finding.resolutionStatus ?? undefined);
+      setResolvedByVersion(finding.resolvedByVersionId);
+      setResolutionNoteDisplay(finding.resolutionNote);
+    }
+  }, [finding]);
+
   // Triage state
   const [triageAction, setTriageAction] = useState<"NONE" | "RESOLVE" | "ACCEPT_RISK">("NONE");
   const [resolvedByVersionId, setResolvedByVersionId] = useState("");
@@ -46,17 +71,6 @@ export function FindingDetailModal({
   const [isSubmittingTriage, setIsSubmittingTriage] = useState(false);
   const [triageError, setTriageError] = useState<string | null>(null);
   const [triageSuccess, setTriageSuccess] = useState<string | null>(null);
-
-  // Close on Escape key press
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
 
   if (!finding) return null;
 
@@ -115,9 +129,10 @@ export function FindingDetailModal({
         resolutionNote: resolutionNote.trim(),
       });
       setTriageSuccess("Finding resolved successfully with verified repairing policy version.");
-      finding.resolutionStatus = "RESOLVED";
-      finding.resolvedByVersionId = resolvedByVersionId.trim();
-      finding.resolutionNote = resolutionNote.trim();
+      // Immutably update local state instead of mutating finding prop directly
+      setResolutionStatus("RESOLVED");
+      setResolvedByVersion(resolvedByVersionId.trim());
+      setResolutionNoteDisplay(resolutionNote.trim());
       if (onFindingResolved) onFindingResolved();
     } catch (err: unknown) {
       setTriageError(err instanceof Error ? err.message : "Failed to resolve finding.");
@@ -146,7 +161,8 @@ export function FindingDetailModal({
         rationale: riskRationale.trim(),
       });
       setTriageSuccess("Risk accepted with required operator rationale.");
-      finding.resolutionStatus = "ACCEPTED_RISK";
+      // Immutably update local state
+      setResolutionStatus("ACCEPTED_RISK");
       if (onFindingResolved) onFindingResolved();
     } catch (err: unknown) {
       setTriageError(err instanceof Error ? err.message : "Failed to accept risk.");
@@ -157,60 +173,65 @@ export function FindingDetailModal({
 
   return (
     <div
+      data-lenis-prevent
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/40 backdrop-blur-xs overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-labelledby="finding-modal-title"
     >
-      <div className="relative w-full max-w-3xl max-h-[90vh] flex flex-col rounded-panel border border-border bg-surface shadow-xl overflow-hidden my-auto">
+      <div
+        ref={modalContainerRef}
+        data-lenis-prevent
+        className="relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-lg border border-border bg-surface text-ink shadow-xl overflow-hidden my-auto"
+      >
         {/* Modal Header */}
-        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-border bg-canvas/40">
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-border bg-surface-inset">
           <div className="flex items-center space-x-2.5">
             {isCounterexample ? (
               <XCircle className="w-5 h-5 text-deny shrink-0" aria-hidden="true" />
             ) : (
-              <AlertTriangle className="w-5 h-5 text-amber-800 shrink-0" aria-hidden="true" />
+              <AlertTriangle className="w-5 h-5 text-review shrink-0" aria-hidden="true" />
             )}
             <div>
               <div className="flex items-center space-x-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-muted">
                   {isCounterexample
                     ? "Confirmed Counterexample (Policy Loophole)"
                     : "Unresolved Ambiguity (Fail-Closed Investigation)"}
                 </span>
                 <span
-                  className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-bold uppercase border ${
+                  className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-mono font-bold uppercase border ${
                     severity === "CRITICAL"
-                      ? "bg-red-200 text-red-950 border-red-400"
+                      ? "bg-deny/10 text-deny border-deny/30"
                       : severity === "HIGH"
-                        ? "bg-red-100 text-red-900 border-red-300"
+                        ? "bg-deny/10 text-deny border-deny/30"
                         : severity === "MEDIUM"
-                          ? "bg-amber-100 text-amber-900 border-amber-300"
-                          : "bg-slate-100 text-slate-800 border-slate-300"
+                          ? "bg-review/10 text-review border-review/30"
+                          : "bg-surface-inset text-muted border-border"
                   }`}
                 >
                   {severity} SEVERITY
                 </span>
                 {finding.violationType && (
-                  <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-canvas border border-border text-muted">
+                  <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-surface-inset border border-border text-muted">
                     {finding.violationType}
                   </span>
                 )}
-                {finding.resolutionStatus && (
+                {resolutionStatus && (
                   <span
                     className={`font-mono text-[10px] px-1.5 py-0.2 rounded font-semibold border ${
-                      finding.resolutionStatus === "RESOLVED"
-                        ? "bg-emerald-100 text-emerald-950 border-emerald-300"
-                        : finding.resolutionStatus === "ACCEPTED_RISK"
-                          ? "bg-amber-100 text-amber-950 border-amber-300"
-                          : "bg-canvas text-muted border-border"
+                      resolutionStatus === "RESOLVED"
+                        ? "bg-allow/10 text-allow border-allow/30"
+                        : resolutionStatus === "ACCEPTED_RISK"
+                          ? "bg-review/10 text-review border-review/30"
+                          : "bg-surface-inset text-muted border-border"
                     }`}
                   >
-                    {finding.resolutionStatus}
+                    {resolutionStatus}
                   </span>
                 )}
               </div>
-              <h3 id="finding-modal-title" className="text-base font-bold text-ink mt-0.5">
+              <h3 id="finding-modal-title" className="text-base font-bold text-ink font-sans mt-0.5">
                 {finding.title}
               </h3>
             </div>
@@ -218,7 +239,7 @@ export function FindingDetailModal({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded text-muted hover:text-ink hover:bg-canvas transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="p-1.5 rounded-md text-muted hover:text-ink hover:bg-surface-raised transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
             title="Close finding details (Esc)"
             aria-label="Close modal"
           >
@@ -230,14 +251,17 @@ export function FindingDetailModal({
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6">
           {/* Summary Banner with Quick Repair Action */}
           <div
-            className={`p-3.5 rounded text-xs space-y-2 border ${
+            className={`p-4 rounded-lg text-xs space-y-2 border ${
               isCounterexample
-                ? "bg-red-50/50 border-red-200 text-red-950"
-                : "bg-amber-50/50 border-amber-200 text-amber-950"
+                ? "bg-deny/10 border-deny/30 text-ink"
+                : "bg-review/10 border-review/30 text-ink"
             }`}
           >
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-xs">Finding Analysis:</span>
+              <span className="font-semibold text-xs text-ink flex items-center gap-1.5">
+                <AlertTriangle className={`w-3.5 h-3.5 ${isCounterexample ? "text-deny" : "text-review"}`} aria-hidden="true" />
+                Finding Analysis:
+              </span>
               {onOpenRepair && (
                 <button
                   type="button"
@@ -249,14 +273,42 @@ export function FindingDetailModal({
                 </button>
               )}
             </div>
-            <p className="leading-relaxed">{finding.summary}</p>
+            <p className="leading-relaxed text-ink">{finding.summary}</p>
           </div>
 
-          {/* Embedded Phase 1 Authoritative DecisionResultCard */}
+          {/* Active Gate Fail-Closed Decision D-014 Protection */}
+          {isHighOrCritical && finding.resolutionStatus !== "RESOLVED" && (
+            <div className="p-3.5 rounded-lg bg-deny/10 border border-deny/30 space-y-1.5">
+              <div className="flex items-center justify-between font-bold">
+                <span className="flex items-center gap-1.5 text-xs text-deny">
+                  <ShieldAlert className="w-4 h-4 text-deny shrink-0" aria-hidden="true" />
+                  Decision D-014 Enforced: Gate Outcome is FAIL-CLOSED (DENY)
+                </span>
+                <span className="px-2 py-0.5 rounded bg-deny text-white text-[10px] font-mono uppercase tracking-wide">
+                  BLOCKED
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-ink-muted">
+                Decision D-014 mandates that the active checkout gate fails closed (DENY) for any checkout proposal while unresolved CRITICAL or HIGH verification findings exist. This transaction cannot proceed to payment until the policy is repaired.
+              </p>
+            </div>
+          )}
+
+          {/* Embedded Verification Test Result */}
           <section aria-labelledby="decision-card-section" className="space-y-2">
-            <h4 id="decision-card-section" className="text-xs font-bold uppercase tracking-wider text-muted">
-              Authoritative Gate Outcome
-            </h4>
+            <div className="flex items-center justify-between">
+              <h4 id="decision-card-section" className="text-xs font-bold uppercase tracking-wider text-muted">
+                {isCounterexample
+                  ? "Flawed Policy Simulation (Pre-Patch Vulnerability Demonstration)"
+                  : "Authoritative Gate Outcome"}
+                <span className="sr-only">Authoritative Gate Outcome</span>
+              </h4>
+              {isCounterexample && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-review/10 text-review border border-review/30">
+                  Witness Flaw Under Test
+                </span>
+              )}
+            </div>
             <DecisionResultCard {...cardProps} />
           </section>
 
@@ -271,7 +323,7 @@ export function FindingDetailModal({
             </h4>
             <div className="rounded border border-border overflow-hidden text-xs">
               <table className="w-full text-left border-collapse">
-                <thead className="bg-canvas border-b border-border text-[11px] text-muted uppercase tracking-wider">
+                <thead className="bg-surface-inset border-b border-border text-[11px] text-muted uppercase tracking-wider">
                   <tr>
                     <th className="p-2.5">SKU / Title</th>
                     <th className="p-2.5">Category</th>
@@ -285,7 +337,7 @@ export function FindingDetailModal({
                     const unitPrice = (item.unitPriceMinor / 100).toFixed(2);
                     const lineTotal = ((item.unitPriceMinor * item.quantity) / 100).toFixed(2);
                     return (
-                      <tr key={idx} className="hover:bg-canvas/40">
+                      <tr key={idx} className="hover:bg-surface-raised transition-colors">
                         <td className="p-2.5">
                           <div className="font-semibold text-ink">{item.title}</div>
                           <div className="font-mono text-[11px] text-muted">{item.sku}</div>
@@ -314,7 +366,7 @@ export function FindingDetailModal({
                 <FileText className="w-3.5 h-3.5 text-accent" aria-hidden="true" />
                 <span>Deterministic Reproduction Steps</span>
               </h4>
-              <ol className="list-decimal list-inside space-y-1.5 text-xs text-ink p-3 rounded bg-canvas border border-border">
+              <ol className="list-decimal list-inside space-y-1.5 text-xs text-ink p-3 rounded bg-surface-inset border border-border">
                 {finding.reproductionNotes.map((step, idx) => (
                   <li key={idx} className="leading-relaxed">
                     {step}
@@ -327,18 +379,18 @@ export function FindingDetailModal({
           {/* Finding Resolution & Triage Controls */}
           <section aria-labelledby="triage-section" className="space-y-3 pt-2 border-t border-border">
             <div className="flex items-center justify-between">
-              <h4 id="triage-section" className="text-xs font-bold uppercase tracking-wider text-ink flex items-center space-x-1.5">
+              <h4 id="triage-section" className="text-xs font-bold uppercase tracking-wider text-ink font-mono flex items-center space-x-1.5">
                 <ShieldCheck className="w-4 h-4 text-accent" aria-hidden="true" />
-                <span>Finding Triage & Governance Resolution</span>
+                <span>Finding Triage &amp; Governance Resolution</span>
               </h4>
-              <div className="flex items-center space-x-1">
+              <div className="flex items-center space-x-1.5">
                 <button
                   type="button"
                   onClick={() => setTriageAction(triageAction === "RESOLVE" ? "NONE" : "RESOLVE")}
-                  className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors border ${
+                  className={`px-2.5 py-1 rounded text-xs font-mono font-semibold transition-colors border ${
                     triageAction === "RESOLVE"
                       ? "bg-accent text-white border-accent"
-                      : "bg-canvas text-ink border-border hover:bg-canvas/80"
+                      : "bg-surface-inset text-ink border-border hover:bg-surface-raised"
                   }`}
                 >
                   Resolve with Version
@@ -346,25 +398,59 @@ export function FindingDetailModal({
                 <button
                   type="button"
                   onClick={() => setTriageAction(triageAction === "ACCEPT_RISK" ? "NONE" : "ACCEPT_RISK")}
-                  className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors border ${
+                  className={`px-2.5 py-1 rounded text-xs font-mono font-semibold transition-colors border ${
                     triageAction === "ACCEPT_RISK"
                       ? "bg-accent text-white border-accent"
-                      : "bg-canvas text-ink border-border hover:bg-canvas/80"
+                      : "bg-surface-inset text-ink border-border hover:bg-surface-raised"
                   }`}
+                  title={isHighOrCritical ? "Decision D-014: Risk acceptance blocked for Critical/High findings" : undefined}
                 >
-                  Accept Risk
+                  Accept Risk {isHighOrCritical && <span className="text-[10px] text-deny font-bold ml-1">(Blocked)</span>}
                 </button>
               </div>
             </div>
 
+            {/* Current Governance Status Banner */}
+            {resolutionStatus === "RESOLVED" && (
+              <div className="p-3.5 rounded border border-emerald-300 dark:border-allow/40 bg-emerald-50 dark:bg-allow/10 text-emerald-950 dark:text-allow text-xs space-y-1 font-mono">
+                <div className="flex items-center space-x-1.5 font-semibold text-emerald-900 dark:text-allow">
+                  <Check className="w-4 h-4 text-emerald-700 dark:text-allow shrink-0" aria-hidden="true" />
+                  <span>Status: Resolved</span>
+                </div>
+                {resolvedByVersion && (
+                  <div className="text-[11px] text-emerald-900 dark:text-ink">
+                    Repair Policy Version: <span className="font-mono font-medium">{resolvedByVersion}</span>
+                  </div>
+                )}
+                {resolutionNoteDisplay && (
+                  <div className="text-[11px] text-emerald-800 dark:text-muted italic font-sans">
+                    &ldquo;{resolutionNoteDisplay}&rdquo;
+                  </div>
+                )}
+              </div>
+            )}
+            {resolutionStatus === "ACCEPTED_RISK" && (
+              <div className="p-3.5 rounded border border-amber-300 dark:border-review/40 bg-amber-50 dark:bg-review/10 text-amber-950 dark:text-review text-xs space-y-1 font-mono">
+                <div className="flex items-center space-x-1.5 font-semibold text-amber-900 dark:text-review">
+                  <AlertTriangle className="w-4 h-4 text-amber-700 dark:text-review shrink-0" aria-hidden="true" />
+                  <span>Status: Risk Accepted</span>
+                </div>
+                {resolutionNoteDisplay && (
+                  <div className="text-[11px] text-amber-800 dark:text-muted italic font-sans">
+                    &ldquo;{resolutionNoteDisplay}&rdquo;
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Resolve Form */}
             {triageAction === "RESOLVE" && (
-              <div className="p-4 rounded border border-border bg-canvas/30 space-y-3 text-xs">
-                <div className="font-semibold text-ink">
+              <div className="p-4 rounded border border-border bg-surface-inset space-y-3 text-xs">
+                <div className="font-semibold text-ink font-mono">
                   Resolve Finding with Verified Policy Version
                 </div>
                 <div>
-                  <label htmlFor="resolved-by-vid" className="block text-muted text-[11px] mb-1 font-medium">
+                  <label htmlFor="resolved-by-vid" className="block text-muted text-[11px] mb-1 font-mono font-medium">
                     Repairing Policy Version UUID *
                   </label>
                   <input
@@ -373,11 +459,11 @@ export function FindingDetailModal({
                     value={resolvedByVersionId}
                     onChange={(e) => setResolvedByVersionId(e.target.value)}
                     placeholder="e.g. 18674b70-b535-465d-a99f-fee8d9de5bf0"
-                    className="w-full px-3 py-1.5 rounded border border-border bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                    className="w-full px-3 py-1.5 rounded border border-border bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
                   />
                 </div>
                 <div>
-                  <label htmlFor="resolution-note" className="block text-muted text-[11px] mb-1 font-medium">
+                  <label htmlFor="resolution-note" className="block text-muted text-[11px] mb-1 font-mono font-medium">
                     Resolution Note / Audit Explanation *
                   </label>
                   <textarea
@@ -386,14 +472,14 @@ export function FindingDetailModal({
                     value={resolutionNote}
                     onChange={(e) => setResolutionNote(e.target.value)}
                     placeholder="Document how the new policy version eliminates this vulnerability..."
-                    className="w-full p-2.5 rounded border border-border bg-surface text-ink text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                    className="w-full p-2.5 rounded border border-border bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
                   />
                 </div>
                 <button
                   type="button"
                   onClick={() => void handleResolve()}
                   disabled={!resolvedByVersionId.trim() || !resolutionNote.trim() || isSubmittingTriage}
-                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold bg-accent text-white hover:bg-accent/90 disabled:opacity-50 transition-colors"
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-mono font-semibold bg-accent text-white hover:bg-accent/90 active:bg-accent/80 disabled:opacity-50 transition-colors shadow-2xs focus:outline-none focus:ring-2 focus:ring-accent/30"
                 >
                   {isSubmittingTriage ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
@@ -407,14 +493,14 @@ export function FindingDetailModal({
 
             {/* Accept Risk Form */}
             {triageAction === "ACCEPT_RISK" && (
-              <div className="p-4 rounded border border-border bg-canvas/30 space-y-3 text-xs">
-                <div className="font-semibold text-ink">
-                  Accept Operational Risk (Medium & Low Severity Only)
+              <div className="p-4 rounded border border-border bg-surface-inset space-y-3 text-xs">
+                <div className="font-semibold text-ink font-mono">
+                  Accept Operational Risk (Medium &amp; Low Severity Only)
                 </div>
 
                 {isHighOrCritical ? (
-                  <div className="p-3 rounded border border-red-300 bg-red-50 text-red-950 space-y-1">
-                    <div className="font-bold flex items-center space-x-1.5 text-red-900">
+                  <div className="p-3 rounded border border-red-300 dark:border-deny/40 bg-red-50 dark:bg-deny/10 text-red-950 dark:text-deny space-y-1">
+                    <div className="font-bold flex items-center space-x-1.5 text-red-900 dark:text-deny font-mono">
                       <AlertCircle className="w-4 h-4 text-deny" aria-hidden="true" />
                       <span>Decision D-014 Strict Guardrail</span>
                     </div>
@@ -425,7 +511,7 @@ export function FindingDetailModal({
                 ) : (
                   <>
                     <div>
-                      <label htmlFor="risk-rationale" className="block text-muted text-[11px] mb-1 font-medium">
+                      <label htmlFor="risk-rationale" className="block text-muted text-[11px] mb-1 font-mono font-medium">
                         Owner Risk Acceptance Rationale *
                       </label>
                       <textarea
@@ -434,14 +520,14 @@ export function FindingDetailModal({
                         value={riskRationale}
                         onChange={(e) => setRiskRationale(e.target.value)}
                         placeholder="Explain why this finding is an acceptable business risk..."
-                        className="w-full p-2.5 rounded border border-border bg-surface text-ink text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                        className="w-full p-2.5 rounded border border-border bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
                       />
                     </div>
                     <button
                       type="button"
                       onClick={() => void handleAcceptRisk()}
                       disabled={!riskRationale.trim() || isSubmittingTriage}
-                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold bg-accent text-white hover:bg-accent/90 disabled:opacity-50 transition-colors"
+                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-mono font-semibold bg-accent text-white hover:bg-accent/90 active:bg-accent/80 disabled:opacity-50 transition-colors shadow-2xs focus:outline-none focus:ring-2 focus:ring-accent/30"
                     >
                       {isSubmittingTriage ? (
                         <RefreshCw className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
@@ -457,13 +543,13 @@ export function FindingDetailModal({
 
             {/* Triage feedback alerts */}
             {triageError && (
-              <div className="p-3 rounded border border-red-300 bg-red-50 text-red-950 text-xs">
+              <div className="p-3 rounded border border-red-300 dark:border-deny/40 bg-red-50 dark:bg-deny/10 text-red-950 dark:text-deny text-xs font-mono">
                 {triageError}
               </div>
             )}
             {triageSuccess && (
-              <div className="p-3 rounded border border-emerald-300 bg-emerald-50 text-emerald-950 text-xs flex items-center space-x-2">
-                <Check className="w-4 h-4 text-emerald-700 shrink-0" aria-hidden="true" />
+              <div className="p-3 rounded border border-emerald-300 dark:border-allow/40 bg-emerald-50 dark:bg-allow/10 text-emerald-950 dark:text-allow text-xs flex items-center space-x-2 font-mono">
+                <Check className="w-4 h-4 text-emerald-700 dark:text-allow shrink-0" aria-hidden="true" />
                 <span>{triageSuccess}</span>
               </div>
             )}
@@ -471,14 +557,14 @@ export function FindingDetailModal({
         </div>
 
         {/* Modal Footer with Copy Payload Action */}
-        <div className="flex items-center justify-between p-4 border-t border-border bg-canvas/30">
+        <div className="flex items-center justify-between p-4 border-t border-border bg-surface-inset">
           <button
             type="button"
             onClick={handleCopyJson}
-            className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold border border-border bg-surface text-ink hover:bg-canvas transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-mono font-semibold border border-border bg-surface text-ink hover:bg-surface-raised transition-colors shadow-2xs focus:outline-none focus:ring-2 focus:ring-accent/30"
           >
             {copiedJson ? (
-              <Check className="w-3.5 h-3.5 text-emerald-700" aria-hidden="true" />
+              <Check className="w-3.5 h-3.5 text-allow" aria-hidden="true" />
             ) : (
               <Copy className="w-3.5 h-3.5 text-muted" aria-hidden="true" />
             )}
@@ -488,7 +574,7 @@ export function FindingDetailModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 rounded text-xs font-semibold bg-accent text-white hover:bg-accent/90 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="px-4 py-1.5 rounded text-xs font-mono font-semibold bg-accent text-white hover:bg-accent/90 active:bg-accent/80 transition-colors shadow-2xs focus:outline-none focus:ring-2 focus:ring-accent/30"
           >
             Done
           </button>

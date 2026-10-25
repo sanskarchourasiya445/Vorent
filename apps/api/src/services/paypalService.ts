@@ -1,4 +1,10 @@
 import { env } from "../config/env.js";
+import type {
+  PayPalTransaction,
+  PayPalAuthStatusResponse,
+  PayPalTransactionListResponse,
+  CreateTestSandboxOrderResponse,
+} from "@warrant/contracts";
 
 export interface PayPalConfig {
   env: string;
@@ -592,6 +598,330 @@ export class PayPalService {
 
     const data = (await response.json()) as Record<string, any>;
     return data?.verification_status === "SUCCESS";
+  }
+
+  /**
+   * Probes PayPal Sandbox credentials and reports authentication readiness,
+   * environment, and granted scopes without leaking secret values.
+   */
+  async getAuthStatus(): Promise<PayPalAuthStatusResponse> {
+    const clientIdConfigured = Boolean(this.config.clientId && this.config.clientId.trim().length > 0);
+    const clientSecretConfigured = Boolean(this.config.clientSecret && this.config.clientSecret.trim().length > 0);
+    const webhookIdConfigured = Boolean(this.config.webhookId && this.config.webhookId.trim().length > 0);
+
+    if (!clientIdConfigured || !clientSecretConfigured) {
+      return {
+        environment: "sandbox",
+        authenticated: false,
+        hasTransactionSearchScope: false,
+        clientIdConfigured,
+        clientSecretConfigured,
+        webhookIdConfigured,
+        scopes: [],
+        message: "PayPal Sandbox credentials are not configured in environment.",
+      };
+    }
+
+    try {
+      const authHeader = `Basic ${Buffer.from(
+        `${this.config.clientId}:${this.config.clientSecret}`
+      ).toString("base64")}`;
+      const url = `${this.config.baseUrl}/v1/oauth2/token`;
+
+      const response = await this.fetchFn(url, {
+        method: "POST",
+        headers: {
+          Authorization: authHeader,
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: "grant_type=client_credentials",
+        signal: AbortSignal.timeout(this.config.timeoutMs),
+      });
+
+      if (!response.ok) {
+        let msg = `PayPal Sandbox OAuth failed with HTTP ${response.status}`;
+        try {
+          const body = (await response.json()) as Record<string, any>;
+          if (body?.error_description) msg = String(body.error_description);
+        } catch {}
+        return {
+          environment: "sandbox",
+          authenticated: false,
+          hasTransactionSearchScope: false,
+          clientIdConfigured,
+          clientSecretConfigured,
+          webhookIdConfigured,
+          scopes: [],
+          message: msg,
+        };
+      }
+
+      const data = (await response.json()) as Record<string, any>;
+      const scopeString = typeof data.scope === "string" ? data.scope : "";
+      const scopes = scopeString.split(" ").filter(Boolean);
+      const hasTransactionSearchScope = scopes.some((s: string) =>
+        s.includes("reporting/search") || s.includes("reporting")
+      );
+
+      if (data.access_token && typeof data.access_token === "string") {
+        const expiresIn = Number(data.expires_in) || 3600;
+        this.cachedToken = {
+          token: data.access_token,
+          expiresAt: Date.now() + Math.max(0, expiresIn - 60) * 1000,
+        };
+      }
+
+      return {
+        environment: "sandbox",
+        authenticated: true,
+        hasTransactionSearchScope,
+        clientIdConfigured,
+        clientSecretConfigured,
+        webhookIdConfigured,
+        scopes,
+        message: hasTransactionSearchScope
+          ? "PayPal Sandbox authenticated with Transaction Search scope enabled."
+          : "PayPal Sandbox authenticated successfully. (Note: Transaction Search reporting scope is not enabled on this app).",
+      };
+    } catch (err: any) {
+      return {
+        environment: "sandbox",
+        authenticated: false,
+        hasTransactionSearchScope: false,
+        clientIdConfigured,
+        clientSecretConfigured,
+        webhookIdConfigured,
+        scopes: [],
+        message: err?.message || "Failed to contact PayPal OAuth endpoint.",
+      };
+    }
+  }
+
+  /**
+   * Retrieves transaction history from PayPal Transaction Search API (/v1/reporting/transactions).
+   * Adheres to PayPal's 31-day max date range constraint.
+   * Handles 403 permission failures defensively when the app lacks search scopes.
+   */
+  async listTransactions(params?: {
+    startDate?: string;
+    endDate?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<PayPalTransactionListResponse> {
+    const authStatus = await this.getAuthStatus();
+    if (!authStatus.authenticated) {
+      throw new PayPalApiError(
+        "PAYPAL_NOT_AUTHENTICATED",
+        authStatus.message,
+        401
+      );
+    }
+
+    const now = new Date();
+    let end = params?.endDate ? new Date(params.endDate) : now;
+    if (isNaN(end.getTime())) end = now;
+
+    let start = params?.startDate
+      ? new Date(params.startDate)
+      : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+    if (isNaN(start.getTime())) {
+      start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+    }
+
+    // PayPal API allows a maximum of 31 days between start_date and end_date
+    const thirtyOneDaysMs = 31 * 24 * 60 * 60 * 1000;
+    if (end.getTime() - start.getTime() > thirtyOneDaysMs) {
+      start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+    }
+
+    const startDateIso = start.toISOString();
+    const endDateIso = end.toISOString();
+    const page = params?.page ?? 1;
+    const pageSize = Math.min(params?.pageSize ?? 20, 100);
+
+    const token = await this.getAccessToken();
+    const url = new URL(`${this.config.baseUrl}/v1/reporting/transactions`);
+    url.searchParams.set("start_date", startDateIso);
+    url.searchParams.set("end_date", endDateIso);
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("page_size", String(pageSize));
+    url.searchParams.set("fields", "all");
+
+    let response: Response;
+    try {
+      response = await this.fetchFn(url.toString(), {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        signal: AbortSignal.timeout(this.config.timeoutMs),
+      });
+    } catch (err: any) {
+      const isTimeout = err?.name === "TimeoutError" || err?.name === "AbortError";
+      throw new PayPalNetworkError(
+        isTimeout
+          ? "PayPal transaction search request timed out."
+          : "Network failure while searching PayPal transactions.",
+        false
+      );
+    }
+
+    if (response.status === 403 || response.status === 401) {
+      let message = "Authorization failed due to insufficient permissions.";
+      try {
+        const errorJson = (await response.json()) as Record<string, any>;
+        if (errorJson?.message) message = errorJson.message;
+      } catch {}
+
+      return {
+        transactions: [],
+        total: 0,
+        startDate: startDateIso,
+        endDate: endDateIso,
+        source: "PAYPAL_TRANSACTION_SEARCH_API",
+        permissionRequired: true,
+        permissionNote: `PayPal Sandbox App requires the 'Transaction Search' feature enabled (${message}). In PayPal Developer Dashboard, navigate to Apps & Credentials > [Your App] > Features, enable 'Transaction Search', and save.`,
+      };
+    }
+
+    if (!response.ok) {
+      let errorMessage = `PayPal transaction search failed with HTTP ${response.status}`;
+      try {
+        const errJson = (await response.json()) as Record<string, any>;
+        if (errJson?.message) errorMessage = errJson.message;
+      } catch {}
+      throw new PayPalApiError(
+        "PAYPAL_TRANSACTION_SEARCH_FAILED",
+        errorMessage,
+        response.status
+      );
+    }
+
+    const data = (await response.json()) as Record<string, any>;
+    const rawList = Array.isArray(data.transaction_details)
+      ? data.transaction_details
+      : [];
+
+    const mappedTransactions: PayPalTransaction[] = rawList.map((item: any) => {
+      const info = item.transaction_info ?? {};
+      const payer = item.payer_info ?? {};
+      const rawStatus = info.transaction_status ?? "S";
+      let status = "COMPLETED";
+      if (rawStatus === "S") status = "COMPLETED";
+      else if (rawStatus === "P") status = "PENDING";
+      else if (rawStatus === "D") status = "DENIED";
+      else if (rawStatus === "V") status = "REVERSED";
+      else status = rawStatus;
+
+      const amtVal = parseFloat(info.transaction_amount?.value ?? "0");
+      const amountMinor = Math.round(amtVal * 100);
+      const feeVal = info.fee_amount?.value ? parseFloat(info.fee_amount.value) : undefined;
+      const feeAmountMinor = feeVal !== undefined ? Math.round(Math.abs(feeVal) * 100) : undefined;
+
+      const payerNameParts = [payer.payer_name?.given_name, payer.payer_name?.surname].filter(Boolean);
+      const payerName = payerNameParts.length > 0 ? payerNameParts.join(" ") : null;
+
+      return {
+        transactionId: info.transaction_id ?? `tx_${Date.now()}`,
+        paypalReferenceId: info.paypal_reference_id ?? null,
+        status,
+        amountMinor,
+        currency: info.transaction_amount?.currency_code ?? "USD",
+        initiationDate: info.transaction_initiation_date ?? new Date().toISOString(),
+        updatedDate: info.transaction_updated_date ?? null,
+        payerEmail: payer.email_address ?? null,
+        payerName,
+        description: info.transaction_subject ?? info.custom_field ?? "PayPal Sandbox Transaction",
+        feeAmountMinor,
+        syncedToLedger: false,
+        associatedOrderId: null,
+      };
+    });
+
+    return {
+      transactions: mappedTransactions,
+      total: Number(data.total_items ?? mappedTransactions.length),
+      startDate: startDateIso,
+      endDate: endDateIso,
+      source: "PAYPAL_TRANSACTION_SEARCH_API",
+      permissionRequired: false,
+    };
+  }
+
+  /**
+   * Creates a standalone test checkout order on PayPal Sandbox v2 for verification and testing.
+   */
+  async createTestSandboxOrder(params?: {
+    amountMinor?: number;
+    currency?: string;
+    itemDescription?: string;
+  }): Promise<CreateTestSandboxOrderResponse> {
+    const amountMinor = params?.amountMinor ?? 1500;
+    const currency = params?.currency ?? "USD";
+    const description = params?.itemDescription ?? "PayPal Sandbox Test Purchase";
+    const formattedAmount = (amountMinor / 100).toFixed(2);
+    const token = await this.getAccessToken();
+
+    const url = `${this.config.baseUrl}/v2/checkout/orders`;
+    const idempotencyKey = `warrant:test:${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    let response: Response;
+    try {
+      response = await this.fetchFn(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "PayPal-Request-Id": idempotencyKey,
+        },
+        body: JSON.stringify({
+          intent: "CAPTURE",
+          purchase_units: [
+            {
+              description,
+              amount: {
+                currency_code: currency,
+                value: formattedAmount,
+              },
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(this.config.timeoutMs),
+      });
+    } catch (err: any) {
+      const isTimeout = err?.name === "TimeoutError" || err?.name === "AbortError";
+      throw new PayPalNetworkError(
+        isTimeout
+          ? "PayPal test order request timed out."
+          : "Network failure while creating PayPal test order.",
+        false
+      );
+    }
+
+    if (!response.ok) {
+      let safeError = `Test order creation failed with HTTP ${response.status}`;
+      try {
+        const json = (await response.json()) as Record<string, any>;
+        if (json?.message) safeError = json.message;
+      } catch {}
+      throw new PayPalApiError("TEST_ORDER_CREATION_FAILED", safeError, response.status);
+    }
+
+    const data = (await response.json()) as Record<string, any>;
+    const approveLink = data.links?.find((l: any) => l.rel === "approve")?.href;
+
+    return {
+      id: data.id,
+      status: data.status ?? "CREATED",
+      approvalUrl: approveLink,
+      amountMinor,
+      currency,
+      createdAt: new Date().toISOString(),
+    };
   }
 }
 

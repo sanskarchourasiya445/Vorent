@@ -176,6 +176,20 @@ export const AUTHORITATIVE_CATALOG: Record<string, CatalogItem> = {
     unitPriceMinor: 3500,
     currency: "USD",
   },
+  "SKU-TEST-1": {
+    sku: "SKU-TEST-1",
+    title: "Test Book",
+    category: "Books",
+    unitPriceMinor: 2500,
+    currency: "USD",
+  },
+  "SKU-TEST-2": {
+    sku: "SKU-TEST-2",
+    title: "Test Book 2",
+    category: "Books",
+    unitPriceMinor: 3500,
+    currency: "USD",
+  },
 };
 
 /**

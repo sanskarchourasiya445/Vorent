@@ -13,6 +13,10 @@ import {
   PaymentOrderListResponseSchema,
   ReconciliationAlertsResponseSchema,
   SpendReservationListResponseSchema,
+  PayPalAuthStatusResponseSchema,
+  PayPalTransactionListResponseSchema,
+  PayPalSyncResponseSchema,
+  CreateTestSandboxOrderResponseSchema,
   type CreatePaymentOrderRequest,
   type CreatePaymentOrderResponse,
   type ConfirmBuyerApprovalRequest,
@@ -25,6 +29,11 @@ import {
   type ReconcilePaymentOrderResponse,
   type PaymentOrderRecord,
   type SpendReservationRecord,
+  type PayPalAuthStatusResponse,
+  type PayPalTransactionListResponse,
+  type PayPalSyncResponse,
+  type CreateTestSandboxOrderResponse,
+  type CreateTestSandboxOrderRequest,
 } from "@warrant/contracts";
 import { z } from "zod";
 
@@ -49,7 +58,7 @@ export class PaymentOrderError extends Error {
 async function executePaymentOrderRequest<T>(
   url: string,
   options: RequestInit,
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, any, any>,
   actionDescription: string,
 ): Promise<T> {
   let response: Response;
@@ -573,3 +582,71 @@ export async function listSpendReservations(): Promise<SpendReservationsResult> 
     };
   }
 }
+
+/**
+ * 10. Probes PayPal Sandbox credentials and connectivity state.
+ */
+export async function getPayPalAuthStatus(): Promise<PayPalAuthStatusResponse> {
+  return executePaymentOrderRequest(
+    `${API_BASE}/api/paypal/auth-status`,
+    { method: "GET" },
+    PayPalAuthStatusResponseSchema,
+    "PayPal Sandbox authentication check",
+  );
+}
+
+/**
+ * 11. Retrieves PayPal Sandbox transaction history with date filters and pagination.
+ */
+export async function listPayPalTransactions(params?: {
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<PayPalTransactionListResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.startDate) searchParams.set("startDate", params.startDate);
+  if (params?.endDate) searchParams.set("endDate", params.endDate);
+  if (params?.page) searchParams.set("page", String(params.page));
+  if (params?.pageSize) searchParams.set("pageSize", String(params.pageSize));
+
+  const queryStr = searchParams.toString();
+  const url = `${API_BASE}/api/paypal/transactions${queryStr ? `?${queryStr}` : ""}`;
+
+  return executePaymentOrderRequest(
+    url,
+    { method: "GET" },
+    PayPalTransactionListResponseSchema,
+    "PayPal Sandbox transaction list",
+  );
+}
+
+/**
+ * 12. Triggers active synchronization of PayPal Sandbox orders and transactions.
+ */
+export async function syncPayPalTransactions(): Promise<PayPalSyncResponse> {
+  return executePaymentOrderRequest(
+    `${API_BASE}/api/paypal/sync`,
+    { method: "POST" },
+    PayPalSyncResponseSchema,
+    "PayPal Sandbox synchronization",
+  );
+}
+
+/**
+ * 13. Creates a test purchase order in PayPal Sandbox for workflow verification.
+ */
+export async function createPayPalTestOrder(
+  params?: CreateTestSandboxOrderRequest,
+): Promise<CreateTestSandboxOrderResponse> {
+  return executePaymentOrderRequest(
+    `${API_BASE}/api/paypal/test-order`,
+    {
+      method: "POST",
+      body: JSON.stringify(params || {}),
+    },
+    CreateTestSandboxOrderResponseSchema,
+    "Create test PayPal Sandbox order",
+  );
+}
+

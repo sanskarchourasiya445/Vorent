@@ -45,6 +45,7 @@ describe("auditRepository", () => {
       const payload = {
         name: "Test proposal",
         client_secret: "super-secret-value",
+        cookie: "session_id=abcdef123456",
         nested: {
           access_token: "bearer-token-12345",
           password: "my-password",
@@ -56,11 +57,25 @@ describe("auditRepository", () => {
       const redacted = redactSensitiveAuditPayload(payload) as any;
       expect(redacted.name).toBe("Test proposal");
       expect(redacted.client_secret).toBe("[REDACTED]");
+      expect(redacted.cookie).toBe("[REDACTED]");
       expect(redacted.nested.access_token).toBe("[REDACTED]");
       expect(redacted.nested.password).toBe("[REDACTED]");
       expect(redacted.nested.safeField).toBe(42);
       expect(redacted.nested.array[0].apiKey).toBe("[REDACTED]");
       expect(redacted.nested.array[0].label).toBe("allowed");
+    });
+
+    it("verifies redaction boundary: property-key based, leaving free-text values intact", () => {
+      const payload = {
+        auditNote: "User entered invalid password format during checkout",
+        systemMessage: "Bearer token expired at 12:00 UTC",
+      };
+
+      const redacted = redactSensitiveAuditPayload(payload) as any;
+      // Key-based redaction: because 'auditNote' and 'systemMessage' do not match sensitive key patterns,
+      // free-text strings are preserved. This establishes the documented boundary.
+      expect(redacted.auditNote).toBe("User entered invalid password format during checkout");
+      expect(redacted.systemMessage).toBe("Bearer token expired at 12:00 UTC");
     });
   });
 

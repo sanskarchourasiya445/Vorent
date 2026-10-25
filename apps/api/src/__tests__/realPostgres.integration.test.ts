@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { pool, db } from "../db/index.js";
 import { buildServer } from "../server.js";
@@ -41,8 +42,12 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
       isDbLive = true;
 
       // Apply migrations if DB is live and reachable
+      const migrationsFolder = existsSync(resolve(process.cwd(), "drizzle/migrations"))
+        ? resolve(process.cwd(), "drizzle/migrations")
+        : resolve(process.cwd(), "../../drizzle/migrations");
+
       await migrate(db, {
-        migrationsFolder: resolve(process.cwd(), "drizzle/migrations"),
+        migrationsFolder,
       });
     } catch {
       isDbLive = false;

@@ -39,7 +39,7 @@ export async function compileMandateWithLLM(
     /set budget to unlimited/i.test(text) ||
     /bypass (all )?(policy|rules|guardrails)/i.test(text);
 
-  if (!apiKey || apiKey.trim() === "" || apiKey === "mock" || apiKey === "demo") {
+  if (!apiKey || apiKey.trim() === "" || apiKey === "mock" || apiKey === "demo" || apiKey.startsWith("placeholder_")) {
     // Deterministic fallback mode (Task AI.3)
     const deterministic = compileIntent(normalizedRequest);
     if (isAdversarial) {
@@ -80,7 +80,7 @@ Return ONLY valid JSON matching this structure:
 }`;
 
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

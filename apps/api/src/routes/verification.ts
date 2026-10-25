@@ -247,6 +247,15 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
         });
       } catch (err: unknown) {
         request.log.error({ err, requestId }, "Failed to persist verification run to database");
+        if (isDbConnectionError(err)) {
+          return reply.status(503).send({
+            error: {
+              code: "DATABASE_UNAVAILABLE",
+              message: "Persistence store is currently unavailable in standby mode.",
+            },
+            requestId,
+          });
+        }
         return reply.status(500).send({
           error: {
             code: "PERSISTENCE_ERROR",

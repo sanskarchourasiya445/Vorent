@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
-import { extractRequestId } from "./routeUtils.js";
+import { extractRequestId, isDbConnectionError } from "./routeUtils.js";
 import {
   CreatePolicyRequestSchema,
   CreatePolicyVersionRequestSchema,
@@ -35,6 +35,15 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(200).send(validated);
     } catch (err: unknown) {
       request.log.error({ err, requestId }, "Failed to list policies");
+      if (isDbConnectionError(err)) {
+        return reply.status(503).send({
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "Persistence store is currently unavailable in standby mode.",
+          },
+          requestId,
+        });
+      }
       return reply.status(500).send({
         error: {
           code: "INTERNAL_ERROR",
@@ -76,6 +85,15 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(200).send(policyVersion);
     } catch (err: unknown) {
       request.log.error({ err, requestId, id }, "Failed to retrieve policy");
+      if (isDbConnectionError(err)) {
+        return reply.status(503).send({
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "Persistence store is currently unavailable in standby mode.",
+          },
+          requestId,
+        });
+      }
       return reply.status(500).send({
         error: {
           code: "INTERNAL_ERROR",
@@ -112,6 +130,15 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(201).send(createdRecord);
     } catch (err: unknown) {
       request.log.error({ err, requestId }, "Failed to create policy in database");
+      if (isDbConnectionError(err)) {
+        return reply.status(503).send({
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "Persistence store is currently unavailable in standby mode.",
+          },
+          requestId,
+        });
+      }
       return reply.status(500).send({
         error: {
           code: "PERSISTENCE_ERROR",
@@ -172,6 +199,15 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(200).send(validated);
     } catch (err: unknown) {
       request.log.error({ err, requestId, id }, "Failed to list policy versions");
+      if (isDbConnectionError(err)) {
+        return reply.status(503).send({
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "Persistence store is currently unavailable in standby mode.",
+          },
+          requestId,
+        });
+      }
       return reply.status(500).send({
         error: {
           code: "INTERNAL_ERROR",
@@ -231,6 +267,15 @@ export const policyRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       request.log.error({ err, requestId, id }, "Failed to create policy version in database");
+      if (isDbConnectionError(err)) {
+        return reply.status(503).send({
+          error: {
+            code: "DATABASE_UNAVAILABLE",
+            message: "Persistence store is currently unavailable in standby mode.",
+          },
+          requestId,
+        });
+      }
       return reply.status(500).send({
         error: {
           code: "PERSISTENCE_ERROR",

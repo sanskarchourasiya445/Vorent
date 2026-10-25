@@ -34,6 +34,7 @@ const SENSITIVE_KEY_PATTERNS = [
   /private[-_]?key/i,
   /credential/i,
   /bearer/i,
+  /cookie/i,
 ];
 
 /**

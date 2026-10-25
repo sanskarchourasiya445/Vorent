@@ -2,23 +2,305 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --color-canvas: #F5F6F8;
+/* ==========================================================================
+   WARRANT STUDIO — DUAL-THEME TOKENS ENGINE
+   Theme 1 (Dark): Midnight Navy + Emerald
+   Theme 2 (Light): Forest Green + Warm Ivory
+   ========================================================================== */
+
+/* DARK MODE (Default & .dark & [data-theme="dark"]) — Midnight Navy + Emerald */
+:root,
+html.dark,
+:root[data-theme="dark"] {
+  /* Specification Semantic Tokens */
+  --bg-primary: #0B1220;
+  --bg-secondary: #101B2D;
+  --bg-card: #14263D;
+  --bg-elevated: #1E293B;
+  --brand-primary: #10B981;
+  --brand-secondary: #059669;
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --border-default: #334155;
+  --soft-accent-surface: #0E2E25;
+  --success: #22C55E;
+  --error: #F87171;
+  --warning: #FBBF24;
+
+  /* App Surface & Canvas Mappings */
+  --color-canvas: #0B1220;
+  --color-canvas-subtle: #101B2D;
+  --color-sidebar: #0B1220;
+  --color-sidebar-raised: #14263D;
+  --color-surface: #14263D;
+  --color-surface-soft: #16263D;
+  --color-surface-subtle: #101B2D;
+  --color-surface-raised: #1E293B;
+  --color-surface-inset: #0E1A2B;
+  --color-surface-muted: #101E31;
+  --color-card: #14263D;
+  --color-chrome: #0B1220;
+
+  /* Typography */
+  --color-ink: #F8FAFC;
+  --color-ink-muted: #94A3B8;
+  --color-ink-secondary: #94A3B8;
+  --color-muted: #94A3B8;
+  --color-ink-subtle: #64748B;
+  --color-white-warm: #F8FAFC;
+
+  /* Borders & Dividers */
+  --color-border: #334155;
+  --color-border-subtle: #1E293B;
+  --color-border-light: #334155;
+  --color-border-strong: #475569;
+
+  /* Accents & Brand */
+  --color-primary: #10B981;
+  --color-primary-hover: #059669;
+  --color-primary-active: #047857;
+  --color-primary-soft: #0E2E25;
+  --color-accent: #10B981;
+  --color-accent-hover: #059669;
+  --color-accent-active: #047857;
+  --color-accent-subtle: #0E2E25;
+  --color-focus-ring: #10B981;
+
+  /* Accent Metallics */
+  --color-brass: #D4C596;
+  --color-earth: #D4C596;
+  --color-earth-soft: #2A2417;
+
+  /* Operational Status & Decision Semantics */
+  --color-allow: #22C55E;
+  --color-allow-bg: #0B2519;
+  --color-allow-border: #134E35;
+  --color-success: #22C55E;
+  --color-success-soft: #0D2818;
+
+  --color-deny: #F87171;
+  --color-deny-bg: #331414;
+  --color-deny-border: #7F1D1D;
+  --color-danger: #F87171;
+  --color-danger-soft: #331414;
+  --color-red-soft: #331414;
+  --color-red-ink: #FCA5A5;
+
+  --color-review: #FBBF24;
+  --color-review-bg: #2E2007;
+  --color-review-border: #78350F;
+  --color-warning: #FBBF24;
+  --color-warning-soft: #2E2007;
+
+  --color-info: #38BDF8;
+  --color-info-soft: #0C283E;
+  --color-disabled: #475569;
+
+  /* Sandbox Environment Badge */
+  --color-sandbox-bg: #2E2007;
+  --color-sandbox-text: #FCD34D;
+  --color-sandbox-border: #78350F;
+}
+
+/* LIGHT MODE (.light & [data-theme="light"]) — Forest Green + Warm Ivory */
+html.light,
+:root[data-theme="light"] {
+  /* Specification Semantic Tokens */
+  --bg-primary: #F7F5EF;
+  --bg-secondary: #F0EFE7;
+  --bg-card: #FFFFFF;
+  --bg-elevated: #FFFFFF;
+  --brand-primary: #12372A;
+  --brand-secondary: #1D6B4F;
+  --text-primary: #24352D;
+  --text-secondary: #69776D;
+  --border-default: #DFE4DC;
+  --soft-green-surface: #E5EEE7;
+  --champagne-accent: #D6B56D;
+  --success: #18794E;
+  --error: #B94343;
+  --warning: #946200;
+
+  /* App Surface & Canvas Mappings */
+  --color-canvas: #F7F5EF;
+  --color-canvas-subtle: #F0EFE7;
+  --color-sidebar: #F0EFE7;
+  --color-sidebar-raised: #FFFFFF;
   --color-surface: #FFFFFF;
-  --color-ink: #172033;
-  --color-muted: #5B6475;
-  --color-border: #D8DDE6;
-  --color-accent: #3157A4;
-  --color-allow: #176B4D;
-  --color-deny: #B42318;
-  --color-review: #8A5A00;
-  --color-info: #245EA8;
-  --color-disabled: #A3AAB7;
+  --color-surface-soft: #E5EEE7;
+  --color-surface-subtle: #F7F5EF;
+  --color-surface-raised: #FFFFFF;
+  --color-surface-inset: #EAE8DF;
+  --color-surface-muted: #F0EFE7;
+  --color-card: #FFFFFF;
+  --color-chrome: #F0EFE7;
+
+  /* Typography */
+  --color-ink: #24352D;
+  --color-ink-muted: #69776D;
+  --color-ink-secondary: #69776D;
+  --color-muted: #69776D;
+  --color-ink-subtle: #8A978E;
+  --color-white-warm: #24352D;
+
+  /* Borders & Dividers */
+  --color-border: #DFE4DC;
+  --color-border-subtle: #ECEFEA;
+  --color-border-light: #DFE4DC;
+  --color-border-strong: #B8C4B4;
+
+  /* Accents & Brand */
+  --color-primary: #12372A;
+  --color-primary-hover: #1D6B4F;
+  --color-primary-active: #0D261D;
+  --color-primary-soft: #E5EEE7;
+  --color-accent: #12372A;
+  --color-accent-hover: #1D6B4F;
+  --color-accent-active: #0D261D;
+  --color-accent-subtle: #E5EEE7;
+  --color-focus-ring: #1D6B4F;
+
+  /* Champagne Accent */
+  --color-brass: #D6B56D;
+  --color-earth: #D6B56D;
+  --color-earth-soft: #FAF4E6;
+
+  /* Operational Status & Decision Semantics */
+  --color-allow: #18794E;
+  --color-allow-bg: #E8F5EE;
+  --color-allow-border: #A3D9BD;
+  --color-success: #18794E;
+  --color-success-soft: #E8F5EE;
+
+  --color-deny: #B94343;
+  --color-deny-bg: #FDECEC;
+  --color-deny-border: #F5B8B8;
+  --color-danger: #B94343;
+  --color-danger-soft: #FDECEC;
+  --color-red-soft: #FDECEC;
+  --color-red-ink: #B94343;
+
+  --color-review: #946200;
+  --color-review-bg: #FEF7E6;
+  --color-review-border: #F0D28E;
+  --color-warning: #946200;
+  --color-warning-soft: #FEF7E6;
+
+  --color-info: #0284C7;
+  --color-info-soft: #E0F2FE;
+  --color-disabled: #A1ACA5;
+
+  /* Sandbox Environment Badge */
+  --color-sandbox-bg: #FEF3C7;
+  --color-sandbox-text: #92400E;
+  --color-sandbox-border: #F59E0B;
 }
 
 body {
   background-color: var(--color-canvas);
   color: var(--color-ink);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: 'Inter', 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Editorial serif utility */
+.font-serif {
+  font-family: 'Source Serif 4', Georgia, Cambria, 'Times New Roman', serif;
+  font-feature-settings: "kern", "liga", "clig", "calt";
+}
+
+/* Tabular figures for numerical stability in financial ledgers */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Technical Monospace Font Standard */
+.font-mono {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  letter-spacing: -0.01em;
+}
+
+/* Dynamic Scrollbar Theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-canvas);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+/* Hide scrollbar utility for touch/horizontal tab strips */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Sidebar scrollbar */
+.sidebar-dark-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+.sidebar-dark-scrollbar::-webkit-scrollbar-track {
+  background: var(--color-sidebar);
+}
+.sidebar-dark-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2.5px;
+}
+.sidebar-dark-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Official Lenis integration & boundary isolation */
+html.lenis, html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+.lenis.lenis-scrolling iframe {
+  pointer-events: none;
+}
+
+/* Restrained motion & interaction utilities matching fintech design system */
+.motion-enter {
+  transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.motion-interactive {
+  transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out;
+}
+.motion-interactive:active {
+  background-color: var(--color-surface-inset);
+}
+.motion-tab {
+  transition: border-color 180ms ease-out, color 180ms ease-out, background-color 180ms ease-out;
+}
+.motion-drawer {
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease-out;
 }

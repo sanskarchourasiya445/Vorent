@@ -6,6 +6,7 @@ import {
   reconcilePaymentOrder,
   processWebhookEvent,
   canTransitionPaymentStatus,
+  syncPayPalTransactions,
 } from "../db/repositories/paymentOrderRepository.js";
 import { CheckoutError } from "../db/repositories/checkoutProposalRepository.js";
 import { PayPalNetworkError } from "../services/paypalService.js";
@@ -40,23 +41,35 @@ describe("PaymentOrderRepository Comprehensive Lifecycle Tests (Phase 1)", () =>
       _updates: updates,
       _inserts: inserts,
       select: vi.fn().mockImplementation(() => ({
-        from: vi.fn().mockImplementation((table: any) => ({
-          where: vi.fn().mockImplementation(async (clause: any) => {
-            if (table === paymentOrders) {
-              const hasCaptureId = clause?.queryChunks?.some((c: any) => c?.name === "capture_id");
-              const hasOrderId = clause?.queryChunks?.some((c: any) => c?.name === "provider_order_id" || c?.name === "reservation_id");
-              if (hasCaptureId && !hasOrderId) {
-                return (setup.orders ?? []).filter((o: any) => Boolean(o.captureId));
-              }
-              return setup.orders ?? [];
-            }
+        from: vi.fn().mockImplementation((table: any) => {
+          const getData = () => {
+            if (table === paymentOrders) return setup.orders ?? [];
             if (table === spendReservations) return setup.reservations ?? [];
             if (table === checkoutProposals) return setup.proposals ?? [];
             if (table === approvals) return setup.approvals ?? [];
             if (table === webhookEvents) return setup.webhookEvents ?? [];
             return [];
-          }),
-        })),
+          };
+
+          const queryObj: any = {
+            $dynamic: vi.fn().mockReturnThis(),
+            where: vi.fn().mockImplementation(async (clause: any) => {
+              if (table === paymentOrders) {
+                const hasCaptureId = clause?.queryChunks?.some((c: any) => c?.name === "capture_id");
+                const hasOrderId = clause?.queryChunks?.some((c: any) => c?.name === "provider_order_id" || c?.name === "reservation_id");
+                if (hasCaptureId && !hasOrderId) {
+                  return (setup.orders ?? []).filter((o: any) => Boolean(o.captureId));
+                }
+                return setup.orders ?? [];
+              }
+              return getData();
+            }),
+            orderBy: vi.fn().mockImplementation(() => ({
+              limit: vi.fn().mockImplementation(async () => getData()),
+            })),
+          };
+          return queryObj;
+        }),
       })),
       update: vi.fn().mockImplementation((table: any) => ({
         set: vi.fn().mockImplementation((values: any) => ({
@@ -497,6 +510,56 @@ describe("PaymentOrderRepository Comprehensive Lifecycle Tests (Phase 1)", () =>
       expect(result.order.status).toBe("CAPTURED");
       expect(result.reservationState).toBe("COMMITTED");
     });
+
+    it("detects settlement amount discrepancy during reconcile and transitions to RECONCILIATION_HOLD", async () => {
+      const order = {
+        id: validOrderId,
+        ownerId: validOwnerId,
+        reservationId: validReservationId,
+        providerOrderId: validPayPalOrderId,
+        status: "APPROVED",
+        amountMinor: 4500, // $45.00
+        currency: "USD",
+      };
+      const res = { id: validReservationId, state: "RESERVED" };
+      const db = createMockDb({ orders: [order], reservations: [res] });
+
+      const mockPayPal: any = {
+        getOrder: vi.fn().mockResolvedValueOnce({
+          id: validPayPalOrderId,
+          status: "COMPLETED",
+          purchaseUnits: [
+            {
+              payments: {
+                captures: [
+                  {
+                    id: "CAP-REC-DIFF",
+                    status: "COMPLETED",
+                    amount: { value: "99.00", currency_code: "USD" }, // Discrepancy: $99 vs $45
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      };
+
+      const result = await reconcilePaymentOrder(
+        db,
+        { orderId: validOrderId, ownerId: validOwnerId },
+        mockPayPal
+      );
+
+      expect(result.reconciled).toBe(false);
+      expect(result.reservationState).toBe("RECONCILIATION_HOLD");
+      expect(result.notes).toContain("Reconciliation exception: Remote settlement amount");
+      expect(result.notes).toContain("RECONCILIATION_HOLD");
+
+      const orderUpdate = db._updates.find((u: any) => u.table === paymentOrders);
+      expect(orderUpdate.values.status).toBe("UNKNOWN_REQUIRES_RECONCILIATION");
+      const resUpdate = db._updates.find((u: any) => u.table === spendReservations);
+      expect(resUpdate.values.state).toBe("RECONCILIATION_HOLD");
+    });
   });
 
   // ==========================================
@@ -678,6 +741,250 @@ describe("PaymentOrderRepository Comprehensive Lifecycle Tests (Phase 1)", () =>
       expect(result.actionTaken).toBe("CAPTURE_MARKED_PENDING");
       const orderUpdate = db._updates.find((u: any) => u.table === paymentOrders);
       expect(orderUpdate.values.status).toBe("CAPTURE_PENDING");
+    });
+
+    it("ignores out-of-order PAYMENT.CAPTURE.DENIED when order is already CAPTURED to prevent terminal state regression", async () => {
+      const capturedOrder = {
+        id: validOrderId,
+        providerOrderId: validPayPalOrderId,
+        reservationId: validReservationId,
+        status: "CAPTURED", // Terminal state
+        captureId: "CAP-FINAL-01",
+      };
+      const committedRes = { id: validReservationId, state: "COMMITTED" };
+      const db = createMockDb({
+        orders: [capturedOrder],
+        reservations: [committedRes],
+        webhookEvents: [],
+      });
+
+      const lateDeniedEvent = {
+        id: "WH-EVT-LATE-DENIED",
+        event_version: "1.0",
+        create_time: "2026-10-19T14:20:00Z",
+        resource_type: "capture",
+        event_type: "PAYMENT.CAPTURE.DENIED",
+        resource: {
+          id: "CAP-FINAL-01",
+          status: "DENIED",
+          supplementary_data: { related_ids: { order_id: validPayPalOrderId } },
+        },
+      };
+
+      const mockPayPal: any = {
+        verifyWebhookSignature: vi.fn().mockResolvedValueOnce(true),
+      };
+
+      const result = await processWebhookEvent(
+        db,
+        { event: lateDeniedEvent, headers: validHeaders },
+        mockPayPal
+      );
+
+      expect(result.received).toBe(true);
+      expect(result.actionTaken).toBe("EVENT_RECORDED");
+      // Zero updates to paymentOrders or spendReservations
+      const orderUpdate = db._updates.find((u: any) => u.table === paymentOrders);
+      expect(orderUpdate).toBeUndefined();
+      const resUpdate = db._updates.find((u: any) => u.table === spendReservations);
+      expect(resUpdate).toBeUndefined();
+    });
+
+    it("ignores out-of-order CHECKOUT.ORDER.APPROVED when order is already CAPTURED or CANCELLED", async () => {
+      const cancelledOrder = {
+        id: validOrderId,
+        providerOrderId: validPayPalOrderId,
+        reservationId: validReservationId,
+        status: "CANCELLED", // Terminal state
+      };
+      const releasedRes = { id: validReservationId, state: "RELEASED" };
+      const db = createMockDb({
+        orders: [cancelledOrder],
+        reservations: [releasedRes],
+        webhookEvents: [],
+      });
+
+      const lateApprovedEvent = {
+        id: "WH-EVT-LATE-APPROVED",
+        event_version: "1.0",
+        create_time: "2026-10-19T14:25:00Z",
+        resource_type: "checkout-order",
+        event_type: "CHECKOUT.ORDER.APPROVED",
+        resource: {
+          id: validPayPalOrderId,
+          status: "APPROVED",
+        },
+      };
+
+      const mockPayPal: any = {
+        verifyWebhookSignature: vi.fn().mockResolvedValueOnce(true),
+      };
+
+      const result = await processWebhookEvent(
+        db,
+        { event: lateApprovedEvent, headers: validHeaders },
+        mockPayPal
+      );
+
+      expect(result.received).toBe(true);
+      expect(result.actionTaken).toBe("EVENT_RECORDED");
+      // Must not advance CANCELLED to APPROVED
+      expect(db._updates.length).toBe(0);
+    });
+
+    it("transitions order and reservation to RECONCILIATION_HOLD when captured amount does not match trusted database order (CAPTURE_AMOUNT_MISMATCH)", async () => {
+      const validApproval = {
+        id: validApprovalId,
+        policyHash: validPolicyHash,
+        spendLimitMinor: 10000,
+        currency: "USD",
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 86400000),
+      };
+      const validProposal = {
+        id: validProposalId,
+        policyHash: validPolicyHash,
+        decision: "ALLOW",
+      };
+      const validReservation = {
+        id: validReservationId,
+        approvalId: validApprovalId,
+        proposalId: validProposalId,
+        amountMinor: 4500, // $45.00
+        currency: "USD",
+        state: "RESERVED",
+      };
+      const validOrder = {
+        id: validOrderId,
+        ownerId: validOwnerId,
+        reservationId: validReservationId,
+        proposalId: validProposalId,
+        providerOrderId: validPayPalOrderId,
+        status: "APPROVED",
+        amountMinor: 4500, // $45.00
+        currency: "USD",
+      };
+
+      const db = createMockDb({
+        orders: [validOrder],
+        reservations: [validReservation],
+        proposals: [validProposal],
+        approvals: [validApproval],
+      });
+
+      // Provider returns $99.00 instead of expected $45.00
+      const mockPayPal: any = {
+        captureOrder: vi.fn().mockResolvedValueOnce({
+          orderId: validPayPalOrderId,
+          orderStatus: "COMPLETED",
+          captureId: "CAP-MISMATCH-99",
+          captureStatus: "COMPLETED",
+          amount: { currencyCode: "USD", value: "99.00" },
+        }),
+      };
+
+      await expect(
+        capturePaymentOrder(db, { orderId: validOrderId, ownerId: validOwnerId }, mockPayPal)
+      ).rejects.toThrowError(/CAPTURE_AMOUNT_MISMATCH/);
+
+      // Verify safe transition to RECONCILIATION_HOLD
+      const orderUpdate = db._updates.find((u: any) => u.table === paymentOrders);
+      expect(orderUpdate.values.status).toBe("UNKNOWN_REQUIRES_RECONCILIATION");
+      expect(orderUpdate.values.captureId).toBe("CAP-MISMATCH-99");
+
+      const resUpdate = db._updates.find((u: any) => u.table === spendReservations);
+      expect(resUpdate.values.state).toBe("RECONCILIATION_HOLD");
+    });
+  });
+
+  // ==========================================
+  // LEDGER SYNCHRONIZATION & RECONCILIATION
+  // ==========================================
+  describe("syncPayPalTransactions", () => {
+    it("matches PayPal transaction by captureId and commits when amount matches", async () => {
+      const order = {
+        id: validOrderId,
+        ownerId: validOwnerId,
+        reservationId: validReservationId,
+        providerOrderId: validPayPalOrderId,
+        captureId: "CAP-TX-100",
+        status: "APPROVED",
+        amountMinor: 4500,
+        currency: "USD",
+      };
+      const res = { id: validReservationId, state: "RESERVED" };
+      const db = createMockDb({ orders: [order], reservations: [res] });
+
+      const txs = [
+        {
+          transactionId: "CAP-TX-100",
+          paypalReferenceId: null,
+          status: "COMPLETED",
+          amountMinor: 4500,
+          currency: "USD",
+          initiationDate: new Date().toISOString(),
+          updatedDate: null,
+          payerEmail: "buyer@sandbox.com",
+          payerName: "John Buyer",
+          description: "Test Capture",
+          feeAmountMinor: 150,
+          syncedToLedger: false,
+          associatedOrderId: null,
+        },
+      ];
+
+      const syncResult = await syncPayPalTransactions(db, txs, validOwnerId);
+      expect(syncResult.syncedCount).toBe(1);
+      expect(syncResult.updatedCount).toBe(1);
+      expect(syncResult.transactions[0]!.syncedToLedger).toBe(true);
+      expect(syncResult.transactions[0]!.associatedOrderId).toBe(validOrderId);
+
+      const orderUpdate = db._updates.find((u: any) => u.table === paymentOrders);
+      expect(orderUpdate.values.status).toBe("CAPTURED");
+      const resUpdate = db._updates.find((u: any) => u.table === spendReservations);
+      expect(resUpdate.values.state).toBe("COMMITTED");
+    });
+
+    it("detects amount mismatch in PayPal transaction and flags RECONCILIATION_HOLD instead of committing", async () => {
+      const order = {
+        id: validOrderId,
+        ownerId: validOwnerId,
+        reservationId: validReservationId,
+        providerOrderId: validPayPalOrderId,
+        captureId: "CAP-TX-MISMATCH",
+        status: "APPROVED",
+        amountMinor: 4500, // $45.00
+        currency: "USD",
+      };
+      const res = { id: validReservationId, state: "RESERVED" };
+      const db = createMockDb({ orders: [order], reservations: [res] });
+
+      const txs = [
+        {
+          transactionId: "CAP-TX-MISMATCH",
+          paypalReferenceId: null,
+          status: "COMPLETED",
+          amountMinor: 9900, // $99.00 -> Discrepancy!
+          currency: "USD",
+          initiationDate: new Date().toISOString(),
+          updatedDate: null,
+          payerEmail: "buyer@sandbox.com",
+          payerName: "John Buyer",
+          description: "Discrepancy Capture",
+          feeAmountMinor: 250,
+          syncedToLedger: false,
+          associatedOrderId: null,
+        },
+      ];
+
+      const syncResult = await syncPayPalTransactions(db, txs, validOwnerId);
+      expect(syncResult.syncedCount).toBe(0); // Not marked synced due to discrepancy
+      expect(syncResult.updatedCount).toBe(0); // Not committed!
+
+      const orderUpdate = db._updates.find((u: any) => u.table === paymentOrders);
+      expect(orderUpdate.values.status).toBe("UNKNOWN_REQUIRES_RECONCILIATION");
+      const resUpdate = db._updates.find((u: any) => u.table === spendReservations);
+      expect(resUpdate.values.state).toBe("RECONCILIATION_HOLD");
     });
   });
 });

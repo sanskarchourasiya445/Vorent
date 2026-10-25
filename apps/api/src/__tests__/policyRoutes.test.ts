@@ -116,6 +116,38 @@ describe("Policy CRUD and Workflow Routes Integration (LEAN-005 & LEAN-007)", ()
     });
   });
 
+  describe("Validation & Error handling", () => {
+    it("POST /api/policies/compile rejects invalid or empty payload with 400 VALIDATION_ERROR", async () => {
+      const res = await server.inject({
+        method: "POST",
+        url: "/api/policies/compile",
+        payload: {},
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = res.json();
+      expect(body.error.code).toBe("VALIDATION_ERROR");
+      expect(body.error.message).toContain("mandateText");
+      expect(body.requestId).toBeDefined();
+    });
+
+    it("POST /api/policies/diff rejects incomplete diff payload with 400 VALIDATION_ERROR", async () => {
+      const res = await server.inject({
+        method: "POST",
+        url: "/api/policies/diff",
+        payload: {
+          sourcePolicy: CANONICAL_POLICY_PRESETS.pol_v1_books_hardware!.policyDocument,
+          // targetPolicy is missing!
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = res.json();
+      expect(body.error.code).toBe("VALIDATION_ERROR");
+      expect(body.error.message).toContain("targetPolicy");
+    });
+  });
+
   describe("Operational v1 compatibility aliases (LEAN-005)", () => {
     it("GET /api/v1/policies is an operational alias for GET /api/policies", async () => {
       const res = await server.inject({

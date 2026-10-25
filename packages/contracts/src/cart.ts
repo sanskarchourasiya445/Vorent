@@ -25,6 +25,7 @@ export const CartItemSchema = z.preprocess(
     quantity: z
       .number()
       .int("Quantity must be an integer")
+      .positive("Quantity must be a positive integer")
       .max(Number.MAX_SAFE_INTEGER, "Quantity exceeds maximum safe integer"),
     currency: z.string().length(3, "Currency code must be 3 characters").optional(),
   }).passthrough()

@@ -44,6 +44,8 @@ export const SubmitCheckoutProposalRequestSchema = z.object({
 });
 
 export type SubmitCheckoutProposalRequest = z.infer<typeof SubmitCheckoutProposalRequestSchema>;
+export const CreateCheckoutProposalRequestSchema = SubmitCheckoutProposalRequestSchema;
+export type CreateCheckoutProposalRequest = SubmitCheckoutProposalRequest;
 
 /**
  * Spend Reservation Record Schema

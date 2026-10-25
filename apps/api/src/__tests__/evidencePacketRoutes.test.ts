@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { buildServer } from "../server.js";
@@ -8,6 +8,9 @@ import {
 } from "@warrant/contracts";
 import { verifyEvidencePacketIntegrity } from "@warrant/domain";
 import { buildEvidencePacketForProposal } from "../services/evidencePacketService.js";
+import * as auditRepo from "../db/repositories/auditRepository.js";
+import * as policyRepo from "../db/repositories/policyRepository.js";
+import { db } from "../db/index.js";
 import {
   checkoutProposals,
   approvals,
@@ -36,6 +39,11 @@ describe("Evidence Packet and Audit API Routes", () => {
 
   describe("GET /api/audit-events", () => {
     it("returns 200 and matches AuditEventListResponseSchema", async () => {
+      vi.spyOn(auditRepo, "listAuditEvents").mockResolvedValueOnce({
+        events: [],
+        total: 0,
+      });
+
       const res = await app.inject({
         method: "GET",
         url: "/api/audit-events",
@@ -50,6 +58,11 @@ describe("Evidence Packet and Audit API Routes", () => {
     });
 
     it("v1 alias GET /api/v1/audit-events works identically", async () => {
+      vi.spyOn(auditRepo, "listAuditEvents").mockResolvedValueOnce({
+        events: [],
+        total: 0,
+      });
+
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/audit-events",
@@ -74,6 +87,15 @@ describe("Evidence Packet and Audit API Routes", () => {
 
   describe("GET /api/evidence-packets", () => {
     it("returns 404 when proposal is not found", async () => {
+      vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce("test-owner-id");
+      vi.spyOn(db, "select").mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([]),
+          }),
+        }),
+      } as any);
+
       const missingId = randomUUID();
       const res = await app.inject({
         method: "GET",
@@ -86,6 +108,15 @@ describe("Evidence Packet and Audit API Routes", () => {
     });
 
     it("returns 404 when payment order is not found", async () => {
+      vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce("test-owner-id");
+      vi.spyOn(db, "select").mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([]),
+          }),
+        }),
+      } as any);
+
       const missingId = randomUUID();
       const res = await app.inject({
         method: "GET",
@@ -98,6 +129,14 @@ describe("Evidence Packet and Audit API Routes", () => {
     });
 
     it("returns 404 when policy version is not found", async () => {
+      vi.spyOn(db, "select").mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([]),
+          }),
+        }),
+      } as any);
+
       const missingId = randomUUID();
       const res = await app.inject({
         method: "GET",
