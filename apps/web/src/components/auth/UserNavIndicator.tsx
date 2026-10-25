@@ -26,7 +26,7 @@ export const UserNavIndicator: React.FC = () => {
       <button
         type="button"
         onClick={() => openAuthModal("login")}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-surface-bg font-medium text-xs hover:opacity-95 transition-opacity cursor-pointer shadow-xs"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent text-white dark:text-slate-950 font-semibold text-xs hover:opacity-95 transition-opacity cursor-pointer shadow-xs"
       >
         <User className="w-3.5 h-3.5" />
         <span>Sign In</span>

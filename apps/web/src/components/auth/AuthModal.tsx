@@ -75,11 +75,11 @@ export const AuthModal: React.FC = () => {
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200"
     >
       <div
-        className="w-full max-w-md bg-panel border border-border text-ink rounded-xl shadow-2xl p-6 relative overflow-hidden"
+        className="w-full max-w-xl sm:max-w-2xl bg-panel border border-border text-ink rounded-xl shadow-2xl p-5 sm:p-6 relative max-h-[min(90vh,680px)] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-border/60">
+        <div className="flex items-center justify-between pb-3.5 border-b border-border/60">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-lg bg-surface border border-border text-accent">
               <Shield className="w-5 h-5" />
@@ -96,7 +96,7 @@ export const AuthModal: React.FC = () => {
           <button
             type="button"
             onClick={closeAuthModal}
-            className="p-1.5 rounded-md text-ink-muted hover:text-ink hover:bg-surface transition-colors"
+            className="p-1.5 rounded-md text-ink-muted hover:text-ink hover:bg-surface transition-colors cursor-pointer"
             aria-label="Close dialog"
           >
             <X className="w-4 h-4" />
@@ -104,14 +104,14 @@ export const AuthModal: React.FC = () => {
         </div>
 
         {/* Tab switcher */}
-        <div className="flex gap-2 my-4 p-1 bg-surface rounded-lg border border-border/40">
+        <div className="flex gap-2 my-3 p-1 bg-surface rounded-lg border border-border/40">
           <button
             type="button"
             onClick={() => {
               setTab("login");
               clearError();
             }}
-            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${
+            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
               tab === "login"
                 ? "bg-panel text-ink shadow-xs border border-border"
                 : "text-ink-muted hover:text-ink"
@@ -125,7 +125,7 @@ export const AuthModal: React.FC = () => {
               setTab("register");
               clearError();
             }}
-            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${
+            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
               tab === "register"
                 ? "bg-panel text-ink shadow-xs border border-border"
                 : "text-ink-muted hover:text-ink"
@@ -137,60 +137,79 @@ export const AuthModal: React.FC = () => {
 
         {/* Master Brief 7.2 Safety Notice on Register */}
         {tab === "register" && (
-          <div className="mb-4 p-3 bg-accent/10 border border-accent/30 rounded-lg text-xs text-ink flex items-start gap-2">
-            <CheckCircle2 className="w-4 h-4 text-accent shrink-0 mt-0.5" />
-            <div>
-              <span className="font-semibold">Least-Privilege Default:</span> Public signups are automatically granted the safe{" "}
-              <span className="font-mono font-medium text-accent">REQUESTER</span> role. Higher authority roles (Approver, Auditor, Admin) require governance assignment.
+          <div className="mb-3 px-3 py-2 bg-accent/10 border border-accent/25 rounded-lg text-xs text-ink flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-accent shrink-0" />
+            <div className="text-[11px] leading-tight">
+              <span className="font-semibold">Least-Privilege Default:</span> Public signups receive the safe{" "}
+              <span className="font-mono font-medium text-accent">REQUESTER</span> role. Higher authority roles require governance assignment.
             </div>
           </div>
         )}
 
         {/* Error alert banner */}
         {error && (
-          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex items-start gap-2">
+          <div className="mb-3 p-2.5 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex items-start gap-2">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
         )}
 
         {/* Auth form */}
-        <form onSubmit={handleSubmit} className="space-y-3.5">
-          {tab === "register" && (
+        <form onSubmit={handleSubmit} className="space-y-3">
+          {tab === "register" ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-ink-muted mb-1">
+                  Full Name
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 absolute left-3 top-2.5 text-ink-muted" />
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Jane Doe"
+                    className="w-full pl-9 pr-3 py-2 text-xs bg-surface border border-border rounded-lg text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-ink-muted mb-1">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 absolute left-3 top-2.5 text-ink-muted" />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="user@example.com"
+                    className="w-full pl-9 pr-3 py-2 text-xs bg-surface border border-border rounded-lg text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
             <div>
               <label className="block text-xs font-medium text-ink-muted mb-1">
-                Full Name
+                Email Address
               </label>
               <div className="relative">
-                <User className="w-4 h-4 absolute left-3 top-2.5 text-ink-muted" />
+                <Mail className="w-4 h-4 absolute left-3 top-2.5 text-ink-muted" />
                 <input
-                  type="text"
+                  type="email"
                   required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Jane Doe"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="user@example.com"
                   className="w-full pl-9 pr-3 py-2 text-xs bg-surface border border-border rounded-lg text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-accent"
                 />
               </div>
             </div>
           )}
-
-          <div>
-            <label className="block text-xs font-medium text-ink-muted mb-1">
-              Email Address
-            </label>
-            <div className="relative">
-              <Mail className="w-4 h-4 absolute left-3 top-2.5 text-ink-muted" />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="user@example.com"
-                className="w-full pl-9 pr-3 py-2 text-xs bg-surface border border-border rounded-lg text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-accent"
-              />
-            </div>
-          </div>
 
           <div>
             <label className="block text-xs font-medium text-ink-muted mb-1">
@@ -213,7 +232,7 @@ export const AuthModal: React.FC = () => {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full mt-2 py-2.5 px-4 bg-accent text-surface-bg font-medium text-xs rounded-lg hover:opacity-95 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+            className="w-full mt-2 py-2.5 px-4 bg-accent text-white dark:text-slate-950 font-bold text-xs rounded-lg hover:opacity-95 active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer shadow-sm tracking-wide"
           >
             {isSubmitting ? (
               <span>Processing...</span>
@@ -226,15 +245,15 @@ export const AuthModal: React.FC = () => {
         </form>
 
         {/* Quick Persona Switcher for Evaluation */}
-        <div className="mt-6 pt-5 border-t border-border/60">
-          <div className="flex items-center justify-between mb-2.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+        <div className="mt-4 pt-3.5 border-t border-border/60">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
               Evaluation Starter Personas
             </span>
-            <span className="text-[10px] text-ink-muted">1-Click Login</span>
+            <span className="text-[10px] text-ink-muted">1-Click Quick Fill</span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
               { email: "admin@warrant.studio", role: "ADMINISTRATOR", label: "Admin" },
               { email: "approver@warrant.studio", role: "APPROVER", label: "Approver" },
@@ -246,10 +265,10 @@ export const AuthModal: React.FC = () => {
                 type="button"
                 disabled={isSubmitting}
                 onClick={() => handlePersonaClick(p.email)}
-                className="text-left p-2 rounded-lg bg-surface border border-border hover:border-accent/50 transition-colors group cursor-pointer"
+                className="text-left p-2 rounded-lg bg-surface border border-border hover:border-accent/50 hover:bg-surface-subtle transition-all group cursor-pointer"
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-ink group-hover:text-accent">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-xs font-semibold text-ink group-hover:text-accent">
                     {p.label}
                   </span>
                   <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-panel border border-border text-ink-muted">

@@ -202,12 +202,12 @@ describe("Milestone 2 Shell & Navigation Empirical Stress Tests", () => {
       expect(html).toContain("Mandate Compiler");
     });
 
-    it("verifies desktop sidebar toggle button is visible on md+ viewports and main content resizes correctly", () => {
+    it("verifies desktop sidebar toggle button is rendered at bottom of sidebar and main content resizes correctly", () => {
       const html = renderToStaticMarkup(React.createElement(App));
 
-      // Desktop toggle button has responsive md:inline-flex class
+      // Desktop toggle button is rendered in the sidebar footer with data-testid
       expect(html).toContain('data-testid="desktop-sidebar-toggle-btn"');
-      expect(html).toContain("hidden md:inline-flex");
+      expect(html).toContain("hidden md:flex");
 
       // Main content container has flex-1 to auto-resize when sidebar expands/collapses
       expect(html).toContain('id="main-scroll-container"');

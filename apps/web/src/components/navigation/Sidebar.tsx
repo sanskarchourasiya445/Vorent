@@ -105,14 +105,6 @@ export const Sidebar: React.FC<SidebarProps> = function Sidebar({
       <span className="sr-only">WARRANT</span>
       <span className="sr-only">STUDIO</span>
       <span className="sr-only">Purchase Authorization &amp; Cryptographic Policy Engine</span>
-      {/* Hidden toggle button to preserve onToggleCollapse handler reference */}
-      <button
-        type="button"
-        onClick={onToggleCollapse}
-        className="hidden"
-        aria-hidden="true"
-        tabIndex={-1}
-      />
 
       <div className="sidebar-scrollable-content flex-1 min-h-0 overflow-y-auto overscroll-contain pr-0.5 space-y-3 sidebar-dark-scrollbar">
 
@@ -233,6 +225,7 @@ export const Sidebar: React.FC<SidebarProps> = function Sidebar({
         <div className="mb-2">
           <button
             type="button"
+            data-testid="desktop-sidebar-toggle-btn"
             onClick={onToggleCollapse}
             title={isCollapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
             aria-label={isCollapsed ? "Expand navigation sidebar" : "Collapse navigation sidebar"}

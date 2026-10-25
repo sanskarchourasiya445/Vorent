@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Shield, RefreshCw, Menu, X, Search, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Shield, RefreshCw, Menu, X, Search } from "lucide-react";
 import { api } from "./api/client";
 import { VerificationStudio } from "./components/verification/VerificationStudio";
 import { ApprovalPanel } from "./components/approval/ApprovalPanel";
@@ -302,22 +302,6 @@ const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation,
             data-testid="mobile-nav-toggle-btn"
           >
             {isMobileNavOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-          </button>
-
-          {/* Desktop Sidebar Collapse/Expand Toggle */}
-          <button
-            type="button"
-            onClick={() => setIsSidebarCollapsed((prev) => !prev)}
-            className="hidden md:inline-flex items-center justify-center w-8 h-8 rounded-md bg-surface hover:bg-surface-subtle active:bg-surface-inset border border-border text-muted hover:text-ink transition-colors duration-150 ease-out focus:outline-none focus:ring-1 focus:ring-accent shrink-0 motion-interactive cursor-pointer"
-            aria-label={isSidebarCollapsed ? "Expand navigation sidebar" : "Collapse navigation sidebar"}
-            title={isSidebarCollapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
-            data-testid="desktop-sidebar-toggle-btn"
-          >
-            {isSidebarCollapsed ? (
-              <PanelLeftOpen className="w-4 h-4" aria-hidden="true" />
-            ) : (
-              <PanelLeftClose className="w-4 h-4" aria-hidden="true" />
-            )}
           </button>
 
           {/* Brand mark & title in header */}
