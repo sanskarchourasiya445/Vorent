@@ -22,6 +22,13 @@
       "when": 1792426057896,
       "tag": "0002_fancy_killmonger",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792450000000,
+      "tag": "0003_add_user_auth_and_sessions",
+      "breakpoints": true
     }
   ]
 }

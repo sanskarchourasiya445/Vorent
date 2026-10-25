@@ -2,6 +2,7 @@ import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { eq, and, inArray, isNull, desc } from "drizzle-orm";
 import {
   type Cart,
+  type ClientCart,
   type EvidenceSnapshot,
   ReasonCode,
   type Decision,
@@ -142,7 +143,7 @@ export interface SubmitCheckoutProposalInput {
   policyVersionId: string;
   policyHash: string;
   nonceId: string;
-  cart: Cart;
+  cart: ClientCart | Cart;
   evidenceSnapshot: EvidenceSnapshot;
 }
 
@@ -278,7 +279,15 @@ export async function submitCheckoutProposal(
           quantity: it.quantity,
         };
       }
-      return it;
+      return {
+        ...it,
+        sku: it.sku,
+        title: it.title || it.name || it.sku,
+        category: it.category || "Uncategorized",
+        unitPriceMinor: typeof it.unitPriceMinor === "number" ? it.unitPriceMinor : 0,
+        currency: it.currency || input.cart.currency,
+        quantity: it.quantity,
+      };
     });
 
     const normalizedCart: Cart = {

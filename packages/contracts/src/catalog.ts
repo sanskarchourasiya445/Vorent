@@ -190,6 +190,41 @@ export const AUTHORITATIVE_CATALOG: Record<string, CatalogItem> = {
     unitPriceMinor: 3500,
     currency: "USD",
   },
+  "sku_book_001": {
+    sku: "sku_book_001",
+    title: "Domain-Driven Design",
+    category: "Reference Books",
+    unitPriceMinor: 4500,
+    currency: "USD",
+  },
+  "hw-1": {
+    sku: "hw-1",
+    title: "Development Hardware",
+    category: "Hardware",
+    unitPriceMinor: 5000,
+    currency: "USD",
+  },
+  "chair-1": {
+    sku: "chair-1",
+    title: "Ergonomic Office Chair",
+    category: "Furniture",
+    unitPriceMinor: 15000,
+    currency: "USD",
+  },
+  "SKU-GIFT-CARD": {
+    sku: "SKU-GIFT-CARD",
+    title: "Retail Gift Card",
+    category: "Gift Cards",
+    unitPriceMinor: 5000,
+    currency: "USD",
+  },
+  "SW-ENTERPRISE-TIER": {
+    sku: "SW-ENTERPRISE-TIER",
+    title: "Enterprise Software License",
+    category: "software_license",
+    unitPriceMinor: 75000,
+    currency: "USD",
+  },
 };
 
 /**
