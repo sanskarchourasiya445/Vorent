@@ -13,6 +13,7 @@ import {
   evaluatePolicy,
   proposePolicyRepair,
 } from "@warrant/domain";
+import { compileMandateWithLLM } from "../services/llmMandateService.js";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { policies } from "../db/schema.js";
@@ -68,6 +69,40 @@ export const policyWorkflowRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post("/compile", handleCompile);
   fastify.post("/draft-compile", handleCompile);
+
+  // 1b. POST /compile-llm - Bounded LLM Mandate Extraction
+  fastify.post("/compile-llm", async (request: FastifyRequest, reply: FastifyReply) => {
+    const requestId = extractRequestId(request);
+    reply.header("x-request-id", requestId);
+
+    const parseResult = CompileIntentRequestSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      const issueSummary = parseResult.error.issues
+        .map((i) => `${i.path.join(".")}: ${i.message}`)
+        .join("; ");
+      return reply.status(400).send({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: `Invalid intent compilation payload: ${issueSummary}`,
+        },
+        requestId,
+      });
+    }
+
+    try {
+      const compiled = await compileMandateWithLLM(parseResult.data);
+      return reply.status(200).send(compiled);
+    } catch (err: unknown) {
+      request.log.error({ err, requestId }, "Failed to compile purchase intent via LLM assistant");
+      return reply.status(500).send({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "An internal error occurred during LLM mandate compilation.",
+        },
+        requestId,
+      });
+    }
+  });
 
   // 2. POST /diff - Semantic Policy Diffing
   fastify.post("/diff", async (request: FastifyRequest, reply: FastifyReply) => {
