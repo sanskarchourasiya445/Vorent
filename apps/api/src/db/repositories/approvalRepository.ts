@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import type { ApprovalRecord, CreateApprovalRequest } from "@warrant/contracts";
+import { computePolicyHash } from "@warrant/domain";
 import {
   approvals,
   policyVersions,
@@ -12,8 +13,10 @@ import {
   calculateCommittedAndActiveSpend,
   CheckoutError,
 } from "./checkoutProposalRepository.js";
+import { logAuditEvent } from "./auditRepository.js";
 
 export interface ListApprovalsFilter {
+  ownerId?: string;
   policyVersionId?: string;
 }
 
@@ -42,8 +45,15 @@ export async function listApprovals(
     .leftJoin(policyVersions, eq(approvals.policyVersionId, policyVersions.id))
     .leftJoin(policies, eq(policyVersions.policyId, policies.id));
 
+  const conditions = [];
   if (filter?.policyVersionId) {
-    query = query.where(eq(approvals.policyVersionId, filter.policyVersionId));
+    conditions.push(eq(approvals.policyVersionId, filter.policyVersionId));
+  }
+  if (filter?.ownerId) {
+    conditions.push(eq(approvals.ownerId, filter.ownerId));
+  }
+  if (conditions.length > 0) {
+    query = query.where(conditions.length === 1 ? conditions[0] : and(...conditions));
   }
 
   const rawList = await query;
@@ -137,6 +147,7 @@ export async function createApproval(
         policyId: policyVersions.policyId,
         policyHash: policyVersions.policyHash,
         policyName: policies.name,
+        policyDocument: policyVersions.policyDocument,
       })
       .from(policyVersions)
       .leftJoin(policies, eq(policyVersions.policyId, policies.id))
@@ -155,6 +166,16 @@ export async function createApproval(
         "POLICY_HASH_MISMATCH",
         `Policy hash mismatch for version ${input.policyVersionId}`
       );
+    }
+
+    if (pv.policyDocument && typeof pv.policyDocument === "object") {
+      const calculatedHash = computePolicyHash(pv.policyDocument as any);
+      if (calculatedHash !== input.policyHash) {
+        throw new CheckoutError(
+          "POLICY_HASH_MISMATCH",
+          `Stored policy document hash (${calculatedHash}) does not match requested hash (${input.policyHash})`
+        );
+      }
     }
 
     // 3. Verify findings under Decision D-014
@@ -234,6 +255,21 @@ export async function createApproval(
       })
       .returning();
 
+    await logAuditEvent(tx, {
+      ownerId,
+      actorType: "USER",
+      eventType: "APPROVAL_CREATED",
+      entityType: "APPROVAL",
+      entityId: approvalId,
+      payload: {
+        policyVersionId: input.policyVersionId,
+        policyHash: input.policyHash,
+        spendLimitMinor: input.spendLimitMinor,
+        currency: input.currency,
+        expiresAt: expiresAt.toISOString(),
+      },
+    });
+
     return {
       id: created.id,
       ownerId: created.ownerId,
@@ -286,6 +322,18 @@ export async function revokeApproval(
   } catch {
     consumedSpendMinor = 0;
   }
+
+  await logAuditEvent(db, {
+    ownerId: existing.ownerId,
+    actorType: "USER",
+    eventType: "APPROVAL_REVOKED",
+    entityType: "APPROVAL",
+    entityId: approvalId,
+    payload: {
+      revokedAt: now.toISOString(),
+      consumedSpendMinor,
+    },
+  });
 
   return {
     id: updated.id,

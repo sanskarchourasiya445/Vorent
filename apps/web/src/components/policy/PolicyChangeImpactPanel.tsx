@@ -10,7 +10,9 @@ import {
   Layers,
   ExternalLink,
   Info,
+  RefreshCw,
 } from "lucide-react";
+import { SkeletonCard } from "../ui/Skeleton";
 import {
   fetchPolicySummaries,
   fetchPolicyVersionDetail,
@@ -23,6 +25,8 @@ import {
 import { ApprovalHistoryTimeline } from "./ApprovalHistoryTimeline";
 import type { PolicySummary } from "@warrant/contracts";
 import type { PersistenceLoadState } from "../../types/persistence";
+import { HashBadge } from "../ui/HashBadge";
+import { StatusBadge } from "../ui/StatusBadge";
 
 interface Props {
   initialBasePolicyId?: string;
@@ -132,44 +136,68 @@ export function PolicyChangeImpactPanel({
     setActiveTab("diff");
   };
 
+  const [showAutomatedTests, setShowAutomatedTests] = useState(false);
+
   const policiesList: PolicySummary[] =
     policiesState.state === "READY" ? policiesState.data : [];
 
+  const isAutomatedTest = (p: PolicySummary) => {
+    const name = p.name.toLowerCase();
+    const id = p.id.toLowerCase();
+    return (
+      name.includes("testing error") ||
+      name.includes("integration test policy") ||
+      name.includes("test concurrent") ||
+      name.includes("test rollback") ||
+      name.includes("test d-014") ||
+      id.startsWith("test_")
+    );
+  };
+
+  const curatedList = policiesList.filter((p) => !isAutomatedTest(p));
+  const testList = policiesList.filter(isAutomatedTest);
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="w-full space-y-6">
       {/* Title & Navigation Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-ink flex items-center space-x-2">
-            <GitCompare className="w-6 h-6 text-accent" />
-            <span>Policy Change Impact & Approval History</span>
-          </h1>
-          <p className="text-sm text-muted mt-1">
-            Compare immutable policy versions, detect purchase rule relaxations requiring re-verification, and inspect the approval audit timeline.
-          </p>
+          <div className="flex items-center space-x-2.5">
+            <div className="w-8 h-8 rounded-md bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+              <GitCompare className="w-4 h-4 text-primary" aria-hidden="true" />
+            </div>
+            <div>
+              <h1 className="text-xl sm:text-2xl font-sans font-semibold tracking-tight text-ink">
+                Policy Change Impact &amp; Approval History
+              </h1>
+              <p className="text-xs text-muted mt-0.5 font-sans leading-relaxed">
+                Compare immutable policy versions, detect purchase rule relaxations requiring re-verification, and inspect the approval audit timeline.
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Workstation Tab Switcher */}
-        <div className="flex items-center space-x-1 p-1 bg-surface border border-border rounded-lg">
+        <div className="flex items-center space-x-1 p-1 bg-surface border border-border rounded-md shadow-2xs font-sans">
           <button
             type="button"
             onClick={() => setActiveTab("diff")}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors flex items-center space-x-1.5 ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors flex items-center space-x-1.5 cursor-pointer ${
               activeTab === "diff"
-                ? "bg-accent text-white shadow-sm"
-                : "text-muted hover:text-ink hover:bg-canvas"
+                ? "bg-primary text-white shadow-2xs"
+                : "text-muted hover:text-ink hover:bg-surface-subtle"
             }`}
           >
             <GitCompare className="w-3.5 h-3.5" />
-            <span>Impact & Diff Matrix</span>
+            <span>Impact &amp; Diff Matrix</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("timeline")}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors flex items-center space-x-1.5 ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors flex items-center space-x-1.5 cursor-pointer ${
               activeTab === "timeline"
-                ? "bg-accent text-white shadow-sm"
-                : "text-muted hover:text-ink hover:bg-canvas"
+                ? "bg-primary text-white shadow-2xs"
+                : "text-muted hover:text-ink hover:bg-surface-subtle"
             }`}
           >
             <History className="w-3.5 h-3.5" />
@@ -180,8 +208,8 @@ export function PolicyChangeImpactPanel({
 
       {/* Fallback Banner if using Presets */}
       {isFallback && (
-        <div className="p-3.5 rounded border border-blue-200 bg-blue-50/70 text-blue-900 text-xs flex items-center space-x-2.5">
-          <Info className="w-4 h-4 text-blue-600 shrink-0" />
+        <div className="p-3.5 rounded-md border border-accent/20 bg-accent/5 text-ink text-xs flex items-center space-x-2.5">
+          <Info className="w-4 h-4 text-accent shrink-0" />
           <span>
             <strong>Reference Presets Mode:</strong> Displaying standard reference policies. Custom persisted policies will automatically appear once PostgreSQL persistence is active.
           </span>
@@ -190,27 +218,27 @@ export function PolicyChangeImpactPanel({
 
       {/* Database Standby Banner */}
       {policiesState.state === "UNAVAILABLE" && (
-        <div className="p-4 rounded border border-amber-300 bg-amber-50 text-amber-900 text-xs space-y-1">
-          <div className="font-semibold flex items-center space-x-1.5">
-            <AlertTriangle className="w-4 h-4 text-amber-600" />
+        <div className="p-4 rounded-md border border-review/40 bg-review/10 text-ink text-xs space-y-1">
+          <div className="font-semibold flex items-center space-x-1.5 text-review font-mono">
+            <AlertTriangle className="w-4 h-4 text-review" />
             <span>PostgreSQL Persistence Standby</span>
           </div>
-          <p className="text-amber-800">{policiesState.message}</p>
+          <p className="text-muted font-mono">{policiesState.message}</p>
         </div>
       )}
 
       {/* Policy List Error Banner */}
       {policiesState.state === "ERROR" && (
-        <div className="p-4 rounded border border-red-300 bg-red-50 text-red-900 text-xs space-y-2">
-          <div className="font-semibold flex items-center space-x-1.5">
-            <AlertTriangle className="w-4 h-4 text-red-600" />
+        <div className="p-4 rounded-md border border-deny/30 bg-deny/10 text-ink text-xs space-y-2">
+          <div className="font-semibold flex items-center space-x-1.5 text-deny-border font-mono">
+            <AlertTriangle className="w-4 h-4 text-deny" />
             <span>Failed to Retrieve Policies</span>
           </div>
-          <p className="text-red-800">{policiesState.message}</p>
+          <p className="text-muted font-mono">{policiesState.message}</p>
           <button
             type="button"
             onClick={() => void loadPolicies()}
-            className="px-3 py-1 text-xs font-semibold rounded bg-red-600 text-white hover:bg-red-700 transition-colors"
+            className="px-3 py-1 text-xs font-mono font-semibold rounded bg-deny text-white hover:opacity-90 transition-opacity"
           >
             Retry
           </button>
@@ -219,7 +247,7 @@ export function PolicyChangeImpactPanel({
 
       {/* Policy List Empty Banner */}
       {policiesState.state === "EMPTY" && (
-        <div className="p-6 rounded border border-dashed border-border bg-surface text-center text-xs text-muted">
+        <div className="p-6 rounded-md border border-dashed border-border bg-surface text-center text-xs text-muted font-mono">
           No policy versions found in the policy store.
         </div>
       )}
@@ -228,65 +256,119 @@ export function PolicyChangeImpactPanel({
       {activeTab === "diff" && (
         <div className="space-y-6">
           {/* Version Selection Header */}
-          <div className="p-5 rounded-panel border border-border bg-surface space-y-4">
+          <div className="bg-surface border border-border rounded-lg p-5 space-y-4 shadow-2xs">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+              <span className="text-xs font-semibold text-ink font-sans">
                 Select Policy Versions to Compare
               </span>
-              <button
-                type="button"
-                onClick={handleSwap}
-                className="inline-flex items-center space-x-1.5 px-3 py-1 text-xs font-medium rounded border border-border bg-canvas hover:bg-surface text-ink transition-colors"
-                title="Swap Base and Target policies"
-              >
-                <ArrowRightLeft className="w-3.5 h-3.5 text-accent" />
-                <span>Swap Comparison</span>
-              </button>
+              <div className="flex items-center space-x-3">
+                <label className="inline-flex items-center space-x-2 px-2.5 py-1 rounded-md text-[11px] font-mono border border-border bg-canvas text-ink cursor-pointer hover:border-accent transition-colors select-none">
+                  <input
+                    type="checkbox"
+                    checked={showAutomatedTests}
+                    onChange={(e) => setShowAutomatedTests(e.target.checked)}
+                    className="rounded border-border text-accent focus:ring-accent w-3.5 h-3.5"
+                    data-testid="toggle-diff-test-policies-btn"
+                  />
+                  <span>
+                    {!showAutomatedTests
+                      ? `Showing ${curatedList.length} policies (${testList.length} test policies hidden)`
+                      : `Showing all ${policiesList.length} policies (including ${testList.length} test policies)`}
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleSwap}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-mono font-medium rounded-md border border-border bg-surface hover:bg-canvas text-ink transition-colors shadow-2xs focus:outline-none focus:ring-2 focus:ring-accent/30"
+                  title="Swap Base and Target policies"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5 text-accent" />
+                  <span>Swap Comparison</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Base Policy Selector */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted block">
+                <label className="text-xs font-mono font-semibold text-muted block">
                   Base Policy Version (Current Standard):
                 </label>
                 <select
                   value={baseId}
                   onChange={(e) => setBaseId(e.target.value)}
-                  className="w-full text-xs font-medium px-3 py-2 rounded border border-border bg-canvas text-ink focus:outline-none focus:ring-1 focus:ring-accent"
+                  className="w-full text-xs font-mono font-medium px-3 py-2 rounded-md border border-border bg-canvas text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
                 >
-                  {policiesList.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.id})
-                    </option>
-                  ))}
+                  {!showAutomatedTests ? (
+                    (curatedList.length > 0 ? curatedList : policiesList).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.id})
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <optgroup label="Standard Curated Policies">
+                        {curatedList.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.id})
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Automated Test Run Policies">
+                        {testList.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.id})
+                          </option>
+                        ))}
+                      </optgroup>
+                    </>
+                  )}
                 </select>
-                {baseDetail && (
-                  <div className="text-[11px] text-muted flex items-center space-x-2 pt-1 font-mono">
-                    <span>Hash: {baseDetail.hash?.slice(0, 16)}...</span>
+                {baseDetail && baseDetail.hash && (
+                  <div className="pt-1">
+                    <HashBadge hash={baseDetail.hash} label="Base Hash" />
                   </div>
                 )}
               </div>
 
               {/* Target Policy Selector */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted block">
+                <label className="text-xs font-mono font-semibold text-muted block">
                   Target Policy Version (Proposed Update):
                 </label>
                 <select
                   value={targetId}
                   onChange={(e) => setTargetId(e.target.value)}
-                  className="w-full text-xs font-medium px-3 py-2 rounded border border-border bg-canvas text-ink focus:outline-none focus:ring-1 focus:ring-accent"
+                  className="w-full text-xs font-mono font-medium px-3 py-2 rounded-md border border-border bg-canvas text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
                 >
-                  {policiesList.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.id})
-                    </option>
-                  ))}
+                  {!showAutomatedTests ? (
+                    (curatedList.length > 0 ? curatedList : policiesList).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.id})
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <optgroup label="Standard Curated Policies">
+                        {curatedList.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.id})
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Automated Test Run Policies">
+                        {testList.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.id})
+                          </option>
+                        ))}
+                      </optgroup>
+                    </>
+                  )}
                 </select>
-                {targetDetail && (
-                  <div className="text-[11px] text-muted flex items-center space-x-2 pt-1 font-mono">
-                    <span>Hash: {targetDetail.hash?.slice(0, 16)}...</span>
+                {targetDetail && targetDetail.hash && (
+                  <div className="pt-1">
+                    <HashBadge hash={targetDetail.hash} label="Target Hash" />
                   </div>
                 )}
               </div>
@@ -295,25 +377,29 @@ export function PolicyChangeImpactPanel({
 
           {/* Details Loading or Error */}
           {loadingDetails && (
-            <div className="p-6 text-center text-xs text-muted border border-border rounded-panel bg-surface animate-pulse">
-              Calculating policy rule diff and re-verification triggers...
+            <div className="space-y-4">
+              <div className="p-3.5 text-center text-xs text-muted border border-border rounded-md bg-surface font-mono flex items-center justify-center space-x-2.5">
+                <RefreshCw className="w-4 h-4 animate-spin text-accent" />
+                <span>Calculating policy rule diff and re-verification triggers...</span>
+              </div>
+              <SkeletonCard lines={4} showHeader={true} />
             </div>
           )}
 
           {detailError && (
-            <div className="p-4 rounded border border-red-300 bg-red-50 text-red-900 text-xs space-y-2">
-              <div className="flex items-center space-x-1.5 font-semibold">
-                <AlertTriangle className="w-4 h-4 text-red-600" />
+            <div className="p-4 rounded-md border border-deny/30 bg-deny/10 text-ink text-xs space-y-2">
+              <div className="flex items-center space-x-1.5 font-semibold text-deny-border font-mono">
+                <AlertTriangle className="w-4 h-4 text-deny" />
                 <span>Policy Version Detail Unavailable</span>
               </div>
-              <p className="text-red-800">{detailError}</p>
+              <p className="text-muted font-mono">{detailError}</p>
               <button
                 type="button"
                 onClick={() => {
                   setBaseId("pol_v1_books_hardware");
                   setTargetId("pol_seeded_defect_unbounded_cart");
                 }}
-                className="px-2.5 py-1 text-xs font-semibold rounded bg-red-600 text-white hover:bg-red-700 transition-colors"
+                className="px-2.5 py-1 text-xs font-mono font-semibold rounded bg-deny text-white hover:opacity-90 transition-opacity"
               >
                 Reset to Standard Presets
               </button>
@@ -325,35 +411,35 @@ export function PolicyChangeImpactPanel({
             <div className="space-y-4">
               {/* Severity Banner */}
               <div
-                className={`p-5 rounded-panel border ${
+                className={`p-5 rounded-lg border ${
                   diffComparison.overallSeverity === "CRITICAL"
-                    ? "border-red-300 bg-red-50/90 text-red-950"
+                    ? "border-deny/40 bg-deny/10 text-ink"
                     : diffComparison.overallSeverity === "HIGH"
-                    ? "border-amber-300 bg-amber-50/90 text-amber-950"
+                    ? "border-review/40 bg-review/10 text-ink"
                     : diffComparison.overallSeverity === "MODERATE" ||
                       diffComparison.overallSeverity === "LOW"
-                    ? "border-blue-300 bg-blue-50/90 text-blue-950"
-                    : "border-emerald-300 bg-emerald-50/90 text-emerald-950"
-                }`}
+                    ? "border-accent/30 bg-accent/10 text-ink"
+                    : "border-allow/40 bg-allow/10 text-ink"
+                } shadow-2xs`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center space-x-2">
                       {diffComparison.overallSeverity === "CRITICAL" && (
-                        <AlertTriangle className="w-5 h-5 text-red-600" />
+                        <AlertTriangle className="w-5 h-5 text-deny" />
                       )}
                       {diffComparison.overallSeverity === "HIGH" && (
-                        <AlertTriangle className="w-5 h-5 text-amber-600" />
+                        <AlertTriangle className="w-5 h-5 text-review" />
                       )}
                       {(diffComparison.overallSeverity === "MODERATE" ||
                         diffComparison.overallSeverity === "LOW") && (
-                        <Layers className="w-5 h-5 text-blue-600" />
+                        <Layers className="w-5 h-5 text-accent" />
                       )}
                       {diffComparison.overallSeverity === "IDENTICAL" && (
-                        <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                        <CheckCircle2 className="w-5 h-5 text-allow" />
                       )}
 
-                      <span className="font-bold text-sm tracking-tight">
+                      <span className="font-bold text-sm tracking-tight font-sans">
                         {diffComparison.overallSeverity === "CRITICAL"
                           ? "RE-VERIFICATION STRICTLY REQUIRED (High-Risk Relaxation)"
                           : diffComparison.overallSeverity === "HIGH"
@@ -365,7 +451,7 @@ export function PolicyChangeImpactPanel({
                       </span>
                     </div>
 
-                    <p className="text-xs max-w-3xl leading-relaxed">
+                    <p className="text-xs max-w-3xl leading-relaxed text-muted font-mono">
                       {diffComparison.summary}
                     </p>
                   </div>
@@ -375,7 +461,7 @@ export function PolicyChangeImpactPanel({
                     <button
                       type="button"
                       onClick={() => onNavigateToVerification(diffComparison.targetId)}
-                      className="px-3.5 py-1.5 text-xs font-semibold rounded bg-accent text-white hover:bg-accent/90 transition-colors shadow-sm inline-flex items-center space-x-1.5 shrink-0"
+                      className="px-3.5 py-1.5 text-xs font-mono font-semibold rounded-md bg-accent text-white hover:opacity-90 active:opacity-100 transition-all shadow-2xs inline-flex items-center space-x-1.5 shrink-0 focus:outline-none focus:ring-2 focus:ring-accent/30"
                     >
                       <Shield className="w-3.5 h-3.5" />
                       <span>Verify Target in Studio</span>
@@ -386,11 +472,11 @@ export function PolicyChangeImpactPanel({
 
                 {/* Specific Risk Triggers List */}
                 {diffComparison.criticalTriggers.length > 0 && (
-                  <div className="mt-4 pt-3 border-t border-red-200/60 dark:border-red-900/40 space-y-1.5">
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-red-900">
+                  <div className="mt-4 pt-3 border-t border-border/80 space-y-1.5 font-sans">
+                    <div className="text-xs font-semibold text-deny-border">
                       Identified Re-Verification Triggers:
                     </div>
-                    <ul className="text-xs space-y-1 pl-4 list-disc">
+                    <ul className="text-xs space-y-1 pl-4 list-disc text-ink">
                       {diffComparison.criticalTriggers.map((trig, idx) => (
                         <li key={idx} className="font-medium">
                           {trig}
@@ -400,17 +486,17 @@ export function PolicyChangeImpactPanel({
                   </div>
                 )}
 
-                <div className="mt-3 pt-2.5 border-t border-border/50 text-[11px] opacity-85">
-                  <span className="font-semibold">Security Boundary Notice:</span> Bounded verification evaluates search spaces within finite candidate budgets. Passing verification runs confirm the absence of counterexamples within the evaluated space; they do not constitute proof of universal safety.
+                <div className="mt-3 pt-2.5 border-t border-border/80 text-[11px] text-muted font-sans">
+                  <span className="font-semibold text-ink">Security Boundary Notice:</span> Bounded verification evaluates search spaces within finite candidate budgets. Passing verification runs confirm the absence of counterexamples within the evaluated space; they do not constitute proof of universal safety.
                 </div>
               </div>
 
               {/* Rule Comparison Table */}
-              <div className="rounded-panel border border-border bg-surface overflow-hidden">
-                <div className="px-5 py-3 border-b border-border bg-canvas/60 flex items-center justify-between">
+              <div className="rounded-lg border border-border bg-surface overflow-hidden shadow-2xs font-sans">
+                <div className="px-5 py-3 border-b border-border bg-canvas/30 flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     <FileCheck className="w-4 h-4 text-accent" />
-                    <h3 className="font-semibold text-xs text-ink uppercase tracking-wider">
+                    <h3 className="font-semibold text-xs text-ink">
                       Purchase Invariant Comparison Matrix
                     </h3>
                   </div>
@@ -419,14 +505,14 @@ export function PolicyChangeImpactPanel({
                   </span>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-border bg-canvas/30 text-muted uppercase text-[10px] tracking-wider font-semibold">
-                        <th className="py-2.5 px-4">Policy Rule / Invariant</th>
-                        <th className="py-2.5 px-4">Base Version ({diffComparison.baseName})</th>
-                        <th className="py-2.5 px-4">Target Version ({diffComparison.targetName})</th>
-                        <th className="py-2.5 px-4">Change & Impact</th>
+                <div className="overflow-x-auto max-h-[520px] overflow-y-auto" data-lenis-prevent>
+                  <table className="w-full text-left border-collapse text-xs min-w-[640px]">
+                    <thead className="sticky top-0 z-10">
+                      <tr className="border-b border-border bg-surface text-muted text-[11px] font-medium font-sans shadow-2xs">
+                        <th className="py-2.5 px-4 bg-surface">Policy Rule / Invariant</th>
+                        <th className="py-2.5 px-4 bg-surface">Base Version ({diffComparison.baseName})</th>
+                        <th className="py-2.5 px-4 bg-surface">Target Version ({diffComparison.targetName})</th>
+                        <th className="py-2.5 px-4 bg-surface">Change &amp; Impact</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -434,13 +520,13 @@ export function PolicyChangeImpactPanel({
                         return (
                           <tr
                             key={diff.field}
-                            className={`hover:bg-canvas/40 transition-colors ${
+                            className={`hover:bg-canvas/30 transition-colors ${
                               diff.severity === "CRITICAL"
-                                ? "bg-red-50/40"
+                                ? "bg-deny/5"
                                 : diff.severity === "HIGH"
-                                ? "bg-amber-50/40"
+                                ? "bg-warning/5"
                                 : diff.changed
-                                ? "bg-blue-50/20"
+                                ? "bg-accent/5"
                                 : ""
                             }`}
                           >
@@ -457,30 +543,30 @@ export function PolicyChangeImpactPanel({
                               <div className="space-y-1">
                                 <div className="flex items-center space-x-1.5">
                                   {diff.reverificationTrigger && (
-                                    <span
-                                      className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    <StatusBadge
+                                      status={
                                         diff.severity === "CRITICAL"
-                                          ? "bg-red-100 text-red-900 border border-red-300"
+                                          ? "CRITICAL TRIGGER"
                                           : diff.severity === "HIGH"
-                                          ? "bg-amber-100 text-amber-900 border border-amber-300"
-                                          : "bg-blue-100 text-blue-900 border border-blue-300"
-                                      }`}
-                                    >
-                                      {diff.severity === "CRITICAL"
-                                        ? "CRITICAL TRIGGER"
-                                        : diff.severity === "HIGH"
-                                        ? "TRIGGER"
-                                        : "CHANGED"}
-                                    </span>
+                                          ? "TRIGGER"
+                                          : "CHANGED"
+                                      }
+                                      variant={
+                                        diff.severity === "CRITICAL"
+                                          ? "CRITICAL"
+                                          : diff.severity === "HIGH"
+                                          ? "HIGH"
+                                          : "REVIEW"
+                                      }
+                                      size="sm"
+                                    />
                                   )}
                                   {!diff.changed && (
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-canvas text-muted border border-border">
-                                      UNCHANGED
-                                    </span>
+                                    <StatusBadge status="UNCHANGED" variant="LOW" size="sm" />
                                   )}
                                 </div>
                                 {diff.notes && (
-                                  <p className="text-[11px] text-muted">{diff.notes}</p>
+                                  <p className="text-[11px] text-muted font-mono">{diff.notes}</p>
                                 )}
                               </div>
                             </td>
@@ -493,21 +579,21 @@ export function PolicyChangeImpactPanel({
               </div>
 
               {/* Side-by-side Cryptographic Fingerprints */}
-              <div className="p-4 rounded-panel border border-border bg-surface grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div className="p-4 rounded-lg border border-border bg-surface shadow-2xs grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-sans">
                 <div className="space-y-1">
-                  <span className="font-semibold text-muted text-[11px] uppercase tracking-wider block">
+                  <span className="font-medium text-muted text-xs block">
                     Base Cryptographic SHA-256 Hash:
                   </span>
-                  <code className="font-mono text-ink bg-canvas p-2 rounded border border-border block overflow-x-auto select-all text-[11px]">
+                  <code data-lenis-prevent className="font-mono text-ink bg-canvas p-2 rounded-md border border-border block overflow-x-auto select-all text-[11px]">
                     {diffComparison.baseHash || "None (uncompiled)"}
                   </code>
                 </div>
 
                 <div className="space-y-1">
-                  <span className="font-semibold text-muted text-[11px] uppercase tracking-wider block">
+                  <span className="font-medium text-muted text-xs block">
                     Target Cryptographic SHA-256 Hash:
                   </span>
-                  <code className="font-mono text-ink bg-canvas p-2 rounded border border-border block overflow-x-auto select-all text-[11px]">
+                  <code data-lenis-prevent className="font-mono text-ink bg-canvas p-2 rounded-md border border-border block overflow-x-auto select-all text-[11px]">
                     {diffComparison.targetHash || "None (uncompiled)"}
                   </code>
                 </div>
@@ -525,7 +611,7 @@ export function PolicyChangeImpactPanel({
               <button
                 type="button"
                 onClick={onNavigateToApproval}
-                className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-semibold rounded bg-accent text-white hover:bg-accent/90 transition-colors shadow-sm"
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 text-xs font-mono font-semibold rounded-md bg-accent text-white hover:opacity-90 transition-all shadow-2xs"
               >
                 <Shield className="w-3.5 h-3.5" />
                 <span>Open Approval Checkpoints</span>
@@ -541,7 +627,7 @@ export function PolicyChangeImpactPanel({
       )}
 
       {/* Permanent Security Boundary Notice */}
-      <div className="p-3 rounded border border-border bg-canvas/40 text-[11px] text-muted flex items-start space-x-2">
+      <div className="p-3 rounded-md border border-border bg-canvas/40 text-[11px] text-muted flex items-start space-x-2">
         <Info className="w-4 h-4 text-accent shrink-0 mt-0.5" />
         <p>
           <strong className="text-ink">Security Boundary Notice:</strong> Policy comparison highlights purchase invariant differences, and bounded verification tests finite candidate budgets. Passing verification runs confirm absence of counterexamples within the evaluated space; they do not constitute proof of universal safety.

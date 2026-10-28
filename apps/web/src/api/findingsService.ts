@@ -6,6 +6,15 @@ import {
   type ResolveFindingRequest,
   type AcceptRiskRequest,
 } from "@warrant/contracts";
+import { getAuthHeaders } from "./client";
+
+const safeAuthHeaders = () => {
+  try {
+    return typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+  } catch {
+    return {};
+  }
+};
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -96,6 +105,7 @@ export async function resolveFinding(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...safeAuthHeaders(),
     },
     body: JSON.stringify(request),
   });
@@ -133,6 +143,7 @@ export async function acceptFindingRisk(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...safeAuthHeaders(),
     },
     body: JSON.stringify(request),
   });

@@ -75,6 +75,14 @@ export const CreatePolicyRequestSchema = z.object({
 export type CreatePolicyRequest = z.infer<typeof CreatePolicyRequestSchema>;
 
 /**
+ * Request payload for renaming an existing policy.
+ */
+export const RenamePolicyRequestSchema = z.object({
+  name: z.string().trim().min(1, "Policy name cannot be empty").max(120),
+});
+export type RenamePolicyRequest = z.infer<typeof RenamePolicyRequestSchema>;
+
+/**
  * Request payload for creating a new version of an existing policy.
  */
 export const CreatePolicyVersionRequestSchema = z.object({

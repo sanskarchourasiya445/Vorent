@@ -1,0 +1,62 @@
+# Version control
+.git
+.gitignore
+
+# Environment & credentials (CRITICAL: Never bake secrets)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+
+# Local host dependencies and npm artifacts
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build artifacts & local caches
+dist
+.turbo
+.cache
+.vite
+coverage
+.nyc_output
+
+# Test files & test fixtures
+**/*.test.ts
+**/*.test.js
+**/*.spec.ts
+**/*.spec.js
+**/__tests__
+
+
+# Web frontend sources (not needed in API container)
+apps/web/src
+apps/web/public
+apps/web/index.html
+apps/web/vite.config.ts
+
+# Backups and database dumps
+backups
+*.sql
+
+# Documentation, planning, and agent artifacts
+.planning
+.agents
+coordination
+graphify-out
+docs
+warrant
+*.md
+
+# Editor and OS metadata
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

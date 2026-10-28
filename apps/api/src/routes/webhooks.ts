@@ -1,5 +1,4 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
-import { randomUUID } from "node:crypto";
 import {
   PayPalWebhookEventSchema,
   WebhookProcessResponseSchema,
@@ -8,14 +7,7 @@ import { db } from "../db/index.js";
 import * as paymentOrderRepo from "../db/repositories/paymentOrderRepository.js";
 import { CheckoutError } from "../db/repositories/checkoutProposalRepository.js";
 import { PayPalService, defaultPayPalService } from "../services/paypalService.js";
-
-function extractRequestId(request: FastifyRequest): string {
-  const incoming = request.headers["x-request-id"];
-  if (typeof incoming === "string" && incoming.trim().length > 0) {
-    return incoming.trim();
-  }
-  return `req_${randomUUID()}`;
-}
+import { extractRequestId } from "./routeUtils.js";
 
 export interface WebhookRoutesOptions {
   paypalService?: PayPalService;

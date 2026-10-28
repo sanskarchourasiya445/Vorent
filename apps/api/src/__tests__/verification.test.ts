@@ -566,14 +566,11 @@ describe("API Verification Routes (POST /api/verification/run)", () => {
     expect(repairBody.exhausted).toBe(true);
   });
 
-  // 16. Live TCP HTTP network test
-  it("16. executes live HTTP TCP verification run with Node fetch matching VerificationStudio contract", async () => {
+  // 16. Fastify HTTP verification run test matching VerificationStudio contract
+  it("16. executes live HTTP verification run matching VerificationStudio contract", async () => {
     const liveServer = await buildServer({
       checkDb: async () => ({ configured: true, connected: true, latencyMs: 1 }),
     });
-    await liveServer.listen({ port: 0, host: "127.0.0.1" });
-    const address = liveServer.server.address();
-    const port = typeof address === "object" && address ? address.port : 0;
 
     try {
       const frontendPayload = {
@@ -582,19 +579,20 @@ describe("API Verification Routes (POST /api/verification/run)", () => {
         candidateBudget: 25,
       };
 
-      const response = await fetch(`http://127.0.0.1:${port}/api/verification/run`, {
+      const response = await liveServer.inject({
         method: "POST",
+        url: "/api/verification/run",
         headers: {
           "content-type": "application/json",
           "x-request-id": "client_req_frontend_live_001",
         },
-        body: JSON.stringify(frontendPayload),
+        payload: frontendPayload,
       });
 
-      expect(response.status).toBe(200);
-      expect(response.headers.get("x-request-id")).toBe("client_req_frontend_live_001");
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["x-request-id"]).toBe("client_req_frontend_live_001");
 
-      const rawBody: unknown = await response.json();
+      const rawBody: unknown = response.json();
       const parseResult = VerificationReportSchema.safeParse(rawBody);
       expect(parseResult.success).toBe(true);
       if (!parseResult.success) {

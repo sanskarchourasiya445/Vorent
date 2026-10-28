@@ -442,4 +442,235 @@ describe("PayPalService (Unit & Mocked Contract Tests)", () => {
       expect(isValid).toBe(false);
     });
   });
+
+  describe("Sandbox Auth Status (getAuthStatus)", () => {
+    it("reports authenticated=true and parses scopes when OAuth succeeds", async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        expect(url).toContain("/v1/oauth2/token");
+        return new Response(
+          JSON.stringify({
+            access_token: "sandbox_token_xyz",
+            scope: "https://uri.paypal.com/services/reporting/search/read https://api-m.paypal.com/v1/payments/.*",
+            expires_in: 3600,
+          }),
+          { status: 200 }
+        );
+      });
+
+      const service = new PayPalService(
+        { env: "sandbox", clientId: validClientId, clientSecret: validClientSecret, baseUrl: mockBaseUrl },
+        mockFetch
+      );
+
+      const status = await service.getAuthStatus();
+      expect(status.authenticated).toBe(true);
+      expect(status.environment).toBe("sandbox");
+      expect(status.clientIdConfigured).toBe(true);
+      expect(status.clientSecretConfigured).toBe(true);
+      expect(status.hasTransactionSearchScope).toBe(true);
+      expect(status.scopes).toContain("https://uri.paypal.com/services/reporting/search/read");
+    });
+
+    it("reports authenticated=false if credentials are missing", async () => {
+      const service = new PayPalService({
+        env: "sandbox",
+        clientId: "",
+        clientSecret: "",
+      });
+
+      const status = await service.getAuthStatus();
+      expect(status.authenticated).toBe(false);
+      expect(status.clientIdConfigured).toBe(false);
+      expect(status.clientSecretConfigured).toBe(false);
+    });
+
+    it("reports authenticated=false if OAuth fails", async () => {
+      const mockFetch = vi.fn().mockImplementation(async () => {
+        return new Response(
+          JSON.stringify({ error: "invalid_client", error_description: "Bad client credentials" }),
+          { status: 401 }
+        );
+      });
+
+      const service = new PayPalService(
+        { env: "sandbox", clientId: validClientId, clientSecret: validClientSecret, baseUrl: mockBaseUrl },
+        mockFetch
+      );
+
+      const status = await service.getAuthStatus();
+      expect(status.authenticated).toBe(false);
+      expect(status.message).toContain("Bad client credentials");
+    });
+  });
+
+  describe("Transaction Search (listTransactions)", () => {
+    it("fetches and maps transactions from reporting API", async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("/v1/oauth2/token")) {
+          return new Response(
+            JSON.stringify({ access_token: "token_123", expires_in: 3600 }),
+            { status: 200 }
+          );
+        }
+
+        expect(url).toContain("/v1/reporting/transactions");
+        expect(url).toContain("fields=all");
+
+        return new Response(
+          JSON.stringify({
+            transaction_details: [
+              {
+                transaction_info: {
+                  transaction_id: "TX-998877",
+                  transaction_status: "S",
+                  transaction_amount: { currency_code: "USD", value: "250.00" },
+                  fee_amount: { currency_code: "USD", value: "-7.55" },
+                  transaction_initiation_date: "2026-10-15T12:00:00Z",
+                  transaction_subject: "Office Equipment Order",
+                },
+                payer_info: {
+                  email_address: "corp-buyer@example.com",
+                  payer_name: { given_name: "John", surname: "Doe" },
+                },
+              },
+            ],
+            total_items: 1,
+            total_pages: 1,
+          }),
+          { status: 200 }
+        );
+      });
+
+      const service = new PayPalService(
+        { env: "sandbox", clientId: validClientId, clientSecret: validClientSecret, baseUrl: mockBaseUrl },
+        mockFetch
+      );
+
+      const result = await service.listTransactions();
+      expect(result.source).toBe("PAYPAL_TRANSACTION_SEARCH_API");
+      expect(result.permissionRequired).toBe(false);
+      expect(result.total).toBe(1);
+      expect(result.transactions).toHaveLength(1);
+
+      const tx = result.transactions[0]!;
+      expect(tx.transactionId).toBe("TX-998877");
+      expect(tx.status).toBe("COMPLETED");
+      expect(tx.amountMinor).toBe(25000);
+      expect(tx.currency).toBe("USD");
+      expect(tx.feeAmountMinor).toBe(755);
+      expect(tx.payerEmail).toBe("corp-buyer@example.com");
+      expect(tx.payerName).toBe("John Doe");
+      expect(tx.description).toBe("Office Equipment Order");
+    });
+
+    it("handles 403 NOT_AUTHORIZED by returning permissionRequired: true without throwing", async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("/v1/oauth2/token")) {
+          return new Response(
+            JSON.stringify({ access_token: "token_123", expires_in: 3600 }),
+            { status: 200 }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            name: "NOT_AUTHORIZED",
+            message: "Authorization failed due to insufficient permissions.",
+          }),
+          { status: 403 }
+        );
+      });
+
+      const service = new PayPalService(
+        { env: "sandbox", clientId: validClientId, clientSecret: validClientSecret, baseUrl: mockBaseUrl },
+        mockFetch
+      );
+
+      const result = await service.listTransactions();
+      expect(result.permissionRequired).toBe(true);
+      expect(result.permissionNote).toContain("Transaction Search");
+      expect(result.transactions).toHaveLength(0);
+    });
+
+    it("clamps date range to 31 days maximum", async () => {
+      let queriedUrl = "";
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes("/v1/oauth2/token")) {
+          return new Response(
+            JSON.stringify({ access_token: "token_123", expires_in: 3600 }),
+            { status: 200 }
+          );
+        }
+        queriedUrl = url;
+        return new Response(JSON.stringify({ transaction_details: [], total_items: 0 }), { status: 200 });
+      });
+
+      const service = new PayPalService(
+        { env: "sandbox", clientId: validClientId, clientSecret: validClientSecret, baseUrl: mockBaseUrl },
+        mockFetch
+      );
+
+      // Request a 60-day range
+      const end = new Date("2026-10-20T00:00:00Z");
+      const start = new Date("2026-08-20T00:00:00Z");
+
+      await service.listTransactions({
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+      });
+
+      const parsedUrl = new URL(queriedUrl);
+      const usedStart = new Date(parsedUrl.searchParams.get("start_date")!);
+      const usedEnd = new Date(parsedUrl.searchParams.get("end_date")!);
+      const diffDays = (usedEnd.getTime() - usedStart.getTime()) / (1000 * 60 * 60 * 24);
+
+      expect(diffDays).toBeLessThanOrEqual(31);
+    });
+  });
+
+  describe("Create Test Sandbox Order (createTestSandboxOrder)", () => {
+    it("creates a test order and returns approval link", async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url.includes("/v1/oauth2/token")) {
+          return new Response(
+            JSON.stringify({ access_token: "token_123", expires_in: 3600 }),
+            { status: 200 }
+          );
+        }
+
+        expect(url).toContain("/v2/checkout/orders");
+        const body = JSON.parse(init?.body as string);
+        expect(body.purchase_units[0].amount.value).toBe("30.00");
+        expect(body.purchase_units[0].amount.currency_code).toBe("USD");
+
+        return new Response(
+          JSON.stringify({
+            id: "TEST-ORDER-777",
+            status: "CREATED",
+            links: [
+              { href: "https://www.sandbox.paypal.com/checkoutnow?token=TEST-ORDER-777", rel: "approve" },
+            ],
+          }),
+          { status: 201 }
+        );
+      });
+
+      const service = new PayPalService(
+        { env: "sandbox", clientId: validClientId, clientSecret: validClientSecret, baseUrl: mockBaseUrl },
+        mockFetch
+      );
+
+      const res = await service.createTestSandboxOrder({
+        amountMinor: 3000,
+        currency: "USD",
+        itemDescription: "Test Sandbox Item",
+      });
+
+      expect(res.id).toBe("TEST-ORDER-777");
+      expect(res.status).toBe("CREATED");
+      expect(res.approvalUrl).toContain("TEST-ORDER-777");
+      expect(res.amountMinor).toBe(3000);
+      expect(res.currency).toBe("USD");
+    });
+  });
 });

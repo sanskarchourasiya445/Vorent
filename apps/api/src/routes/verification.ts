@@ -1,21 +1,33 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
-import { randomUUID } from "node:crypto";
 import {
-  type ConfirmedIntent,
-  type PolicyDocument,
-  type SearchDimension,
-  type SearchSpaceDefinition,
+  extractRequestId,
+  isDbConnectionError,
+  createRateLimiter,
+  authenticateRequest,
+  resolveAuthorizedUserOrReject,
+} from "./routeUtils.js";
+
+export const verificationRateLimiter = createRateLimiter({
+  max: 30,
+  windowMs: 60 * 1000,
+});
+import {
   type VerificationReport,
   type VerificationRequest,
   PresetVerificationRequestSchema,
   VerificationReportSchema,
   VerificationRequestSchema,
+  UserRole,
 } from "@warrant/contracts";
 import { verifyPolicy } from "@warrant/domain";
+import {
+  CANONICAL_POLICY_PRESETS,
+  type CanonicalPolicyPreset,
+  buildSearchSpaceForPreset as buildCanonicalSearchSpace,
+} from "@warrant/test-fixtures";
 import { db } from "../db/index.js";
 import {
   getPolicyVersion,
-  ensureDefaultUser,
   resolveOrCreatePresetVersion,
 } from "../db/repositories/policyRepository.js";
 import {
@@ -34,162 +46,24 @@ export const SERVER_BOUNDS = {
   MIN_TIMEOUT_MS: 1,
 } as const;
 
-export interface PolicyPreset {
-  id: string;
-  name: string;
-  version: string;
-  hash: string;
-  policy: PolicyDocument;
-  intent: ConfirmedIntent;
-  defaultCategories: string[];
-  defaultPricePointsMinor: number[];
-}
-
-export const POLICY_PRESETS: Record<string, PolicyPreset> = {
-  pol_v1_books_hardware: {
-    id: "pol_v1_books_hardware",
-    name: "Engineering Hardware & Technical Books Policy",
-    version: "1.0.0",
-    hash: "93258bd2e0e10160490d8d690e79028c1886f96de0806b749e1822619a3cbbb5",
-    policy: {
-      schemaVersion: "1.0",
-      currency: "USD",
-      maxItemPriceMinor: 25000, // $250.00
-      maxCartTotalMinor: 60000, // $600.00
-      allowedCategories: ["Hardware", "Reference Books", "Peripherals"],
-      prohibitedCategories: ["Weapons / Lasers", "Adult", "Gift Cards"],
-      requireEvidence: true,
-    },
-    intent: {
-      name: "Engineering Hardware & Technical Books Mandate",
-      currency: "USD",
-      maxItemPriceMinor: 25000,
-      maxCartTotalMinor: 60000,
-      allowedCategories: ["Hardware", "Reference Books", "Peripherals"],
-      prohibitedCategories: ["Weapons / Lasers", "Adult", "Gift Cards"],
-      requireEvidence: true,
-    },
-    defaultCategories: ["Hardware", "Reference Books", "Peripherals"],
-    defaultPricePointsMinor: [15000, 24900, 25000, 25100, 30000],
-  },
-  pol_v2_strict_peripherals: {
-    id: "pol_v2_strict_peripherals",
-    name: "Strict Ergonomic Peripherals Mandate",
-    version: "2.1.0-draft",
-    hash: "b327a266d96b8461924c4baa78afd43f46669a1be5e5aacf419eab57c0a30f07",
-    policy: {
-      schemaVersion: "1.0",
-      currency: "USD",
-      maxItemPriceMinor: 15000, // $150.00
-      maxCartTotalMinor: 30000, // $300.00
-      allowedCategories: ["Ergonomic Peripherals", "Monitors", "Keypads"],
-      prohibitedCategories: ["Gaming", "Entertainment"],
-      requireEvidence: true,
-    },
-    intent: {
-      name: "Strict Ergonomic Peripherals Mandate",
-      currency: "USD",
-      maxItemPriceMinor: 15000,
-      maxCartTotalMinor: 30000,
-      allowedCategories: ["Ergonomic Peripherals", "Monitors", "Keypads"],
-      prohibitedCategories: ["Gaming", "Entertainment"],
-      requireEvidence: true,
-    },
-    defaultCategories: ["Ergonomic Peripherals", "Monitors", "Keypads"],
-    defaultPricePointsMinor: [8000, 14900, 15000, 15100, 20000],
-  },
-  pol_seeded_defect_unbounded_cart: {
-    id: "pol_seeded_defect_unbounded_cart",
-    name: "Defective Policy: Whole-Cart Spending Limit Omitted",
-    version: "1.0.0-flawed",
-    hash: "1d4ea3fac4f62cae288f43ec6ae466b757081ab1be31039e9f84d26c9f47183f",
-    policy: {
-      schemaVersion: "1.0",
-      currency: "USD",
-      maxItemPriceMinor: 25000, // $250.00 item ceiling set
-      // maxCartTotalMinor is intentionally omitted to discover CART_TOTAL_LIMIT_EXCEEDED counterexample
-      allowedCategories: ["Hardware", "Reference Books"],
-      prohibitedCategories: ["Gift Cards"],
-      requireEvidence: true,
-    },
-    intent: {
-      name: "Mandate with Whole-Cart Cap of $600",
-      currency: "USD",
-      maxItemPriceMinor: 25000,
-      maxCartTotalMinor: 60000, // $600.00 whole-cart ceiling
-      allowedCategories: ["Hardware", "Reference Books"],
-      prohibitedCategories: ["Gift Cards"],
-      requireEvidence: true,
-    },
-    defaultCategories: ["Hardware", "Reference Books"],
-    defaultPricePointsMinor: [22000, 25000], // 3 items @ $220.00 = $660.00 > $600.00
-  },
-};
-
-export function buildSearchSpaceForPreset(
-  preset: PolicyPreset,
-  dimensions: SearchDimension[] = ["PRICE_BOUNDARIES"],
-): SearchSpaceDefinition {
-  const categories = [...preset.defaultCategories];
-  if (dimensions.includes("CATEGORY_EVASION")) {
-    if (preset.intent.prohibitedCategories) {
-      categories.push(...preset.intent.prohibitedCategories);
-    }
-    categories.push("Office Furnishing / Ergonomics");
-  }
-
-  const pricePointsMinor = [...preset.defaultPricePointsMinor];
-  if (dimensions.includes("PRICE_BOUNDARIES") && preset.intent.maxItemPriceMinor) {
-    const limit = preset.intent.maxItemPriceMinor;
-    pricePointsMinor.push(Math.max(0, limit - 100), limit, limit + 100);
-  }
-
-  const quantities = dimensions.includes("QUANTITY_SPLITS") ? [1, 2, 3] : [1];
-  const maxItemsPerCart = dimensions.includes("QUANTITY_SPLITS") ? 2 : 1;
-  const currencies = dimensions.includes("CURRENCY_MUTATION")
-    ? ["USD", "EUR"]
-    : [preset.policy.currency];
-  const evidenceVariations: ("COMPLETE" | "MISSING" | "STALE")[] = dimensions.includes("EVIDENCE_FRESHNESS")
-    ? ["COMPLETE", "STALE", "MISSING"]
-    : ["COMPLETE"];
-
-  return {
-    domainVersion: "1.0.0",
-    categories: Array.from(new Set(categories.filter((c) => Boolean(c) && c.trim().length > 0))),
-    pricePointsMinor: Array.from(new Set(pricePointsMinor.filter((p) => p >= 0))),
-    quantities,
-    currencies,
-    maxItemsPerCart,
-    evidenceVariations,
-  };
-}
-
-function extractRequestId(request: FastifyRequest): string {
-  const headerId = request.headers["x-request-id"];
-  if (typeof headerId === "string" && headerId.trim().length > 0) {
-    return headerId.trim();
-  }
-  return request.id || `req_${randomUUID()}`;
-}
-
-function isDbConnectionError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as any;
-  return (
-    e.code === "28P01" ||
-    e.code === "ECONNREFUSED" ||
-    e.code === "ETIMEDOUT" ||
-    e.code === "ENOTFOUND" ||
-    (typeof e.message === "string" &&
-      (e.message.includes("connection") || e.message.includes("authentication failed")))
-  );
-}
+export type PolicyPreset = CanonicalPolicyPreset;
+export const POLICY_PRESETS: Record<string, PolicyPreset> = CANONICAL_POLICY_PRESETS;
+export const buildSearchSpaceForPreset = buildCanonicalSearchSpace;
 
 export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
   // Handler for verification run
   const handleVerificationRun = async (request: FastifyRequest, reply: FastifyReply, persistRun: boolean = false) => {
     const requestId = extractRequestId(request);
     reply.header("x-request-id", requestId);
+
+    const shouldPersist = persistRun || (request.query as any)?.persist === "true";
+    let authUser: { user: any; ownerId: string } | null = null;
+    if (shouldPersist) {
+      authUser = await resolveAuthorizedUserOrReject(request, reply, {
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authUser) return;
+    }
 
     const body = request.body;
     if (!body || typeof body !== "object") {
@@ -275,7 +149,10 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
               name: dbVersion.name,
               version: String(dbVersion.versionNumber),
               hash: dbVersion.policyHash,
+              description: dbVersion.name,
+              limitsSummary: `Version ${dbVersion.versionNumber}`,
               policy: dbVersion.policyDocument,
+              policyDocument: dbVersion.policyDocument,
               intent: dbVersion.intentSpec,
               defaultCategories: dbVersion.policyDocument.allowedCategories ?? ["General"],
               defaultPricePointsMinor: [
@@ -354,9 +231,9 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
     const validated = VerificationReportSchema.parse(report);
 
     // Save to database if persistence is requested
-    if (persistRun || (request.query as any)?.persist === "true") {
+    if (shouldPersist && authUser) {
       try {
-        const ownerId = await ensureDefaultUser(db);
+        const ownerId = authUser.ownerId;
         let targetPolicyVersionId = verificationRequest.config?.policyVersionId || "unknown";
         let targetPolicyHash = verificationRequest.config?.policyHash || validated.policyHash;
 
@@ -390,6 +267,15 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
         });
       } catch (err: unknown) {
         request.log.error({ err, requestId }, "Failed to persist verification run to database");
+        if (isDbConnectionError(err)) {
+          return reply.status(503).send({
+            error: {
+              code: "DATABASE_UNAVAILABLE",
+              message: "Persistence store is currently unavailable in standby mode.",
+            },
+            requestId,
+          });
+        }
         return reply.status(500).send({
           error: {
             code: "PERSISTENCE_ERROR",
@@ -409,9 +295,16 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
     reply.header("x-request-id", requestId);
 
     try {
+      const user = await authenticateRequest(request);
       const limit = request.query?.limit ? parseInt(request.query.limit, 10) : 50;
+      const ownerId =
+        user && (user.role === UserRole.ADMINISTRATOR || user.role === UserRole.FINANCE_AUDITOR)
+          ? undefined
+          : user?.id;
+
       const runs = await listVerificationRuns(db, {
         policyVersionId: request.query?.policyVersionId,
+        ownerId,
         limit: Number.isNaN(limit) ? 50 : limit,
       });
 
@@ -517,11 +410,11 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // POST /runs - Execute and persist verification run
-  fastify.post("/runs", (request, reply) => handleVerificationRun(request, reply, true));
+  fastify.post("/runs", { preHandler: [verificationRateLimiter] }, (request, reply) => handleVerificationRun(request, reply, true));
 
-  // POST /run - Pure execution (Phase 3 contract)
-  fastify.post("/run", (request, reply) => handleVerificationRun(request, reply, false));
+  // POST /run - Pure execution
+  fastify.post("/run", { preHandler: [verificationRateLimiter] }, (request, reply) => handleVerificationRun(request, reply, false));
 
   // POST / (convenience alias)
-  fastify.post("/", (request, reply) => handleVerificationRun(request, reply, false));
+  fastify.post("/", { preHandler: [verificationRateLimiter] }, (request, reply) => handleVerificationRun(request, reply, false));
 };

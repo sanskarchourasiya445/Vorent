@@ -142,3 +142,22 @@ export const ReasonCode = {
 } as const;
 
 export type ReasonCodeValue = z.infer<typeof ReasonCodeZodSchema>;
+
+// 8. UserRole
+export const UserRoleValues = [
+  "REQUESTER",
+  "APPROVER",
+  "FINANCE_AUDITOR",
+  "ADMINISTRATOR",
+] as const;
+export const UserRoleZodSchema = z.enum(UserRoleValues);
+
+export const UserRole = {
+  REQUESTER: "REQUESTER",
+  APPROVER: "APPROVER",
+  FINANCE_AUDITOR: "FINANCE_AUDITOR",
+  ADMINISTRATOR: "ADMINISTRATOR",
+} as const;
+
+export type UserRole = z.infer<typeof UserRoleZodSchema>;
+

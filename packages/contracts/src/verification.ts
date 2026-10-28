@@ -5,7 +5,7 @@ import { PolicyDocumentSchema } from "./policy.js";
 import { PolicyEvaluationResultSchema } from "./evaluation.js";
 
 /**
- * Warrant Phase 2 — Verification Contracts
+ * Warrant — Verification Contracts
  * Bounded counterexample discovery, confirmed intent constraints, and search reports.
  */
 

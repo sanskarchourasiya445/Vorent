@@ -1,6 +1,9 @@
 import type {
   EvidenceSnapshot,
   SearchSpaceDefinition,
+  SearchDimension,
+  PolicyDocument,
+  ConfirmedIntent,
 } from "@warrant/contracts";
 
 /**
@@ -248,3 +251,168 @@ export const SEARCH_SPACES_FIXTURES: Record<string, SearchSpaceDefinition> = {
     evidenceVariations: ["COMPLETE"],
   },
 };
+
+// 5. Canonical Policy Presets
+export interface CanonicalPolicyPreset {
+  id: string;
+  name: string;
+  version: string;
+  hash: string;
+  description: string;
+  limitsSummary: string;
+  policy: PolicyDocument;
+  policyDocument: PolicyDocument;
+  intent: ConfirmedIntent;
+  defaultCategories: string[];
+  defaultPricePointsMinor: number[];
+}
+
+const pol1Doc: PolicyDocument = {
+  schemaVersion: "1.0",
+  currency: "USD",
+  maxItemPriceMinor: 25000, // $250.00
+  maxCartTotalMinor: 60000, // $600.00
+  allowedCategories: ["Hardware", "Reference Books", "Peripherals"],
+  prohibitedCategories: ["Weapons / Lasers", "Adult", "Gift Cards"],
+  requireEvidence: true,
+};
+
+const pol1Intent: ConfirmedIntent = {
+  name: "Engineering Hardware & Technical Books Mandate",
+  currency: "USD",
+  maxItemPriceMinor: 25000,
+  maxCartTotalMinor: 60000,
+  allowedCategories: ["Hardware", "Reference Books", "Peripherals"],
+  prohibitedCategories: ["Weapons / Lasers", "Adult", "Gift Cards"],
+  requireEvidence: true,
+};
+
+const pol2Doc: PolicyDocument = {
+  schemaVersion: "1.0",
+  currency: "USD",
+  maxItemPriceMinor: 15000, // $150.00
+  maxCartTotalMinor: 30000, // $300.00
+  allowedCategories: ["Ergonomic Peripherals", "Monitors", "Keypads"],
+  prohibitedCategories: ["Gaming", "Entertainment"],
+  requireEvidence: true,
+};
+
+const pol2Intent: ConfirmedIntent = {
+  name: "Strict Ergonomic Peripherals Mandate",
+  currency: "USD",
+  maxItemPriceMinor: 15000,
+  maxCartTotalMinor: 30000,
+  allowedCategories: ["Ergonomic Peripherals", "Monitors", "Keypads"],
+  prohibitedCategories: ["Gaming", "Entertainment"],
+  requireEvidence: true,
+};
+
+const pol3Doc: PolicyDocument = {
+  schemaVersion: "1.0",
+  currency: "USD",
+  maxItemPriceMinor: 25000, // $250.00 item ceiling set
+  // maxCartTotalMinor is intentionally omitted to discover CART_TOTAL_LIMIT_EXCEEDED counterexample
+  allowedCategories: ["Hardware", "Reference Books"],
+  prohibitedCategories: ["Gift Cards"],
+  requireEvidence: true,
+};
+
+const pol3Intent: ConfirmedIntent = {
+  name: "Mandate with Whole-Cart Cap of $600",
+  currency: "USD",
+  maxItemPriceMinor: 25000,
+  maxCartTotalMinor: 60000, // $600.00 whole-cart ceiling
+  allowedCategories: ["Hardware", "Reference Books"],
+  prohibitedCategories: ["Gift Cards"],
+  requireEvidence: true,
+};
+
+export const CANONICAL_POLICY_PRESETS: Record<string, CanonicalPolicyPreset> = {
+  pol_v1_books_hardware: {
+    id: "pol_v1_books_hardware",
+    name: "Engineering Hardware & Technical Books Policy",
+    version: "1.0.0",
+    hash: "93258bd2e0e10160490d8d690e79028c1886f96de0806b749e1822619a3cbbb5",
+    description:
+      "Approved policy authorizing dev hardware and reference books up to $250.00 USD per item and $600.00 USD total.",
+    limitsSummary: "Max Item: $250.00 | Max Cart: $600.00 | Allowed: Hardware, Reference Books",
+    policy: pol1Doc,
+    policyDocument: pol1Doc,
+    intent: pol1Intent,
+    defaultCategories: ["Hardware", "Reference Books", "Peripherals"],
+    defaultPricePointsMinor: [15000, 24900, 25000, 25100, 30000],
+  },
+  pol_v2_strict_peripherals: {
+    id: "pol_v2_strict_peripherals",
+    name: "Strict Ergonomic Peripherals Mandate",
+    version: "2.1.0-draft",
+    hash: "b327a266d96b8461924c4baa78afd43f46669a1be5e5aacf419eab57c0a30f07",
+    description:
+      "Draft policy enforcing strict category matching and requiring verifiable quotes for all monitors and keypads.",
+    limitsSummary: "Max Item: $150.00 | Max Cart: $300.00 | Strict Quotes Required",
+    policy: pol2Doc,
+    policyDocument: pol2Doc,
+    intent: pol2Intent,
+    defaultCategories: ["Ergonomic Peripherals", "Monitors", "Keypads"],
+    defaultPricePointsMinor: [8000, 14900, 15000, 15100, 20000],
+  },
+  pol_seeded_defect_unbounded_cart: {
+    id: "pol_seeded_defect_unbounded_cart",
+    name: "Defective Policy: Whole-Cart Spending Limit Omitted",
+    version: "1.0.0-flawed",
+    hash: "1d4ea3fac4f62cae288f43ec6ae466b757081ab1be31039e9f84d26c9f47183f",
+    description:
+      "Seeded defective policy: Item price ceiling ($250.00) is enforced, but whole-cart total ceiling is omitted while user intent restricts cart total to $600.00.",
+    limitsSummary: "Max Item: $250.00 | Max Cart: UNBOUNDED (Defect) | Intent Total: $600.00",
+    policy: pol3Doc,
+    policyDocument: pol3Doc,
+    intent: pol3Intent,
+    defaultCategories: ["Hardware", "Reference Books"],
+    defaultPricePointsMinor: [22000, 25000], // 3 items @ $220.00 = $660.00 > $600.00
+  },
+};
+
+export const POLICY_PRESET_LIST: CanonicalPolicyPreset[] = Object.values(CANONICAL_POLICY_PRESETS);
+
+/**
+ * Builds deterministic verification search space for a given policy preset.
+ */
+export function buildSearchSpaceForPreset(
+  preset: CanonicalPolicyPreset,
+  dimensions: SearchDimension[] = ["PRICE_BOUNDARIES"],
+): SearchSpaceDefinition {
+  const categories = [...preset.defaultCategories];
+  if (dimensions.includes("CATEGORY_EVASION")) {
+    if (preset.intent.prohibitedCategories) {
+      categories.push(...preset.intent.prohibitedCategories);
+    }
+    categories.push("Office Furnishing / Ergonomics");
+  }
+
+  const pricePointsMinor = [...preset.defaultPricePointsMinor];
+  if (dimensions.includes("PRICE_BOUNDARIES") && preset.intent.maxItemPriceMinor) {
+    const limit = preset.intent.maxItemPriceMinor;
+    pricePointsMinor.push(Math.max(0, limit - 100), limit, limit + 100);
+  }
+
+  const quantities = dimensions.includes("QUANTITY_SPLITS") ? [1, 2, 3] : [1];
+  const currencies = dimensions.includes("CURRENCY_MUTATION")
+    ? ["USD", "EUR"]
+    : [preset.policy.currency];
+  const maxItemsPerCart = dimensions.includes("QUANTITY_SPLITS") ? 2 : 1;
+  const evidenceVariations: ("COMPLETE" | "MISSING" | "STALE")[] = dimensions.includes(
+    "EVIDENCE_FRESHNESS",
+  )
+    ? ["COMPLETE", "STALE", "MISSING"]
+    : ["COMPLETE"];
+
+  return {
+    domainVersion: "1.0.0",
+    categories: Array.from(new Set(categories.filter((c) => Boolean(c) && c.trim().length > 0))),
+    pricePointsMinor: Array.from(new Set(pricePointsMinor.filter((p) => p >= 0))),
+    quantities,
+    currencies,
+    maxItemsPerCart,
+    evidenceVariations,
+  };
+}

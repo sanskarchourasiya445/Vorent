@@ -2,23 +2,396 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --color-canvas: #F5F6F8;
+/* ==========================================================================
+   VORENT — DUAL-THEME TOKENS ENGINE
+   Theme 1 (Dark): Obsidian Black + Charcoal + Restrained Electric Blue
+   Theme 2 (Light): Platinum White + Obsidian Sidebar + Electric Blue Accent
+   ========================================================================== */
+
+/* DARK MODE (Default & .dark & [data-theme="dark"]) — Obsidian + Charcoal + Electric Blue */
+:root,
+html.dark,
+:root[data-theme="dark"] {
+  /* Specification Semantic Tokens */
+  --bg-primary: #080B11;
+  --bg-secondary: #0F172A;
+  --bg-card: #111726;
+  --bg-elevated: #161F30;
+  --brand-primary: #0EA5E9;
+  --brand-secondary: #0284C7;
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --border-default: #1E293B;
+  --soft-accent-surface: #0C253B;
+  --success: #22C55E;
+  --error: #F87171;
+  --warning: #FBBF24;
+
+  /* App Surface & Canvas Mappings */
+  --color-canvas: #080B11;
+  --color-canvas-subtle: #0B0F17;
+  --color-sidebar: #070A0F;
+  --color-sidebar-raised: #0F172A;
+  --color-surface: #111726;
+  --color-surface-soft: #161F30;
+  --color-surface-subtle: #0B0F17;
+  --color-surface-raised: #1A2338;
+  --color-surface-inset: #0A0E17;
+  --color-surface-muted: #0F172A;
+  --color-card: #111726;
+  --color-chrome: #080B11;
+
+  /* Typography */
+  --color-ink: #F8FAFC;
+  --color-ink-muted: #94A3B8;
+  --color-ink-secondary: #94A3B8;
+  --color-muted: #94A3B8;
+  --color-ink-subtle: #64748B;
+  --color-white-warm: #F8FAFC;
+
+  /* Borders & Dividers */
+  --color-border: #1E293B;
+  --color-border-subtle: #141C2E;
+  --color-border-light: #283548;
+  --color-border-strong: #334155;
+
+  /* Accents & Brand: Restrained Electric Blue */
+  --color-primary: #0EA5E9;
+  --color-primary-hover: #0284C7;
+  --color-primary-active: #0369A1;
+  --color-primary-soft: #0C253B;
+  --color-accent: #0EA5E9;
+  --color-accent-hover: #0284C7;
+  --color-accent-active: #0369A1;
+  --color-accent-subtle: #0C253B;
+  --color-focus-ring: #0EA5E9;
+
+  /* Accent Metallics */
+  --color-brass: #E2E8F0;
+  --color-earth: #CBD5E1;
+  --color-earth-soft: #1E293B;
+
+  /* Operational Status & Decision Semantics */
+  --color-allow: #22C55E;
+  --color-allow-bg: #0B2519;
+  --color-allow-border: #134E35;
+  --color-success: #22C55E;
+  --color-success-soft: #0D2818;
+
+  --color-deny: #F87171;
+  --color-deny-bg: #331414;
+  --color-deny-border: #7F1D1D;
+  --color-danger: #F87171;
+  --color-danger-soft: #331414;
+  --color-red-soft: #331414;
+  --color-red-ink: #FCA5A5;
+
+  --color-review: #FBBF24;
+  --color-review-bg: #2E2007;
+  --color-review-border: #78350F;
+  --color-warning: #FBBF24;
+  --color-warning-soft: #2E2007;
+
+  --color-info: #0EA5E9;
+  --color-info-soft: #0C253B;
+  --color-disabled: #475569;
+
+  /* Sandbox Environment Badge */
+  --color-sandbox-bg: #2E2007;
+  --color-sandbox-text: #FCD34D;
+  --color-sandbox-border: #78350F;
+}
+
+/* LIGHT MODE (.light & [data-theme="light"]) — Clean Platinum + Obsidian Sidebar + Electric Blue Accent */
+html.light,
+:root[data-theme="light"] {
+  /* Specification Semantic Tokens */
+  --bg-primary: #F8FAFC;
+  --bg-secondary: #F1F5F9;
+  --bg-card: #FFFFFF;
+  --bg-elevated: #FFFFFF;
+  --brand-primary: #0284C7;
+  --brand-secondary: #0369A1;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --border-default: #E2E8F0;
+  --soft-green-surface: #E0F2FE;
+  --champagne-accent: #CBD5E1;
+  --success: #16A34A;
+  --error: #DC2626;
+  --warning: #D97706;
+
+  /* App Surface & Canvas Mappings */
+  --color-canvas: #F8FAFC;
+  --color-canvas-subtle: #F1F5F9;
+  --color-sidebar: #070A0F;
+  --color-sidebar-raised: #0F172A;
   --color-surface: #FFFFFF;
-  --color-ink: #172033;
-  --color-muted: #5B6475;
-  --color-border: #D8DDE6;
-  --color-accent: #3157A4;
-  --color-allow: #176B4D;
-  --color-deny: #B42318;
-  --color-review: #8A5A00;
-  --color-info: #245EA8;
-  --color-disabled: #A3AAB7;
+  --color-surface-soft: #F1F5F9;
+  --color-surface-subtle: #F8FAFC;
+  --color-surface-raised: #FFFFFF;
+  --color-surface-inset: #F1F5F9;
+  --color-surface-muted: #E2E8F0;
+  --color-card: #FFFFFF;
+  --color-chrome: #F1F5F9;
+
+  /* Typography */
+  --color-ink: #0F172A;
+  --color-ink-muted: #64748B;
+  --color-ink-secondary: #64748B;
+  --color-muted: #64748B;
+  --color-ink-subtle: #94A3B8;
+  --color-white-warm: #0F172A;
+
+  /* Borders & Dividers */
+  --color-border: #E2E8F0;
+  --color-border-subtle: #F1F5F9;
+  --color-border-light: #E2E8F0;
+  --color-border-strong: #CBD5E1;
+
+  /* Accents & Brand: Restrained Electric Blue */
+  --color-primary: #0284C7;
+  --color-primary-hover: #0369A1;
+  --color-primary-active: #075985;
+  --color-primary-soft: #E0F2FE;
+  --color-accent: #0284C7;
+  --color-accent-hover: #0369A1;
+  --color-accent-active: #075985;
+  --color-accent-subtle: #E0F2FE;
+  --color-focus-ring: #0284C7;
+
+  /* Champagne / Platinum Accent */
+  --color-brass: #94A3B8;
+  --color-earth: #94A3B8;
+  --color-earth-soft: #F1F5F9;
+
+  /* Operational Status & Decision Semantics */
+  --color-allow: #16A34A;
+  --color-allow-bg: #DCFCE7;
+  --color-allow-border: #86EFAC;
+  --color-success: #16A34A;
+  --color-success-soft: #DCFCE7;
+
+  --color-deny: #DC2626;
+  --color-deny-bg: #FEE2E2;
+  --color-deny-border: #FCA5A5;
+  --color-danger: #DC2626;
+  --color-danger-soft: #FEE2E2;
+  --color-red-soft: #FEE2E2;
+  --color-red-ink: #DC2626;
+
+  --color-review: #D97706;
+  --color-review-bg: #FEF3C7;
+  --color-review-border: #FCD34D;
+  --color-warning: #D97706;
+  --color-warning-soft: #FEF3C7;
+
+  --color-info: #0284C7;
+  --color-info-soft: #E0F2FE;
+  --color-disabled: #94A3B8;
+
+  /* Sandbox Environment Badge */
+  --color-sandbox-bg: #FEF3C7;
+  --color-sandbox-text: #92400E;
+  --color-sandbox-border: #F59E0B;
+}
+
+/* ==========================================================================
+   LIGHT THEME SIDEBAR SPECIFICATION — OBSIDIAN CHARCOAL
+   - Sidebar background: #070A0F (Deep Obsidian Charcoal)
+   - Selected navigation item: #111726
+   - Subtle borders/dividers: #1E293B
+   - Muted text/icons: #94A3B8
+   - Primary text and icons: Platinum White (#F8FAFC) with clear contrast
+   - Preserves active-state electric blue indicators (#0EA5E9)
+   ========================================================================== */
+html.light aside[aria-label="Application Navigation"],
+:root[data-theme="light"] aside[aria-label="Application Navigation"],
+html.light #mobile-nav-drawer,
+:root[data-theme="light"] #mobile-nav-drawer,
+html.light .warrant-sidebar,
+:root[data-theme="light"] .warrant-sidebar {
+  --color-sidebar: #070A0F;
+  --color-sidebar-raised: #0F172A;
+  --color-surface: #070A0F;
+  --color-surface-raised: #111726;
+  --color-surface-subtle: #0B0F17;
+  --color-surface-inset: #05070B;
+  --color-ink: #F8FAFC;
+  --color-ink-muted: #94A3B8;
+  --color-ink-subtle: #64748B;
+  --color-muted: #94A3B8;
+  --color-border: #1E293B;
+  --color-border-subtle: #141C2E;
+  --color-border-strong: #283548;
+  --color-accent: #0EA5E9;
+  --color-allow: #22C55E;
+  background-color: #070A0F;
+  color: #F8FAFC;
+  border-right-color: #1E293B;
+}
+
+html.light aside[aria-label="Application Navigation"] .bg-surface-raised,
+:root[data-theme="light"] aside[aria-label="Application Navigation"] .bg-surface-raised,
+html.light #mobile-nav-drawer .bg-surface-raised,
+:root[data-theme="light"] #mobile-nav-drawer .bg-surface-raised {
+  background-color: #111726;
+  color: #F8FAFC;
+}
+
+html.light aside[aria-label="Application Navigation"] .bg-accent\/15,
+:root[data-theme="light"] aside[aria-label="Application Navigation"] .bg-accent\/15,
+html.light #mobile-nav-drawer .bg-accent\/15,
+:root[data-theme="light"] #mobile-nav-drawer .bg-accent\/15 {
+  background-color: rgba(14, 165, 233, 0.18);
+  border-color: rgba(14, 165, 233, 0.35);
+  color: #38BDF8;
+}
+
+html.light aside[aria-label="Application Navigation"] select,
+:root[data-theme="light"] aside[aria-label="Application Navigation"] select,
+html.light #mobile-nav-drawer select,
+:root[data-theme="light"] #mobile-nav-drawer select {
+  background-color: #111726;
+  color: #F8FAFC;
+  border-color: #1E293B;
+}
+
+html.light aside[aria-label="Application Navigation"] option,
+:root[data-theme="light"] aside[aria-label="Application Navigation"] option,
+html.light #mobile-nav-drawer option,
+:root[data-theme="light"] #mobile-nav-drawer option {
+  background-color: #0F172A;
+  color: #F8FAFC;
 }
 
 body {
   background-color: var(--color-canvas);
   color: var(--color-ink);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: 'Inter', 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Editorial serif utility */
+.font-serif {
+  font-family: 'Source Serif 4', Georgia, Cambria, 'Times New Roman', serif;
+  font-feature-settings: "kern", "liga", "clig", "calt";
+}
+
+/* Tabular figures for numerical stability in financial ledgers */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Technical Monospace Font Standard */
+.font-mono {
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  letter-spacing: -0.01em;
+}
+
+/* Dynamic Scrollbar Theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-canvas);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+/* Hide scrollbar utility for touch/horizontal tab strips */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Sidebar scrollbar */
+.sidebar-dark-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+.sidebar-dark-scrollbar::-webkit-scrollbar-track {
+  background: var(--color-sidebar);
+}
+.sidebar-dark-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2.5px;
+}
+.sidebar-dark-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Official Lenis integration & boundary isolation */
+html.lenis, html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+.lenis.lenis-scrolling iframe {
+  pointer-events: none;
+}
+
+/* Restrained motion & interaction utilities matching fintech design system */
+.motion-enter {
+  transition: opacity 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.motion-interactive {
+  transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out;
+}
+.motion-interactive:active {
+  background-color: var(--color-surface-inset);
+}
+.motion-tab {
+  transition: border-color 180ms ease-out, color 180ms ease-out, background-color 180ms ease-out;
+}
+.motion-drawer {
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease-out;
+}
+
+/* ==========================================================================
+   PREMIUM SKELETON LOADING UI (Midnight Navy Shimmer & Motion Reduction)
+   ========================================================================== */
+@keyframes skeleton-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-skeleton-shimmer {
+  animation: skeleton-shimmer 2.2s infinite ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-skeleton-shimmer {
+    animation: none !important;
+  }
 }

@@ -347,6 +347,44 @@ describe("Checkout HTTP Routes (Nonces & Proposals)", () => {
       expect(json.reasonCodes).toContain(ReasonCode.PROHIBITED_CATEGORY);
     });
 
+    it("evaluates item price limit exceeded proposal to DENY with ITEM_PRICE_LIMIT_EXCEEDED without reservation", async () => {
+      vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce(validOwnerId);
+      vi.spyOn(checkoutRepo, "submitCheckoutProposal").mockResolvedValueOnce({
+        proposal: {
+          id: validProposalId,
+          ownerId: validOwnerId,
+          approvalId: validApprovalId,
+          policyVersionId: validPolicyVersionId,
+          policyHash: validPolicyHash,
+          consumedNonceId: validNonceId,
+          cartHash: "c".repeat(64),
+          proposedCart: validProposalPayload.cart,
+          normalizedCart: validProposalPayload.cart,
+          evidenceSnapshot: validProposalPayload.evidenceSnapshot,
+          decision: "DENY",
+          reasonCodes: [ReasonCode.ITEM_PRICE_LIMIT_EXCEEDED],
+          ruleTrace: [],
+          evaluatedAt: new Date(),
+          createdAt: new Date(),
+        },
+        reservation: null,
+        decision: "DENY",
+        reasonCodes: [ReasonCode.ITEM_PRICE_LIMIT_EXCEEDED],
+      });
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/checkout/proposals",
+        payload: validProposalPayload,
+      });
+
+      expect(response.statusCode).toBe(201);
+      const json = response.json();
+      expect(json.decision).toBe("DENY");
+      expect(json.reservation).toBeNull();
+      expect(json.reasonCodes).toContain(ReasonCode.ITEM_PRICE_LIMIT_EXCEEDED);
+    });
+
     it("evaluates spend limit exceeded proposal to DENY without reservation", async () => {
       vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce(validOwnerId);
       vi.spyOn(checkoutRepo, "submitCheckoutProposal").mockResolvedValueOnce({
@@ -404,6 +442,26 @@ describe("Checkout HTTP Routes (Nonces & Proposals)", () => {
       expect(json.error.code).toBe("NONCE_REPLAYED");
     });
 
+    it("returns 400 Bad Request when cart contains an unknown SKU (PAY-001)", async () => {
+      vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce(validOwnerId);
+      vi.spyOn(checkoutRepo, "submitCheckoutProposal").mockRejectedValueOnce(
+        new checkoutRepo.CheckoutError(
+          "UNKNOWN_CATALOG_SKU",
+          "Item with SKU 'fake-sku' is not present in the authoritative product catalog."
+        )
+      );
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/checkout/proposals",
+        payload: validProposalPayload,
+      });
+
+      expect(response.statusCode).toBe(400);
+      const json = response.json();
+      expect(json.error.code).toBe("UNKNOWN_CATALOG_SKU");
+    });
+
     it("returns 400 Bad Request when nonce has expired (NONCE_EXPIRED)", async () => {
       vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce(validOwnerId);
       vi.spyOn(checkoutRepo, "submitCheckoutProposal").mockRejectedValueOnce(
@@ -441,6 +499,82 @@ describe("Checkout HTTP Routes (Nonces & Proposals)", () => {
 
       expect(response.statusCode).toBe(404);
       expect(response.json().error.code).toBe("APPROVAL_NOT_FOUND");
+    });
+
+    it("returns 400 Bad Request when policy version hash does not match approval (POLICY_HASH_MISMATCH)", async () => {
+      vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce(validOwnerId);
+      vi.spyOn(checkoutRepo, "submitCheckoutProposal").mockRejectedValueOnce(
+        new checkoutRepo.CheckoutError(
+          "POLICY_HASH_MISMATCH",
+          "Stored policy document has been modified or does not match approved policy hash"
+        )
+      );
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/checkout/proposals",
+        payload: validProposalPayload,
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("POLICY_HASH_MISMATCH");
+    });
+
+    it("returns 400 Bad Request when proposal references a revoked approval (REVOKED_APPROVAL)", async () => {
+      vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce(validOwnerId);
+      vi.spyOn(checkoutRepo, "submitCheckoutProposal").mockRejectedValueOnce(
+        new checkoutRepo.CheckoutError(
+          "REVOKED_APPROVAL",
+          "The specified approval checkpoint has been revoked and cannot authorize checkout."
+        )
+      );
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/checkout/proposals",
+        payload: validProposalPayload,
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("REVOKED_APPROVAL");
+    });
+
+    it("evaluates proposal with stale evidence to REVIEW with zero spend reservation (201 Created)", async () => {
+      vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce(validOwnerId);
+      vi.spyOn(checkoutRepo, "submitCheckoutProposal").mockResolvedValueOnce({
+        proposal: {
+          id: validProposalId,
+          ownerId: validOwnerId,
+          approvalId: validApprovalId,
+          policyVersionId: validPolicyVersionId,
+          policyHash: validPolicyHash,
+          consumedNonceId: validNonceId,
+          cartHash: "c".repeat(64),
+          proposedCart: validProposalPayload.cart,
+          normalizedCart: validProposalPayload.cart,
+          evidenceSnapshot: { ...validProposalPayload.evidenceSnapshot, stale: true },
+          decision: "REVIEW",
+          reasonCodes: [ReasonCode.STALE_EVIDENCE],
+          ruleTrace: [],
+          evaluatedAt: new Date(),
+          createdAt: new Date(),
+        },
+        reservation: null, // Zero reservation on REVIEW
+        decision: "REVIEW",
+        reasonCodes: [ReasonCode.STALE_EVIDENCE],
+      });
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/checkout/proposals",
+        payload: validProposalPayload,
+      });
+
+      expect(response.statusCode).toBe(201);
+      const json = response.json();
+      expect(json.decision).toBe("REVIEW");
+      expect(json.reservation).toBeNull();
+      expect(json.reasonCodes).toContain(ReasonCode.STALE_EVIDENCE);
     });
 
     it("returns 503 DATABASE_UNAVAILABLE when database is unreachable", async () => {

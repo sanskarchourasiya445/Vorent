@@ -124,7 +124,7 @@ export async function submitCheckoutProposal(
       cartTotalMinor,
       currency: input.currency,
       policyVersionId: input.policyVersionId || "pol_v1_books_hardware",
-      policyHash: input.policyHash || "a4f912b7e53c4d89a290bc9812efaa43217d8900fe5b81a91e5d7a810b45cd2e",
+      policyHash: input.policyHash || "93258bd2e0e10160490d8d690e79028c1886f96de0806b749e1822619a3cbbb5",
       reservationId: decision === "ALLOW" ? `sim_res_${Date.now()}` : undefined,
       reservationState: decision === "ALLOW" ? "ORDER_CREATION_PENDING" : undefined,
       evaluatedAt: new Date().toISOString(),
@@ -143,12 +143,21 @@ export async function submitCheckoutProposal(
   const evidenceSnapshot =
     input.evidenceVariation === "MISSING"
       ? {
+          evidenceComplete: false,
+          quotesVerified: false,
+          evidenceFresh: false,
+          snapshotTimestamp: new Date().toISOString(),
           timestamp: new Date().toISOString(),
           merchantConfidence: 0.1,
           itemCategorizations: {},
         }
       : input.evidenceVariation === "STALE"
         ? {
+            evidenceComplete: true,
+            quotesVerified: true,
+            evidenceFresh: false,
+            stale: true,
+            snapshotTimestamp: new Date(Date.now() - 14 * 86400000).toISOString(),
             timestamp: new Date(Date.now() - 14 * 86400000).toISOString(),
             merchantConfidence: 0.9,
             itemCategorizations: Object.fromEntries(
@@ -156,6 +165,11 @@ export async function submitCheckoutProposal(
             ),
           }
         : {
+            evidenceComplete: true,
+            quotesVerified: true,
+            evidenceFresh: true,
+            stale: false,
+            snapshotTimestamp: new Date().toISOString(),
             timestamp: new Date().toISOString(),
             merchantConfidence: 1.0,
             itemCategorizations: Object.fromEntries(
@@ -240,7 +254,10 @@ export async function submitCheckoutProposal(
     proposalId: proposal.id || proposal.proposalId || `prop_${Date.now()}`,
     approvalId: proposal.approvalId || input.approvalId,
     decision,
-    primaryReasonCode: reasonCodes[0] || proposal?.primaryReasonCode || ReasonCode.ALL_RULES_PASSED,
+    primaryReasonCode:
+      reasonCodes[0] ||
+      proposal?.primaryReasonCode ||
+      (decision === "ALLOW" ? ReasonCode.ALL_RULES_PASSED : ReasonCode.INTERNAL_EVALUATION_ERROR),
     reasonCodes,
     ruleTrace: proposal.ruleTrace || [],
     cartTotalMinor: proposal.cartTotalMinor ?? cartTotalMinor,

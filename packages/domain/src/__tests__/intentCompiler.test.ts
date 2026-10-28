@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { compileIntent } from "../compiler/intentCompiler.js";
 import { MANDATE_FIXTURES } from "@warrant/test-fixtures";
 
-describe("Phase 2 Intent Compiler (Deterministic)", () => {
+describe("Intent Compiler (Deterministic)", () => {
   it("compiles a clear, unambiguous mandate into valid PolicyDocument and ConfirmedIntent", () => {
     const mandate = MANDATE_FIXTURES.engineeringClear.text;
     const response = compileIntent({ mandateText: mandate });
@@ -82,5 +82,30 @@ describe("Phase 2 Intent Compiler (Deterministic)", () => {
     expect(response.questions.some((q) => q.includes("Tax and VAT"))).toBe(true);
     expect(response.questions.some((q) => q.includes("Shipping fee"))).toBe(true);
     expect(response.questions.some((q) => q.includes("Recurring subscriptions"))).toBe(true);
+  });
+
+  it("handles contradictory purchase requirements honestly (per-item ceiling exceeds whole-cart budget)", () => {
+    const mandate = "Engineering hardware up to $300 each with total budget of $200.";
+    const response = compileIntent({ mandateText: mandate });
+
+    expect(response.candidatePolicy.maxItemPriceMinor).toBe(30000); // $300.00
+    expect(response.candidatePolicy.maxCartTotalMinor).toBe(20000); // $200.00
+    expect(response.validation.warnings.some((w) =>
+      w.includes("Per-item ceiling (30000) is greater than whole-cart limit (20000)")
+    )).toBe(true);
+    expect(response.requiresUserConfirmation).toBe(true);
+  });
+
+  it("preserves explicit constraints without silently inventing unstated categories or currency", () => {
+    // Mandate with no currency and no category specifications
+    const mandate = "Purchase items up to 50 each with maximum spend of 100.";
+    const response = compileIntent({ mandateText: mandate });
+
+    expect(response.candidatePolicy.maxItemPriceMinor).toBe(5000);
+    expect(response.candidatePolicy.maxCartTotalMinor).toBe(10000);
+    expect(response.candidatePolicy.allowedCategories).toBeUndefined();
+    expect(response.assumptions.some((a) => a.includes("No currency symbol found; defaulted currency to USD"))).toBe(true);
+    expect(response.questions.some((q) => q.includes("Which currency should apply to this policy?"))).toBe(true);
+    expect(response.questions.some((q) => q.includes("Should purchases be restricted to specific categories"))).toBe(true);
   });
 });

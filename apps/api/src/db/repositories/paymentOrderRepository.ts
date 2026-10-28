@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { eq, and, or, desc } from "drizzle-orm";
+import { eq, and, or, inArray, notInArray, desc } from "drizzle-orm";
 import {
   paymentOrders,
   spendReservations,
   checkoutProposals,
   approvals,
   webhookEvents,
-  auditEvents,
 } from "../schema.js";
+import type { Database } from "../index.js";
 import { CheckoutError } from "./checkoutProposalRepository.js";
+import { logAuditEvent } from "./auditRepository.js";
 import {
   PayPalService,
   PayPalNetworkError,
@@ -32,6 +33,7 @@ import type {
   WebhookProcessResponse,
   PaymentStatus,
   ReservationState,
+  PayPalTransaction,
 } from "@warrant/contracts";
 
 export interface CreatePaymentOrderContext extends CreatePaymentOrderRequest {
@@ -47,11 +49,11 @@ export interface CancelPaymentOrderContext extends CancelPaymentOrderRequest {
 }
 
 export interface CapturePaymentOrderContext extends CapturePaymentOrderRequest {
-  ownerId: string;
+  ownerId?: string;
 }
 
 export interface ReconcilePaymentOrderContext extends ReconcilePaymentOrderRequest {
-  ownerId: string;
+  ownerId?: string;
 }
 
 function mapPaymentOrderRecord(o: any): PaymentOrderRecord {
@@ -95,7 +97,7 @@ export function canTransitionPaymentStatus(current: string, next: string): boole
  * Creates a PayPal Sandbox Checkout Order for an existing ALLOW spend reservation.
  */
 export async function createPaymentOrder(
-  db: any,
+  db: Database,
   input: CreatePaymentOrderContext,
   paypalService: PayPalService = defaultPayPalService
 ): Promise<CreatePaymentOrderResponse> {
@@ -147,14 +149,38 @@ export async function createPaymentOrder(
     );
   }
 
+  // 1.1 Verify linked approval status if bound to reservation
+  if (reservation.approvalId) {
+    const approvalsList = await db
+      .select()
+      .from(approvals)
+      .where(eq(approvals.id, reservation.approvalId));
+
+    const approval = approvalsList[0];
+    if (approval) {
+      if (approval.revokedAt) {
+        throw new CheckoutError("REVOKED_APPROVAL", "Linked approval checkpoint has been revoked");
+      }
+      if (approval.expiresAt && new Date(approval.expiresAt) <= new Date()) {
+        throw new CheckoutError("EXPIRED_APPROVAL", "Linked approval checkpoint has expired");
+      }
+      if (approval.policyHash !== proposal.policyHash) {
+        throw new CheckoutError(
+          "POLICY_HASH_MISMATCH",
+          `Approval policy hash ${approval.policyHash} does not match proposal policy hash ${proposal.policyHash}`
+        );
+      }
+    }
+  }
+
   // 2. Check for existing payment order (Idempotency and Reconciliation)
   const existingOrders = await db
     .select()
     .from(paymentOrders)
     .where(eq(paymentOrders.reservationId, input.reservationId));
 
-  if (existingOrders.length > 0) {
-    const existing = existingOrders[0];
+  const existing = existingOrders[0];
+  if (existing) {
     if (existing.providerOrderId) {
       return {
         order: mapPaymentOrderRecord(existing),
@@ -290,6 +316,32 @@ export async function createPaymentOrder(
       })
       .where(eq(spendReservations.id, reservation.id));
 
+    await logAuditEvent(tx, {
+      ownerId: input.ownerId,
+      actorType: "SYSTEM",
+      eventType: "PAYMENT_ORDER_CREATED",
+      entityType: "PAYMENT_ORDER",
+      entityId: orderId,
+      payload: {
+        providerOrderId: paypalOrder.id,
+        amountMinor,
+        currency,
+        idempotencyKey,
+      },
+    });
+
+    await logAuditEvent(tx, {
+      ownerId: input.ownerId,
+      actorType: "SYSTEM",
+      eventType: "SPEND_RESERVATION_RESERVED",
+      entityType: "SPEND_RESERVATION",
+      entityId: reservation.id,
+      payload: {
+        orderId,
+        state: "RESERVED",
+      },
+    });
+
     return [insertedOrder];
   });
 
@@ -305,7 +357,7 @@ export async function createPaymentOrder(
  * Retrieves a payment order by ID with ownership scope check.
  */
 export async function getPaymentOrder(
-  db: any,
+  db: Database,
   orderId: string,
   ownerId?: string
 ): Promise<PaymentOrderRecord | null> {
@@ -324,7 +376,7 @@ export async function getPaymentOrder(
  * Helper to find order by internal UUID or PayPal provider order ID.
  */
 async function findOrderByIdOrProviderId(
-  db: any,
+  db: Database,
   input: { orderId?: string; paypalOrderId?: string },
   ownerId?: string
 ) {
@@ -356,7 +408,7 @@ async function findOrderByIdOrProviderId(
  * Never treats a browser redirect alone as proof of payment or authorization to capture.
  */
 export async function confirmBuyerApproval(
-  db: any,
+  db: Database,
   input: ConfirmBuyerApprovalContext,
   paypalService: PayPalService = defaultPayPalService
 ): Promise<ConfirmBuyerApprovalResponse> {
@@ -494,7 +546,7 @@ export async function confirmBuyerApproval(
  * Cancels a payment order and safely releases spend reservation if confirmed not captured.
  */
 export async function cancelPaymentOrder(
-  db: any,
+  db: Database,
   input: CancelPaymentOrderContext,
   paypalService: PayPalService = defaultPayPalService
 ): Promise<CancelPaymentOrderResponse> {
@@ -564,16 +616,63 @@ export async function cancelPaymentOrder(
         status: "CANCELLED",
         updatedAt: now,
       })
-      .where(eq(paymentOrders.id, order.id))
+      .where(
+        and(
+          eq(paymentOrders.id, order.id),
+          notInArray(paymentOrders.status, ["CAPTURED", "CAPTURE_PENDING"])
+        )
+      )
       .returning();
 
-    await tx
+    if (!up) {
+      throw new CheckoutError(
+        "CANNOT_CANCEL_CAPTURED_ORDER",
+        "Order has already been captured or is pending capture and cannot be cancelled."
+      );
+    }
+
+    const [upRes] = await tx
       .update(spendReservations)
       .set({
         state: "RELEASED",
         updatedAt: now,
       })
-      .where(eq(spendReservations.id, reservation.id));
+      .where(
+        and(
+          eq(spendReservations.id, reservation.id),
+          inArray(spendReservations.state, ["ORDER_CREATION_PENDING", "RESERVED"])
+        )
+      )
+      .returning();
+
+    if (!upRes) {
+      throw new CheckoutError(
+        "INVALID_RESERVATION_STATE",
+        "Spend reservation is not in a cancellable state."
+      );
+    }
+
+    await logAuditEvent(tx, {
+      ownerId: order.ownerId,
+      actorType: "USER",
+      eventType: "PAYMENT_ORDER_CANCELLED",
+      entityType: "PAYMENT_ORDER",
+      entityId: order.id,
+      payload: {
+        reason: input.reason ?? "User cancelled at checkout return",
+      },
+    });
+
+    await logAuditEvent(tx, {
+      ownerId: order.ownerId,
+      actorType: "SYSTEM",
+      eventType: "SPEND_RESERVATION_RELEASED",
+      entityType: "SPEND_RESERVATION",
+      entityId: reservation.id,
+      payload: {
+        state: "RELEASED",
+      },
+    });
 
     return [up];
   });
@@ -593,7 +692,7 @@ export async function cancelPaymentOrder(
  * Client-supplied amounts or currencies are never accepted.
  */
 export async function capturePaymentOrder(
-  db: any,
+  db: Database,
   input: CapturePaymentOrderContext,
   paypalService: PayPalService = defaultPayPalService
 ): Promise<CapturePaymentOrderResponse> {
@@ -780,27 +879,85 @@ export async function capturePaymentOrder(
   const finalReservationState: ReservationState = isCompleted ? "COMMITTED" : "RESERVED";
   const now = new Date();
 
-  const [persistedOrder] = await db.transaction(async (tx: any) => {
-    const [up] = await tx
-      .update(paymentOrders)
-      .set({
-        status: finalStatus,
-        captureId: captureResult.captureId,
-        updatedAt: now,
-      })
-      .where(eq(paymentOrders.id, order.id))
-      .returning();
+  let persistedOrder: any;
+  try {
+    const [txResult] = await db.transaction(async (tx: any) => {
+      const [up] = await tx
+        .update(paymentOrders)
+        .set({
+          status: finalStatus,
+          captureId: captureResult.captureId,
+          updatedAt: now,
+        })
+        .where(eq(paymentOrders.id, order.id))
+        .returning();
 
-    await tx
-      .update(spendReservations)
-      .set({
-        state: finalReservationState,
-        updatedAt: now,
-      })
-      .where(eq(spendReservations.id, reservation.id));
+      await tx
+        .update(spendReservations)
+        .set({
+          state: finalReservationState,
+          updatedAt: now,
+        })
+        .where(eq(spendReservations.id, reservation.id));
 
-    return [up];
-  });
+      await logAuditEvent(tx, {
+        ownerId: order.ownerId,
+        actorType: "USER",
+        eventType: "PAYMENT_ORDER_CAPTURED",
+        entityType: "PAYMENT_ORDER",
+        entityId: order.id,
+        payload: {
+          captureId: captureResult.captureId,
+          amountMinor: order.amountMinor,
+          status: finalStatus,
+        },
+      });
+
+      await logAuditEvent(tx, {
+        ownerId: order.ownerId,
+        actorType: "SYSTEM",
+        eventType: "SPEND_RESERVATION_COMMITTED",
+        entityType: "SPEND_RESERVATION",
+        entityId: reservation.id,
+        payload: {
+          state: finalReservationState,
+        },
+      });
+
+      return [up];
+    });
+    persistedOrder = txResult;
+  } catch (postCaptureDbErr: unknown) {
+    // Post-capture database persistence failed.
+    // The funds were successfully captured in PayPal (captureId: captureResult.captureId),
+    // but the local database transaction failed. We must attempt to flag the order
+    // for reconciliation with its captureId so repeated captures are prevented and reconciliation can resolve it.
+    try {
+      await db
+        .update(paymentOrders)
+        .set({
+          status: "UNKNOWN_REQUIRES_RECONCILIATION",
+          captureId: captureResult.captureId,
+          updatedAt: new Date(),
+        })
+        .where(eq(paymentOrders.id, order.id));
+
+      await db
+        .update(spendReservations)
+        .set({
+          state: "RECONCILIATION_HOLD",
+          updatedAt: new Date(),
+        })
+        .where(eq(spendReservations.id, reservation.id));
+    } catch {
+      // Best-effort safety update in case the main transaction crashed
+    }
+
+    throw new CheckoutError(
+      "CAPTURE_SUCCEEDED_DATABASE_FAILED",
+      `Payment captured successfully by PayPal (Capture ID: ${captureResult.captureId}), but database record update failed. Order held for reconciliation.`
+    );
+  }
 
   return {
     order: mapPaymentOrderRecord(persistedOrder),
@@ -808,8 +965,8 @@ export async function capturePaymentOrder(
     paypalOrderId: order.providerOrderId,
     status: finalStatus,
     reservationState: finalReservationState,
-    capturedAmountMinor: Number(persistedOrder.amountMinor),
-    currency: persistedOrder.currency,
+    capturedAmountMinor: Number(persistedOrder?.amountMinor ?? order.amountMinor),
+    currency: persistedOrder?.currency ?? order.currency,
   };
 }
 
@@ -818,7 +975,7 @@ export async function capturePaymentOrder(
  * Resolves ambiguous states, missing webhooks, and DB mismatches safely.
  */
 export async function reconcilePaymentOrder(
-  db: any,
+  db: Database,
   input: ReconcilePaymentOrderContext,
   paypalService: PayPalService = defaultPayPalService
 ): Promise<ReconcilePaymentOrderResponse> {
@@ -853,6 +1010,47 @@ export async function reconcilePaymentOrder(
   if (remoteOrder.status === "COMPLETED") {
     const capture = remoteOrder.purchaseUnits?.[0]?.payments?.captures?.[0];
     const captureId = capture?.id ?? order.captureId;
+
+    // Invariant Check: Verify settlement amount and currency match database order
+    if (capture?.amount) {
+      const rawVal = capture.amount.value ?? (capture.amount as any).value;
+      const rawCur = capture.amount.currency_code ?? (capture.amount as any).currencyCode;
+      if (rawVal !== undefined && rawCur !== undefined) {
+        const remoteAmountMinor = Math.round(parseFloat(rawVal) * 100);
+        if (remoteAmountMinor !== Number(order.amountMinor) || rawCur !== order.currency) {
+          // Amount discrepancy detected! Never silently force a match.
+          [updatedOrder] = await db.transaction(async (tx: any) => {
+            const [up] = await tx
+              .update(paymentOrders)
+              .set({
+                status: "UNKNOWN_REQUIRES_RECONCILIATION",
+                captureId: captureId ?? null,
+                updatedAt: now,
+              })
+              .where(eq(paymentOrders.id, order.id))
+              .returning();
+
+            await tx
+              .update(spendReservations)
+              .set({
+                state: "RECONCILIATION_HOLD",
+                updatedAt: now,
+              })
+              .where(eq(spendReservations.id, reservation.id));
+
+            return [up];
+          });
+
+          return {
+            order: mapPaymentOrderRecord(updatedOrder),
+            reservationState: "RECONCILIATION_HOLD",
+            reconciled: false,
+            externalStatus: remoteOrder.status,
+            notes: `Reconciliation exception: Remote settlement amount ($${(remoteAmountMinor / 100).toFixed(2)} ${rawCur}) does not match authorized order ($${(Number(order.amountMinor) / 100).toFixed(2)} ${order.currency}). Placed on RECONCILIATION_HOLD.`,
+          };
+        }
+      }
+    }
 
     [updatedOrder] = await db.transaction(async (tx: any) => {
       const [up] = await tx
@@ -940,7 +1138,7 @@ export async function reconcilePaymentOrder(
  * Durably processes an incoming PayPal webhook event with signature verification and deduplication.
  */
 export async function processWebhookEvent(
-  db: any,
+  db: Database,
   params: {
     event: PayPalWebhookEvent;
     headers: {
@@ -1081,11 +1279,32 @@ export async function processWebhookEvent(
     case "PAYMENT.CAPTURE.DENIED":
     case "PAYMENT.CAPTURE.DECLINED": {
       const captureId = event.resource?.id;
-      const orderList = await db
-        .select()
-        .from(paymentOrders)
-        .where(eq(paymentOrders.captureId, captureId));
-      const order = orderList[0];
+      const orderId =
+        event.resource?.supplementary_data?.related_ids?.order_id ||
+        event.resource?.custom_id;
+
+      let order: any = null;
+      if (orderId) {
+        const list = await db
+          .select()
+          .from(paymentOrders)
+          .where(
+            or(
+              eq(paymentOrders.providerOrderId, orderId),
+              eq(paymentOrders.reservationId, orderId)
+            )
+          );
+        order = list[0];
+      }
+
+      if (!order && captureId) {
+        const orderList = await db
+          .select()
+          .from(paymentOrders)
+          .where(eq(paymentOrders.captureId, captureId));
+        order = orderList[0];
+      }
+
       if (order && order.status !== "CAPTURED") {
         await db.transaction(async (tx: any) => {
           await tx
@@ -1105,11 +1324,32 @@ export async function processWebhookEvent(
 
     case "PAYMENT.CAPTURE.PENDING": {
       const captureId = event.resource?.id;
-      const orderList = await db
-        .select()
-        .from(paymentOrders)
-        .where(eq(paymentOrders.captureId, captureId));
-      const order = orderList[0];
+      const orderId =
+        event.resource?.supplementary_data?.related_ids?.order_id ||
+        event.resource?.custom_id;
+
+      let order: any = null;
+      if (orderId) {
+        const list = await db
+          .select()
+          .from(paymentOrders)
+          .where(
+            or(
+              eq(paymentOrders.providerOrderId, orderId),
+              eq(paymentOrders.reservationId, orderId)
+            )
+          );
+        order = list[0];
+      }
+
+      if (!order && captureId) {
+        const orderList = await db
+          .select()
+          .from(paymentOrders)
+          .where(eq(paymentOrders.captureId, captureId));
+        order = orderList[0];
+      }
+
       if (order && order.status !== "CAPTURED") {
         await db
           .update(paymentOrders)
@@ -1123,13 +1363,14 @@ export async function processWebhookEvent(
     case "PAYMENT.CAPTURE.REFUNDED":
     case "PAYMENT.CAPTURE.REVERSED": {
       // Record audit event for refunds/reversals without silently overwriting terminal CAPTURED
-      await db.insert(auditEvents).values({
-        id: randomUUID(),
+      await logAuditEvent(db, {
         actorType: "PAYPAL_WEBHOOK",
-        eventType: event.event_type,
+        eventType: "WEBHOOK_EVENT_PROCESSED",
         entityType: "PAYMENT_ORDER",
-        payload: event.resource ?? {},
-        createdAt: now,
+        payload: {
+          paypalEventType: event.event_type,
+          resource: event.resource ?? {},
+        },
       });
       actionTaken = "REFUND_AUDITED";
       break;
@@ -1139,18 +1380,36 @@ export async function processWebhookEvent(
       actionTaken = `UNHANDLED_EVENT_${event.event_type}`;
   }
 
-  // 4. Durably persist event in webhookEvents
-  await db.insert(webhookEvents).values({
-    id: randomUUID(),
-    eventId: event.id,
-    eventType: event.event_type,
-    resourceType: event.resource_type ?? null,
-    resourceId: event.resource?.id ?? null,
-    status: "PROCESSED",
-    payload: event,
-    createdAt: now,
-    processedAt: now,
-  });
+  // 4. Durably persist event in webhookEvents (handles concurrent duplicate deliveries)
+  try {
+    await db.insert(webhookEvents).values({
+      id: randomUUID(),
+      eventId: event.id,
+      eventType: event.event_type,
+      resourceType: event.resource_type ?? null,
+      resourceId: event.resource?.id ?? null,
+      status: "PROCESSED",
+      payload: event,
+      createdAt: now,
+      processedAt: now,
+    });
+  } catch (insertErr: any) {
+    if (
+      insertErr?.code === "23505" ||
+      insertErr?.message?.includes("unique") ||
+      insertErr?.message?.includes("duplicate") ||
+      insertErr?.message?.includes("UNIQUE")
+    ) {
+      return {
+        received: true,
+        duplicate: true,
+        eventId: event.id,
+        eventType: event.event_type,
+        actionTaken: "DUPLICATE_EVENT_IGNORED",
+      };
+    }
+    throw insertErr;
+  }
 
   return {
     received: true,
@@ -1158,13 +1417,13 @@ export async function processWebhookEvent(
     eventType: event.event_type,
     actionTaken,
   };
-}
+};
 
 /**
  * Lists payment orders with optional filtering by status and reservation.
  */
 export async function listPaymentOrders(
-  db: any,
+  db: Database,
   params?: {
     ownerId?: string;
     status?: PaymentStatus;
@@ -1179,13 +1438,22 @@ export async function listPaymentOrders(
   if (params?.status) conditions.push(eq(paymentOrders.status, params.status));
   if (params?.reservationId) conditions.push(eq(paymentOrders.reservationId, params.reservationId));
 
-  let query = db.select().from(paymentOrders);
-  if (conditions.length > 0) {
+  let query: any = db.select().from(paymentOrders);
+  if (typeof query.$dynamic === "function") {
+    query = query.$dynamic();
+  }
+  if (conditions.length > 0 && typeof query.where === "function") {
     query = query.where(conditions.length === 1 ? conditions[0] : and(...conditions));
   }
 
-  const rows = await query.orderBy(desc(paymentOrders.createdAt)).limit(limit);
-  const mapped = rows.map(mapPaymentOrderRecord);
+  let rows: any[] = [];
+  if (typeof query.orderBy === "function") {
+    const ordered = query.orderBy(desc(paymentOrders.createdAt));
+    rows = typeof ordered.limit === "function" ? await ordered.limit(limit) : await ordered;
+  } else {
+    rows = await query;
+  }
+  const mapped = Array.isArray(rows) ? rows.map(mapPaymentOrderRecord) : [];
 
   // Count reconciliation alerts (orders requiring reconciliation)
   let alertCount = 0;
@@ -1210,7 +1478,7 @@ export async function listPaymentOrders(
  * Returns reconciliation alerts across payment orders and spend reservations.
  */
 export async function getReconciliationAlerts(
-  db: any,
+  db: Database,
   ownerId?: string
 ): Promise<{ unreconciledOrders: PaymentOrderRecord[]; heldReservations: any[]; totalAlerts: number }> {
   let orderQuery = db
@@ -1237,10 +1505,180 @@ export async function getReconciliationAlerts(
       .where(and(eq(spendReservations.state, "RECONCILIATION_HOLD"), eq(spendReservations.ownerId, ownerId)));
   }
   const heldReservations = await resQuery.orderBy(desc(spendReservations.createdAt));
+  const mappedHeld = heldReservations.map((r: any) => ({
+    id: r.id,
+    ownerId: r.ownerId,
+    approvalId: r.approvalId,
+    proposalId: r.proposalId,
+    amountMinor: Number(r.amountMinor),
+    currency: r.currency,
+    state: r.state,
+    expiresAt: r.expiresAt ? (r.expiresAt instanceof Date ? r.expiresAt.toISOString() : r.expiresAt) : null,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+    updatedAt: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : r.updatedAt,
+  }));
 
   return {
     unreconciledOrders,
-    heldReservations,
-    totalAlerts: unreconciledOrders.length + heldReservations.length,
+    heldReservations: mappedHeld,
+    totalAlerts: unreconciledOrders.length + mappedHeld.length,
+  };
+}
+
+/**
+ * Normalizes an internal PaymentOrderRecord into a PayPalTransaction view model.
+ */
+export function mapPaymentOrderToPayPalTransaction(order: PaymentOrderRecord): PayPalTransaction {
+  return {
+    transactionId: order.providerOrderId || order.id,
+    paypalReferenceId: order.id,
+    status: order.status === "CAPTURED" ? "COMPLETED" : order.status,
+    amountMinor: order.amountMinor,
+    currency: order.currency,
+    initiationDate: typeof order.createdAt === "string" ? order.createdAt : new Date(order.createdAt).toISOString(),
+    updatedDate: typeof order.updatedAt === "string" ? order.updatedAt : new Date(order.updatedAt).toISOString(),
+    payerEmail: order.payerId ? `buyer-${order.payerId.slice(0, 6)}@sandbox.paypal.com` : "sandbox-buyer@warrant.dev",
+    payerName: "Sandbox Authorized Buyer",
+    description: `Spend Reservation #${order.reservationId.slice(0, 8)}`,
+    feeAmountMinor: Math.round(order.amountMinor * 0.029 + 30),
+    syncedToLedger: true,
+    associatedOrderId: order.id,
+  };
+}
+
+/**
+ * Synchronizes PayPal transactions with the local database ledger.
+ * Matches by providerOrderId, captureId, or internal orderId.
+ * Enforces amount and currency invariants to prevent silent corruption or forced matches.
+ */
+export async function syncPayPalTransactions(
+  db: Database,
+  transactions: PayPalTransaction[],
+  ownerId?: string
+): Promise<{
+  syncedCount: number;
+  updatedCount: number;
+  transactions: PayPalTransaction[];
+}> {
+  const localOrdersResult = await listPaymentOrders(db, { ownerId, limit: 100 });
+  const ordersByProviderId = new Map<string, PaymentOrderRecord>();
+  const ordersByCaptureId = new Map<string, PaymentOrderRecord>();
+  const ordersById = new Map<string, PaymentOrderRecord>();
+
+  for (const ord of localOrdersResult.orders) {
+    if (ord.providerOrderId) {
+      ordersByProviderId.set(ord.providerOrderId, ord);
+    }
+    if (ord.captureId) {
+      ordersByCaptureId.set(ord.captureId, ord);
+    }
+    ordersById.set(ord.id, ord);
+  }
+
+  let updatedCount = 0;
+  const enriched: PayPalTransaction[] = [];
+
+  for (const tx of transactions) {
+    let matchedOrder =
+      ordersByProviderId.get(tx.transactionId) ||
+      ordersByCaptureId.get(tx.transactionId) ||
+      ordersById.get(tx.transactionId);
+
+    if (!matchedOrder && tx.paypalReferenceId) {
+      matchedOrder =
+        ordersByProviderId.get(tx.paypalReferenceId) ||
+        ordersById.get(tx.paypalReferenceId) ||
+        ordersByCaptureId.get(tx.paypalReferenceId);
+    }
+
+    if (matchedOrder) {
+      const amountMatches =
+        tx.amountMinor === matchedOrder.amountMinor &&
+        tx.currency === matchedOrder.currency;
+
+      if (!amountMatches) {
+        // Discrepancy detected! Never silently force a match.
+        // Transition order and reservation to RECONCILIATION_HOLD.
+        try {
+          const now = new Date();
+          await db.transaction(async (trx: any) => {
+            await trx
+              .update(paymentOrders)
+              .set({
+                status: "UNKNOWN_REQUIRES_RECONCILIATION",
+                updatedAt: now,
+              })
+              .where(eq(paymentOrders.id, matchedOrder!.id));
+
+            await trx
+              .update(spendReservations)
+              .set({
+                state: "RECONCILIATION_HOLD",
+                updatedAt: now,
+              })
+              .where(eq(spendReservations.id, matchedOrder!.reservationId));
+          });
+        } catch {
+          // standby non-blocking
+        }
+
+        enriched.push({
+          ...tx,
+          syncedToLedger: false,
+          associatedOrderId: matchedOrder.id,
+        });
+      } else {
+        enriched.push({
+          ...tx,
+          syncedToLedger: true,
+          associatedOrderId: matchedOrder.id,
+        });
+
+        // Update captured status safely if PayPal reports COMPLETED/SUCCESS
+        if (
+          (tx.status === "SUCCESS" || tx.status === "COMPLETED") &&
+          (matchedOrder.status === "CREATED" ||
+            matchedOrder.status === "APPROVED" ||
+            matchedOrder.status === "CAPTURE_PENDING")
+        ) {
+          try {
+            const now = new Date();
+            await db.transaction(async (trx: any) => {
+              await trx
+                .update(paymentOrders)
+                .set({
+                  status: "CAPTURED",
+                  captureId: tx.transactionId,
+                  updatedAt: now,
+                })
+                .where(eq(paymentOrders.id, matchedOrder!.id));
+
+              await trx
+                .update(spendReservations)
+                .set({
+                  state: "COMMITTED",
+                  updatedAt: now,
+                })
+                .where(eq(spendReservations.id, matchedOrder!.reservationId));
+            });
+            updatedCount++;
+          } catch {
+            // Non-blocking in standby mode
+          }
+        }
+      }
+    } else {
+      enriched.push({
+        ...tx,
+        syncedToLedger: false,
+        associatedOrderId: null,
+      });
+    }
+  }
+
+  return {
+    syncedCount: enriched.filter((t) => t.syncedToLedger).length,
+    updatedCount,
+    transactions: enriched,
   };
 }

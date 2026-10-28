@@ -10,4 +10,11 @@ export * from "./checkout.js";
 export * from "./approvals.js";
 export * from "./paymentOrders.js";
 export * from "./policyCompilation.js";
+export * from "./evaluationReport.js";
+export * from "./audit.js";
+export * from "./evidencePacket.js";
+export * from "./auth.js";
+export * from "./catalog.js";
+export * from "./account.js";
+export * from "./email.js";
 

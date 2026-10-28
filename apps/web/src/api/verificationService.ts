@@ -12,101 +12,24 @@ import {
   VerificationRequestSchema,
   VerificationReportSchema,
 } from "@warrant/contracts";
+import { POLICY_PRESET_LIST } from "@warrant/test-fixtures";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
-export const AVAILABLE_POLICIES: PolicyOption[] = [
-  {
-    id: "pol_v1_books_hardware",
-    version: "1.0.0",
-    name: "Engineering Hardware & Technical Books Policy",
-    hash: "a4f912b7e53c4d89a290bc9812efaa43217d8900fe5b81a91e5d7a810b45cd2e",
-    description:
-      "Approved policy authorizing dev hardware and reference books up to $250.00 USD per item and $600.00 USD total.",
-    limitsSummary: "Max Item: $250.00 | Max Cart: $600.00 | Allowed: Hardware, Reference Books",
-    policyDocument: {
-      schemaVersion: "1.0",
-      currency: "USD",
-      maxItemPriceMinor: 25000,
-      maxCartTotalMinor: 60000,
-      allowedCategories: ["Hardware", "Reference Books", "Peripherals"],
-      prohibitedCategories: ["Weapons / Lasers", "Adult", "Gift Cards"],
-      requireEvidence: true,
-    },
-    intent: {
-      name: "Engineering Hardware & Technical Books Mandate",
-      currency: "USD",
-      maxItemPriceMinor: 25000,
-      maxCartTotalMinor: 60000,
-      allowedCategories: ["Hardware", "Reference Books", "Peripherals"],
-      prohibitedCategories: ["Weapons / Lasers", "Adult", "Gift Cards"],
-      requireEvidence: true,
-    },
-    defaultCategories: ["Hardware", "Reference Books", "Peripherals"],
-    defaultPricePointsMinor: [15000, 24900, 25000, 25100, 30000],
-  },
-  {
-    id: "pol_v2_strict_peripherals",
-    version: "2.1.0-draft",
-    name: "Strict Ergonomic Peripherals Mandate",
-    hash: "8e71fa480cb12da970392bc13d5a42099fbc9018e4726d1b8207f901abcf8912",
-    description:
-      "Draft policy enforcing strict category matching and requiring verifiable quotes for all monitors and keypads.",
-    limitsSummary: "Max Item: $150.00 | Max Cart: $300.00 | Strict Quotes Required",
-    policyDocument: {
-      schemaVersion: "1.0",
-      currency: "USD",
-      maxItemPriceMinor: 15000,
-      maxCartTotalMinor: 30000,
-      allowedCategories: ["Peripherals", "Ergonomics"],
-      prohibitedCategories: ["Office Furniture", "Entertainment"],
-      requireEvidence: true,
-    },
-    intent: {
-      name: "Strict Ergonomic Peripherals Mandate",
-      currency: "USD",
-      maxItemPriceMinor: 15000,
-      maxCartTotalMinor: 30000,
-      allowedCategories: ["Peripherals", "Ergonomics"],
-      prohibitedCategories: ["Office Furniture", "Entertainment"],
-      requireEvidence: true,
-    },
-    defaultCategories: ["Peripherals", "Ergonomics"],
-    defaultPricePointsMinor: [9900, 14900, 15000, 15100, 20000],
-  },
-  {
-    id: "pol_seeded_defect_unbounded_cart",
-    version: "1.0.0-flawed",
-    name: "Defective Policy: Whole-Cart Spending Limit Omitted",
-    hash: "b7e4521098acdf512345678901234567890abcdef1234567890abcdef1234567",
-    description:
-      "Seeded defective policy: Item price ceiling ($250.00) is enforced, but whole-cart total ceiling is omitted while user intent restricts cart total to $600.00.",
-    limitsSummary: "Max Item: $250.00 | Max Cart: UNBOUNDED (Defect) | Intent Total: $600.00",
-    policyDocument: {
-      schemaVersion: "1.0",
-      currency: "USD",
-      maxItemPriceMinor: 25000, // $250.00
-      // maxCartTotalMinor is intentionally omitted to discover loophole
-      allowedCategories: ["Hardware", "Reference Books"],
-      prohibitedCategories: ["Gift Cards"],
-      requireEvidence: true,
-    },
-    intent: {
-      name: "Mandate with Whole-Cart Cap of $600",
-      currency: "USD",
-      maxItemPriceMinor: 25000,
-      maxCartTotalMinor: 60000, // $600.00
-      allowedCategories: ["Hardware", "Reference Books"],
-      prohibitedCategories: ["Gift Cards"],
-      requireEvidence: true,
-    },
-    defaultCategories: ["Hardware", "Reference Books"],
-    defaultPricePointsMinor: [22000, 25000], // 3 items @ $220.00 = $660.00 > $600.00
-  },
-];
+export const AVAILABLE_POLICIES: PolicyOption[] = [...POLICY_PRESET_LIST];
+
+/**
+ * Returns available preset policies configured with search bounds for bounded verification.
+ * Note: Persisted database policies are fetched separately via fetchPolicySummaries()
+ * in policyService.ts because GET /api/policies returns PolicySummary items without
+ * the client-side search space configuration required by PolicyOption.
+ */
+export function getAvailablePolicies(): PolicyOption[] {
+  return [...AVAILABLE_POLICIES];
+}
 
 export async function fetchAvailablePolicies(): Promise<PolicyOption[]> {
-  return Promise.resolve(AVAILABLE_POLICIES);
+  return [...AVAILABLE_POLICIES];
 }
 
 /**

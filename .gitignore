@@ -13,6 +13,9 @@ out/
 # Environment files and secrets - NEVER COMMIT
 .env
 .env.local
+.env.docker.local
+.env.*
+!.env.example
 .env.development.local
 .env.test.local
 .env.production.local
@@ -51,7 +54,22 @@ Thumbs.db
 .eslintcache
 .cache/
 
-# Local-only directories (Never publish to GitHub)
+# Local-only documentation and planning (Never publish to GitHub)
 docs/
+documentation/
 warrant/
 coordination/
+backups/
+*.sql
+!drizzle/migrations/*.sql
+
+# Markdown exclusion - ONLY root README.md is published to GitHub
+*.md
+!/README.md
+!README.md
+DEMO_SCRIPT.md
+plan.md
+
+# Tooling and agent workspaces
+.agents/
+graphify-out/

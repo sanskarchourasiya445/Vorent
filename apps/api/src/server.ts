@@ -1,20 +1,28 @@
-import Fastify, { type FastifyInstance, type FastifyError } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyError, type FastifyServerOptions } from "fastify";
 import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
 import { randomUUID } from "node:crypto";
 import { healthRoutes, type HealthRoutesOptions } from "./routes/health.js";
 import { verificationRoutes } from "./routes/verification.js";
 import { policyRoutes } from "./routes/policies.js";
+import { policyWorkflowRoutes } from "./routes/policyWorkflow.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { checkoutRoutes } from "./routes/checkout.js";
 import { paymentOrderRoutes, type PaymentOrderRoutesOptions } from "./routes/paymentOrders.js";
+import { paypalRoutes, type PayPalRoutesOptions } from "./routes/paypal.js";
 import { webhookRoutes, type WebhookRoutesOptions } from "./routes/webhooks.js";
 import { findingRoutes } from "./routes/findings.js";
+import { evaluationRoutes } from "./routes/evaluation.js";
+import { auditEventRoutes } from "./routes/auditEvents.js";
+import { evidencePacketRoutes } from "./routes/evidencePackets.js";
+import { authRoutes } from "./routes/auth.js";
+import { accountRoutes } from "./routes/account.js";
 import { env } from "./config/env.js";
 import { pool } from "./db/index.js";
 
-export interface ServerOptions extends HealthRoutesOptions, PaymentOrderRoutesOptions, WebhookRoutesOptions {
+export interface ServerOptions extends HealthRoutesOptions, PaymentOrderRoutesOptions, PayPalRoutesOptions, WebhookRoutesOptions {
   logStream?: NodeJS.WritableStream;
+  trustProxy?: boolean | string | string[] | ((address: string, hop: number) => boolean);
 }
 
 export async function buildServer(options: ServerOptions = {}): Promise<FastifyInstance> {
@@ -34,9 +42,19 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
         },
       };
 
-  const app = Fastify({
+  // Narrowly scoped trustProxy topology:
+  // Trusts reverse proxies on loopback (127.0.0.1/::1) and private subnets (Render, ALB, Docker).
+  // Untrusted public clients attempting direct connections cannot spoof X-Forwarded-For.
+  const trustProxyConfig = options.trustProxy !== undefined
+    ? options.trustProxy
+    : ["loopback", "linklocal", "uniquelocal"];
+
+  const fastifyOptions: FastifyServerOptions = {
     logger: loggerConfig,
-  });
+    trustProxy: trustProxyConfig,
+  };
+
+  const app = Fastify(fastifyOptions);
 
   // Standardized error handler: Sanitizes all unhandled framework & runtime errors into contract envelope
   app.setErrorHandler((error: FastifyError, request, reply) => {
@@ -85,20 +103,51 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
 
   // Register routes
   await app.register(healthRoutes, { checkDb: options.checkDb });
-  await app.register(verificationRoutes, { prefix: "/api/verification" });
-  await app.register(verificationRoutes, { prefix: "/api/v1/verification" });
-  await app.register(policyRoutes, { prefix: "/api/policies" });
-  await app.register(policyRoutes, { prefix: "/api/v1/policies" });
-  await app.register(approvalRoutes, { prefix: "/api/approvals" });
-  await app.register(approvalRoutes, { prefix: "/api/v1/approvals" });
-  await app.register(checkoutRoutes, { prefix: "/api/checkout" });
-  await app.register(checkoutRoutes, { prefix: "/api/v1/checkout" });
-  await app.register(findingRoutes, { prefix: "/api/findings" });
-  await app.register(findingRoutes, { prefix: "/api/v1/findings" });
-  await app.register(paymentOrderRoutes, { prefix: "/api/payment-orders", paypalService: options.paypalService });
-  await app.register(paymentOrderRoutes, { prefix: "/api/v1/payment-orders", paypalService: options.paypalService });
-  await app.register(webhookRoutes, { prefix: "/api/webhooks", paypalService: options.paypalService });
-  await app.register(webhookRoutes, { prefix: "/api/v1/webhooks", paypalService: options.paypalService });
+
+  // Standard route definitions: canonical prefix and backward-compatibility aliases
+  // Note: /api/v1/* and /api/audit-packets are preserved for client and test compatibility
+  const apiRouteDefinitions = [
+    { plugin: authRoutes, prefixes: ["/api/auth", "/api/v1/auth"] },
+    { plugin: accountRoutes, prefixes: ["/api/account", "/api/v1/account"] },
+    { plugin: verificationRoutes, prefixes: ["/api/verification", "/api/v1/verification"] },
+    { plugin: policyRoutes, prefixes: ["/api/policies", "/api/v1/policies"] },
+    { plugin: policyWorkflowRoutes, prefixes: ["/api/policies", "/api/v1/policies", "/api/mandates", "/api/v1/mandates"] },
+    { plugin: approvalRoutes, prefixes: ["/api/approvals", "/api/v1/approvals"] },
+    { plugin: checkoutRoutes, prefixes: ["/api/checkout", "/api/v1/checkout"] },
+    { plugin: findingRoutes, prefixes: ["/api/findings", "/api/v1/findings"] },
+    {
+      plugin: paymentOrderRoutes,
+      prefixes: ["/api/payment-orders", "/api/v1/payment-orders"],
+      opts: { paypalService: options.paypalService },
+    },
+    {
+      plugin: paypalRoutes,
+      prefixes: ["/api/paypal", "/api/v1/paypal"],
+      opts: { paypalService: options.paypalService },
+    },
+    {
+      plugin: webhookRoutes,
+      prefixes: ["/api/webhooks", "/api/v1/webhooks"],
+      opts: { paypalService: options.paypalService },
+    },
+    { plugin: evaluationRoutes, prefixes: ["/api/evaluation", "/api/v1/evaluation"] },
+    { plugin: auditEventRoutes, prefixes: ["/api/audit-events", "/api/v1/audit-events"] },
+    {
+      plugin: evidencePacketRoutes,
+      prefixes: [
+        "/api/evidence-packets",
+        "/api/v1/evidence-packets",
+        "/api/audit-packets",
+        "/api/v1/audit-packets",
+      ],
+    },
+  ];
+
+  for (const { plugin, prefixes, opts } of apiRouteDefinitions) {
+    for (const prefix of prefixes) {
+      await app.register(plugin, { ...opts, prefix });
+    }
+  }
 
 
   // Root welcome route

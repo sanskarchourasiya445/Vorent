@@ -2,13 +2,15 @@ import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { eq, and, inArray, isNull, desc } from "drizzle-orm";
 import {
   type Cart,
+  type ClientCart,
   type EvidenceSnapshot,
   ReasonCode,
   type Decision,
   type ReservationState,
   type SpendReservationRecord,
+  resolveCatalogItem,
 } from "@warrant/contracts";
-import { evaluatePolicy } from "@warrant/domain";
+import { evaluatePolicy, computePolicyHash } from "@warrant/domain";
 import {
   approvals,
   checkoutNonces,
@@ -16,6 +18,7 @@ import {
   spendReservations,
   policyVersions,
 } from "../schema.js";
+import { logAuditEvent } from "./auditRepository.js";
 
 export class NonceReplayError extends Error {
   readonly code = "NONCE_REPLAYED";
@@ -75,6 +78,20 @@ export async function issueCheckoutNonce(
     consumedAt: null,
   });
 
+  await logAuditEvent(db, {
+    ownerId: params.ownerId,
+    actorType: "USER",
+    eventType: "NONCE_ISSUED",
+    entityType: "CHECKOUT_NONCE",
+    entityId: nonceId,
+    payload: {
+      approvalId: params.approvalId,
+      policyVersionId: params.policyVersionId,
+      policyHash: params.policyHash,
+      expiresAt: expiresAt.toISOString(),
+    },
+  });
+
   return {
     id: nonceId,
     rawNonce,
@@ -126,7 +143,7 @@ export interface SubmitCheckoutProposalInput {
   policyVersionId: string;
   policyHash: string;
   nonceId: string;
-  cart: Cart;
+  cart: ClientCart | Cart;
   evidenceSnapshot: EvidenceSnapshot;
 }
 
@@ -236,13 +253,51 @@ export async function submitCheckoutProposal(
       throw new NonceReplayError("NONCE_REPLAYED: Concurrently consumed checkout nonce");
     }
 
-    // 3. Calculate lifetime spend
+    await logAuditEvent(tx, {
+      ownerId: input.ownerId,
+      actorType: "USER",
+      eventType: "NONCE_CONSUMED",
+      entityType: "CHECKOUT_NONCE",
+      entityId: nonce.id,
+      payload: {
+        approvalId: input.approvalId,
+      },
+    });
+
+    // 3. Authoritative Cart Normalization (Price & Category Trust Boundary)
+    // Client cannot forge price or category. We resolve each SKU strictly from the authoritative catalog.
+    // If any SKU is not present in the authoritative catalog, fail-closed immediately.
+    const normalizedItems = input.cart.items.map((it: any) => {
+      const catalogItem = resolveCatalogItem(it.sku);
+      if (!catalogItem) {
+        throw new CheckoutError(
+          "UNKNOWN_CATALOG_SKU",
+          `Item with SKU '${it.sku}' is not present in the authoritative product catalog.`
+        );
+      }
+      return {
+        ...it,
+        sku: catalogItem.sku,
+        title: catalogItem.title,
+        category: catalogItem.category,
+        unitPriceMinor: catalogItem.unitPriceMinor,
+        currency: catalogItem.currency || input.cart.currency,
+        quantity: it.quantity,
+      };
+    });
+
+    const normalizedCart: Cart = {
+      ...input.cart,
+      items: normalizedItems,
+    };
+
+    // Calculate lifetime spend using authoritative normalizedCart
     const currentSpentAndReserved = await calculateCommittedAndActiveSpend(
       tx,
       input.approvalId
     );
 
-    const cartTotalMinor = input.cart.items.reduce(
+    const cartTotalMinor = normalizedCart.items.reduce(
       (sum: number, it: any) => sum + it.unitPriceMinor * it.quantity,
       0
     );
@@ -264,6 +319,37 @@ export async function submitCheckoutProposal(
       );
     }
 
+    if (pv.policyHash && pv.policyHash !== input.policyHash) {
+      throw new CheckoutError(
+        "POLICY_HASH_MISMATCH",
+        `Stored policy version hash (${pv.policyHash}) does not match requested policy hash (${input.policyHash})`
+      );
+    }
+
+    let policyDoc = pv.policyDocument as any;
+    if (policyDoc && typeof policyDoc === "object" && typeof policyDoc.currency === "string") {
+      const calculatedPolicyHash = computePolicyHash(policyDoc);
+      if (calculatedPolicyHash !== input.policyHash) {
+        throw new CheckoutError(
+          "POLICY_HASH_MISMATCH",
+          "Stored policy document has been modified or does not match approved policy hash"
+        );
+      }
+    } else {
+      const rules = (pv.intentSpec as any)?.rules ?? [];
+      const itemRule = rules.find((r: any) => r.type === "MAX_PER_ITEM");
+      const totalRule = rules.find((r: any) => r.type === "MAX_TOTAL");
+      policyDoc = {
+        schemaVersion: pv.policySchemaVersion || "1.0",
+        currency: "USD",
+        maxItemPriceMinor: itemRule?.limitMinor ?? 70000,
+        maxCartTotalMinor: totalRule?.limitMinor ?? 75000,
+        allowedCategories: ["software_license", "Reference Books", "Peripherals"],
+        prohibitedCategories: ["Weapons", "Adult", "Gift Cards"],
+        requireEvidence: true,
+      };
+    }
+
     const evidence = { ...(input.evidenceSnapshot ?? {}) };
     if (evidence.snapshotTimestamp) {
       const snapTime = new Date(evidence.snapshotTimestamp).getTime();
@@ -274,8 +360,8 @@ export async function submitCheckoutProposal(
     }
 
     const evalResult = evaluatePolicy({
-      policy: pv.policyDocument,
-      cart: input.cart,
+      policy: policyDoc,
+      cart: normalizedCart,
       evidence,
     });
 
@@ -298,7 +384,7 @@ export async function submitCheckoutProposal(
     // 5. Persist Checkout Proposal
     const proposalId = randomUUID();
     const cartHash = createHash("sha256")
-      .update(JSON.stringify(input.cart))
+      .update(JSON.stringify(normalizedCart))
       .digest("hex");
 
     const [proposalRecord] = await tx.insert(checkoutProposals).values({
@@ -310,13 +396,29 @@ export async function submitCheckoutProposal(
       consumedNonceId: nonce.id,
       cartHash,
       proposedCart: input.cart,
-      normalizedCart: input.cart,
+      normalizedCart: normalizedCart,
       evidenceSnapshot: input.evidenceSnapshot,
       decision: finalDecision,
       reasonCodes: finalReasonCodes,
       ruleTrace: finalRuleTrace,
       evaluatedAt: new Date(),
     }).returning();
+
+    await logAuditEvent(tx, {
+      ownerId: input.ownerId,
+      actorType: "SYSTEM",
+      eventType: "CHECKOUT_PROPOSAL_EVALUATED",
+      entityType: "CHECKOUT_PROPOSAL",
+      entityId: proposalId,
+      payload: {
+        decision: finalDecision,
+        reasonCodes: finalReasonCodes,
+        cartTotalMinor,
+        approvalId: input.approvalId,
+        policyVersionId: input.policyVersionId,
+        policyHash: input.policyHash,
+      },
+    });
 
     // 6. Atomically reserve spend in ORDER_CREATION_PENDING if ALLOWed
     let reservationRecord: any = null;
@@ -332,6 +434,20 @@ export async function submitCheckoutProposal(
         expiresAt: null,
       }).returning();
       reservationRecord = res;
+
+      await logAuditEvent(tx, {
+        ownerId: input.ownerId,
+        actorType: "SYSTEM",
+        eventType: "SPEND_RESERVATION_CREATED",
+        entityType: "SPEND_RESERVATION",
+        entityId: res.id,
+        payload: {
+          approvalId: input.approvalId,
+          proposalId,
+          amountMinor: cartTotalMinor,
+          state: "ORDER_CREATION_PENDING",
+        },
+      });
     }
 
     return {

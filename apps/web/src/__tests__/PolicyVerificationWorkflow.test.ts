@@ -17,7 +17,7 @@ import {
 import { adaptVerificationReportToRunResult } from "../api/verificationService";
 import type { VerificationReport, ProposeRepairResponse } from "@warrant/contracts";
 
-describe("Phase 2 Policy Verification Workflow — Frontend Integration", () => {
+describe("Policy Verification Workflow — Frontend Integration", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {

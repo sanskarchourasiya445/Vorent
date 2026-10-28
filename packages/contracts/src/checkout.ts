@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { DecisionZodSchema, ReservationStateZodSchema } from "./enums.js";
-import { CartSchema, EvidenceSnapshotSchema } from "./cart.js";
+import { CartSchema, ClientCartSchema, EvidenceSnapshotSchema } from "./cart.js";
 
 /**
  * Checkout Nonce Record Schema
@@ -33,17 +33,22 @@ export type CreateCheckoutNonceRequest = z.infer<typeof CreateCheckoutNonceReque
 
 /**
  * Submit Checkout Proposal Request
+ * Client requests provide only permitted identifiers (sku, quantity, title).
+ * unitPriceMinor and category are deliberately omitted from this schema to enforce
+ * the server-side price and category trust boundary.
  */
 export const SubmitCheckoutProposalRequestSchema = z.object({
   approvalId: z.string().uuid(),
   policyVersionId: z.string().uuid(),
   policyHash: z.string().length(64),
   nonceId: z.string().uuid(),
-  cart: CartSchema,
+  cart: ClientCartSchema,
   evidenceSnapshot: EvidenceSnapshotSchema,
 });
 
 export type SubmitCheckoutProposalRequest = z.infer<typeof SubmitCheckoutProposalRequestSchema>;
+export const CreateCheckoutProposalRequestSchema = SubmitCheckoutProposalRequestSchema;
+export type CreateCheckoutProposalRequest = SubmitCheckoutProposalRequest;
 
 /**
  * Spend Reservation Record Schema
@@ -84,7 +89,7 @@ export const CheckoutProposalRecordSchema = z.object({
   policyHash: z.string().length(64),
   consumedNonceId: z.string().uuid(),
   cartHash: z.string().length(64),
-  proposedCart: CartSchema,
+  proposedCart: z.union([CartSchema, ClientCartSchema]),
   normalizedCart: CartSchema,
   evidenceSnapshot: EvidenceSnapshotSchema,
   decision: DecisionZodSchema,

@@ -4,10 +4,11 @@ import type { FastifyInstance } from "fastify";
 import * as approvalRepo from "../db/repositories/approvalRepository.js";
 import * as policyRepo from "../db/repositories/policyRepository.js";
 import { CheckoutError } from "../db/repositories/checkoutProposalRepository.js";
-import { ApprovalListResponseSchema } from "@warrant/contracts";
+import { ApprovalListResponseSchema, UserRole } from "@warrant/contracts";
 
 describe("Approval Routes & Decision D-014 Enforcements", () => {
   let server: FastifyInstance;
+  let adminToken: string;
 
   const validApproval = {
     id: "11111111-1111-1111-1111-111111111111",
@@ -29,6 +30,12 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
     server = await buildServer({
       checkDb: async () => ({ configured: true, connected: false }),
     });
+    const loginRes = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "admin@warrant.studio", password: "AdminPass123!" },
+    });
+    adminToken = loginRes.json().token;
   });
 
   afterAll(async () => {
@@ -98,6 +105,7 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
       const response = await server.inject({
         method: "POST",
         url: "/api/approvals",
+        headers: { authorization: `Bearer ${adminToken}` },
         payload: {
           policyVersionId: "invalid-uuid",
         },
@@ -114,6 +122,7 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
       const response = await server.inject({
         method: "POST",
         url: "/api/approvals",
+        headers: { authorization: `Bearer ${adminToken}` },
         payload: validBody,
       });
 
@@ -136,6 +145,7 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
       const response = await server.inject({
         method: "POST",
         url: "/api/approvals",
+        headers: { authorization: `Bearer ${adminToken}` },
         payload: validBody,
       });
 
@@ -157,6 +167,7 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
       const response = await server.inject({
         method: "POST",
         url: "/api/approvals",
+        headers: { authorization: `Bearer ${adminToken}` },
         payload: validBody,
       });
 
@@ -177,6 +188,7 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
       const response = await server.inject({
         method: "POST",
         url: "/api/approvals",
+        headers: { authorization: `Bearer ${adminToken}` },
         payload: validBody,
       });
 
@@ -197,6 +209,7 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
       const response = await server.inject({
         method: "POST",
         url: "/api/approvals",
+        headers: { authorization: `Bearer ${adminToken}` },
         payload: validBody,
       });
 
@@ -205,8 +218,77 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
       expect(json.error.code).toBe("QUALIFYING_RUN_NOT_FOUND");
     });
 
+    it("rejects approval creation if policy hash does not match version (POLICY_HASH_MISMATCH)", async () => {
+      vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce("22222222-2222-2222-2222-222222222222");
+      vi.spyOn(approvalRepo, "createApproval").mockRejectedValueOnce(
+        new CheckoutError(
+          "POLICY_HASH_MISMATCH",
+          `Policy hash mismatch for version ${validBody.policyVersionId}`
+        )
+      );
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          ...validBody,
+          policyHash: "b".repeat(64),
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const json = response.json();
+      expect(json.error.code).toBe("POLICY_HASH_MISMATCH");
+    });
+
+    it("rejects approval creation if qualifying test run version does not match requested version (POLICY_VERSION_MISMATCH)", async () => {
+      vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce("22222222-2222-2222-2222-222222222222");
+      vi.spyOn(approvalRepo, "createApproval").mockRejectedValueOnce(
+        new CheckoutError(
+          "POLICY_VERSION_MISMATCH",
+          "Qualifying test run policyVersionId does not match requested version"
+        )
+      );
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: validBody,
+      });
+
+      expect(response.statusCode).toBe(400);
+      const json = response.json();
+      expect(json.error.code).toBe("POLICY_VERSION_MISMATCH");
+    });
+
+    it("rejects approval creation with 403 FORBIDDEN when authenticated user role is REQUESTER", async () => {
+      const authService = await import("../services/authService.js");
+      vi.spyOn(authService, "verifySessionToken").mockResolvedValueOnce({
+        id: "requester-user-id",
+        email: "requester@warrant.studio",
+        name: "Test Requester",
+        role: UserRole.REQUESTER,
+        createdAt: new Date().toISOString(),
+      });
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/approvals",
+        headers: {
+          authorization: "Bearer mock-requester-token",
+        },
+        payload: validBody,
+      });
+
+      expect(response.statusCode).toBe(403);
+      const json = response.json();
+      expect(json.error.code).toBe("FORBIDDEN");
+    });
+
     it("returns 503 DATABASE_UNAVAILABLE when database is unreachable", async () => {
-      vi.spyOn(policyRepo, "ensureDefaultUser").mockRejectedValueOnce({
+      vi.spyOn(approvalRepo, "createApproval").mockRejectedValueOnce({
         code: "ECONNREFUSED",
         message: "connect ECONNREFUSED 127.0.0.1:5432",
       });
@@ -214,6 +296,9 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
       const response = await server.inject({
         method: "POST",
         url: "/api/approvals",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
         payload: validBody,
       });
 
@@ -236,6 +321,9 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
       const response = await server.inject({
         method: "POST",
         url: `/api/approvals/${validApproval.id}/revoke`,
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
       });
 
       expect(response.statusCode).toBe(200);
@@ -256,6 +344,9 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
       const response = await server.inject({
         method: "POST",
         url: `/api/v1/approvals/${validApproval.id}/revoke`,
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
       });
 
       expect(response.statusCode).toBe(200);
@@ -271,6 +362,9 @@ describe("Approval Routes & Decision D-014 Enforcements", () => {
       const response = await server.inject({
         method: "POST",
         url: `/api/approvals/nonexistent-id/revoke`,
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
       });
 
       expect(response.statusCode).toBe(404);

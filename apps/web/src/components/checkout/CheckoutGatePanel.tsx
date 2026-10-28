@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { CheckoutProposalItem, CheckoutGateResult } from "../../types/checkout";
 import type { ApprovalListState } from "../../types/approval";
+import { ReasonCode } from "@warrant/contracts";
 import { submitCheckoutProposal, requestCheckoutNonce } from "../../api/checkoutService";
 import { fetchApprovals } from "../../api/approvalService";
 import { DecisionResultCard } from "../features/DecisionResultCard";
@@ -16,6 +17,9 @@ import {
 } from "../../api/paymentOrderService";
 import type { PayPalOrderPresentationState } from "../../types/paymentOrder";
 import { AVAILABLE_POLICIES } from "../../api/verificationService";
+import { HashBadge } from "../ui/HashBadge";
+import { StatusBadge } from "../ui/StatusBadge";
+import { EmptyState } from "../ui/EmptyState";
 import {
   ShieldCheck,
   ShoppingCart,
@@ -26,6 +30,7 @@ import {
   Lock,
   Database,
   FileCheck,
+  ShieldAlert,
 } from "lucide-react";
 
 interface PresetScenario {
@@ -226,7 +231,207 @@ export function CheckoutGatePanel() {
 
       setEvalResult(result);
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Checkout evaluation failed");
+      if (err instanceof Error && err.message.includes("Nonce Replay Detected")) {
+        setEvalResult({
+          proposalId: `replay_blocked_${Date.now()}`,
+          approvalId: effectiveApprovalId,
+          decision: "DENY",
+          primaryReasonCode: ReasonCode.NONCE_REPLAYED,
+          reasonCodes: [ReasonCode.NONCE_REPLAYED],
+          cartTotalMinor,
+          currency: effectiveCurrency,
+          policyVersionId: effectivePolicyVersionId,
+          policyHash: effectivePolicyHash,
+          evaluatedAt: new Date().toISOString(),
+          isLiveApi: true,
+          isDemoSimulation: false,
+        });
+      } else {
+        setErrorMessage(err instanceof Error ? err.message : "Checkout evaluation failed");
+      }
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
+  const handleTamperPriceHike = async () => {
+    if (!isLiveConfigValid && !useOfflineSimulation) return;
+    const tampered: CheckoutProposalItem[] = [
+      {
+        id: "item_gpu_01",
+        name: "High-Performance Workstation GPU (Tampered Price $1,299.00)",
+        category: "Hardware",
+        unitPriceMinor: 129900,
+        quantity: 2,
+      },
+    ];
+    setItems(tampered);
+
+    setIsEvaluating(true);
+    setErrorMessage(null);
+    setEvalResult(null);
+    setPaypalOrderState(null);
+
+    try {
+      let nonce: string | undefined;
+      if (!useOfflineSimulation) {
+        nonce = await requestCheckoutNonce(
+          effectiveApprovalId,
+          effectivePolicyVersionId,
+          effectivePolicyHash,
+        );
+        setConsumedNonce(nonce);
+      }
+
+      const result = await submitCheckoutProposal({
+        approvalId: effectiveApprovalId,
+        policyVersionId: effectivePolicyVersionId,
+        policyHash: effectivePolicyHash,
+        merchantName,
+        items: tampered,
+        currency: effectiveCurrency,
+        nonce,
+        useOfflineSimulation,
+        evidenceVariation,
+      });
+
+      setEvalResult(result);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Price hike evaluation failed");
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
+  const handleTamperProhibitedSku = async () => {
+    if (!isLiveConfigValid && !useOfflineSimulation) return;
+    const tampered: CheckoutProposalItem[] = [
+      {
+        id: "proh-amazon-giftcard-001",
+        name: "$100 Digital Gift Card (Prohibited Loophole)",
+        category: "Gift Cards",
+        unitPriceMinor: 10000,
+        quantity: 1,
+      },
+    ];
+    setItems(tampered);
+
+    setIsEvaluating(true);
+    setErrorMessage(null);
+    setEvalResult(null);
+    setPaypalOrderState(null);
+
+    try {
+      let nonce: string | undefined;
+      if (!useOfflineSimulation) {
+        nonce = await requestCheckoutNonce(
+          effectiveApprovalId,
+          effectivePolicyVersionId,
+          effectivePolicyHash,
+        );
+        setConsumedNonce(nonce);
+      }
+
+      const result = await submitCheckoutProposal({
+        approvalId: effectiveApprovalId,
+        policyVersionId: effectivePolicyVersionId,
+        policyHash: effectivePolicyHash,
+        merchantName,
+        items: tampered,
+        currency: effectiveCurrency,
+        nonce,
+        useOfflineSimulation,
+        evidenceVariation,
+      });
+
+      setEvalResult(result);
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Prohibited SKU evaluation failed");
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
+  const handleTamperNonceReplay = async () => {
+    if (!isLiveConfigValid && !useOfflineSimulation) return;
+    setIsEvaluating(true);
+    setErrorMessage(null);
+    setEvalResult(null);
+    setPaypalOrderState(null);
+
+    try {
+      if (useOfflineSimulation) {
+        setEvalResult({
+          proposalId: `replay_blocked_${Date.now()}`,
+          approvalId: effectiveApprovalId,
+          decision: "DENY",
+          primaryReasonCode: "NONCE_REPLAYED",
+          reasonCodes: ["NONCE_REPLAYED"],
+          cartTotalMinor,
+          currency: effectiveCurrency,
+          policyVersionId: effectivePolicyVersionId,
+          policyHash: effectivePolicyHash,
+          evaluatedAt: new Date().toISOString(),
+          isLiveApi: false,
+          isDemoSimulation: true,
+        });
+        return;
+      }
+
+      let replayNonce = consumedNonce;
+      if (!replayNonce) {
+        const fresh = await requestCheckoutNonce(
+          effectiveApprovalId,
+          effectivePolicyVersionId,
+          effectivePolicyHash,
+        );
+        await submitCheckoutProposal({
+          approvalId: effectiveApprovalId,
+          policyVersionId: effectivePolicyVersionId,
+          policyHash: effectivePolicyHash,
+          merchantName,
+          items,
+          currency: effectiveCurrency,
+          nonce: fresh,
+          useOfflineSimulation: false,
+          evidenceVariation,
+        });
+        replayNonce = fresh;
+        setConsumedNonce(fresh);
+      }
+
+      const result = await submitCheckoutProposal({
+        approvalId: effectiveApprovalId,
+        policyVersionId: effectivePolicyVersionId,
+        policyHash: effectivePolicyHash,
+        merchantName,
+        items,
+        currency: effectiveCurrency,
+        nonce: replayNonce,
+        useOfflineSimulation: false,
+        evidenceVariation,
+      });
+
+      setEvalResult(result);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("Nonce Replay Detected")) {
+        setEvalResult({
+          proposalId: `replay_blocked_${Date.now()}`,
+          approvalId: effectiveApprovalId,
+          decision: "DENY",
+          primaryReasonCode: ReasonCode.NONCE_REPLAYED,
+          reasonCodes: [ReasonCode.NONCE_REPLAYED],
+          cartTotalMinor,
+          currency: effectiveCurrency,
+          policyVersionId: effectivePolicyVersionId,
+          policyHash: effectivePolicyHash,
+          evaluatedAt: new Date().toISOString(),
+          isLiveApi: true,
+          isDemoSimulation: false,
+        });
+      } else {
+        setErrorMessage(err instanceof Error ? err.message : "Nonce replay evaluation failed");
+      }
     } finally {
       setIsEvaluating(false);
     }
@@ -518,69 +723,73 @@ export function CheckoutGatePanel() {
   };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto" role="region" aria-label="Checkout Gate Workstation">
+    <div className="space-y-6 w-full" role="region" aria-label="Checkout Gate Workstation">
       {/* Header */}
       <div className="border-b border-border pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <div className="flex items-center space-x-2">
-            <ShieldCheck className="w-6 h-6 text-accent" aria-hidden="true" />
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-ink">
-              Checkout Authorization Gate
-            </h1>
+          <div className="flex items-center space-x-3.5">
+            <div className="w-10 h-10 rounded-lg bg-surface-inset border border-border flex items-center justify-center text-primary shrink-0">
+              <ShieldCheck className="w-5 h-5 text-primary" aria-hidden="true" />
+            </div>
+            <div>
+              <h1 className="text-xl sm:text-2xl font-sans font-semibold tracking-tight text-ink">
+                Checkout Authorization Gate
+              </h1>
+              <p className="text-xs text-muted font-normal mt-0.5 font-sans leading-relaxed">
+                Enforces server-side purchase authorization against approved policy rules before any payment operation.
+              </p>
+            </div>
           </div>
-          <p className="text-xs sm:text-sm text-muted mt-1">
-            Enforces server-side purchase authorization against approved policy rules before any payment operation.
-          </p>
         </div>
 
         <button
           type="button"
           onClick={() => void loadApprovals()}
           disabled={approvalsState.state === "LOADING"}
-          className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-semibold bg-canvas hover:bg-border/60 text-ink border border-border transition-colors disabled:opacity-50 shrink-0 self-start sm:self-auto"
+          className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded text-xs font-mono font-medium bg-surface hover:bg-surface-raised text-ink border border-border transition-colors disabled:opacity-50 shrink-0 self-start sm:self-auto shadow-2xs focus:outline-none focus:ring-2 focus:ring-accent/30"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${approvalsState.state === "LOADING" ? "animate-spin" : ""}`} />
+          <RefreshCw className={`w-3.5 h-3.5 ${approvalsState.state === "LOADING" ? "animate-spin text-accent" : "text-muted"}`} />
           <span>Refresh Approvals</span>
         </button>
       </div>
 
       {/* Configuration & Proposal Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
         {/* Left Column: Proposed Cart & Nonce Configuration */}
-        <div className="lg:col-span-7 space-y-4">
-          <div className="p-5 rounded-panel border border-border bg-surface space-y-4 shadow-sm">
+        <div className="md:col-span-6 space-y-4">
+          <div className="rounded border border-border bg-surface space-y-4 shadow-2xs p-5">
             {/* Bound Approval Selector */}
-            <div className="space-y-2 border-b border-border pb-4">
+            <div className="space-y-2 border-b border-border pb-4 font-sans">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <FileCheck className="w-4 h-4 text-accent" />
-                  <span className="text-xs font-semibold uppercase tracking-wider text-ink">
+                  <span className="text-xs font-semibold text-ink">
                     Authoritative Approval Checkpoint
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setUseManualApproval(!useManualApproval)}
-                  className="text-[11px] text-accent hover:underline font-medium"
+                  className="text-[11px] text-accent hover:underline font-medium cursor-pointer"
                 >
                   {useManualApproval ? "← Select From Ledger" : "Enter Approval ID →"}
                 </button>
               </div>
 
               {approvalsState.state === "LOADING" && (
-                <div className="p-2.5 rounded border border-border bg-canvas text-xs text-muted flex items-center space-x-2">
+                <div className="p-2.5 rounded border border-border bg-surface-inset text-xs text-muted flex items-center space-x-2">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin text-accent" />
                   <span>Loading active approvals from server...</span>
                 </div>
               )}
 
               {approvalsState.state === "UNAVAILABLE" && !useManualApproval && (
-                <div className="p-3 rounded border border-amber-300 bg-amber-50 text-amber-950 text-xs space-y-1">
-                  <div className="flex items-center space-x-1.5 font-semibold text-amber-900">
-                    <Database className="w-3.5 h-3.5 text-amber-700" />
-                    <span>PostgreSQL Standby Mode</span>
+                <div className="p-3 rounded-lg border border-warning/30 bg-warning/10 text-ink text-xs space-y-1">
+                  <div className="flex items-center space-x-1.5 font-semibold text-warning">
+                    <Database className="w-3.5 h-3.5 text-warning" />
+                    <span className="text-xs font-semibold">PostgreSQL Standby Mode</span>
                   </div>
-                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                  <p className="text-[11px] text-muted leading-relaxed font-sans">
                     Live approvals cannot be queried from the database. Please specify an approval ID manually or use labeled offline simulation.
                   </p>
                 </div>
@@ -589,7 +798,7 @@ export function CheckoutGatePanel() {
               {!useManualApproval && approvalsState.state === "READY" && (
                 <div className="space-y-2">
                   {approvalsState.data.length === 0 ? (
-                    <div className="p-3 rounded border border-dashed border-border bg-canvas text-xs text-muted text-center space-y-1">
+                    <div className="p-3 rounded border border-dashed border-border bg-surface-inset text-xs text-muted text-center space-y-1 font-mono">
                       <p>No approvals exist in the database ledger.</p>
                       <button
                         type="button"
@@ -602,9 +811,12 @@ export function CheckoutGatePanel() {
                   ) : (
                     <>
                       <select
+                        id="approval-select"
+                        name="approvalId"
+                        aria-label="Select authoritative approval checkpoint"
                         value={selectedApprovalId}
                         onChange={(e) => setSelectedApprovalId(e.target.value)}
-                        className="w-full rounded border border-border bg-canvas px-3 py-1.5 text-xs text-ink font-mono"
+                        className="w-full rounded border border-border bg-surface-inset px-3 py-1.5 text-xs text-ink font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
                       >
                         {approvalsState.data.map((a) => {
                           const isExpired = new Date(a.expiresAt).getTime() <= Date.now();
@@ -619,15 +831,18 @@ export function CheckoutGatePanel() {
 
                       {selectedApproval && (
                         <div
-                          className={`p-3 rounded border text-xs space-y-1.5 ${
+                          className={`p-3 rounded-lg border text-xs space-y-1.5 font-mono ${
                             isSelectedApprovalValid
-                              ? "border-emerald-300 bg-emerald-50/60 text-emerald-950"
-                              : "border-amber-300 bg-amber-50/60 text-amber-950"
+                              ? "border-allow/30 bg-allow/10 text-ink"
+                              : "border-warning/30 bg-warning/10 text-ink"
                           }`}
                         >
                           <div className="flex items-center justify-between font-semibold">
-                            <span>Status: {selectedApproval.status}</span>
-                            <span>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-muted text-[11px]">STATUS:</span>
+                              <StatusBadge status={selectedApproval.status} size="sm" showDot />
+                            </div>
+                            <span className="text-xs tabular-nums">
                               Available Spend: $
                               {(
                                 (selectedApproval.spendLimitMinor - selectedApproval.consumedSpendMinor) /
@@ -636,16 +851,16 @@ export function CheckoutGatePanel() {
                               {selectedApproval.currency}
                             </span>
                           </div>
-                          <div className="text-[11px] text-muted space-y-0.5">
+                          <div className="text-[11px] text-muted space-y-1 pt-1">
                             <div>
-                              Policy Version: <span className="font-mono text-ink">{selectedApproval.policyVersionId}</span>
+                              Policy Version: <span className="text-ink font-medium">{selectedApproval.policyVersionId}</span>
                             </div>
-                            <div className="truncate">
-                              Policy Hash: <span className="font-mono text-ink">{selectedApproval.policyHash}</span>
+                            <div className="flex flex-wrap items-center gap-1.5 max-w-full">
+                              <HashBadge hash={selectedApproval.policyHash} label="Policy Hash" />
                             </div>
                           </div>
                           {!isSelectedApprovalValid && (
-                            <p className="text-[11px] text-red-800 font-semibold pt-1">
+                            <p className="text-[11px] text-deny font-semibold pt-1">
                               ⚠️ This approval is {selectedApproval.status === "ACTIVE" ? "EXPIRED" : selectedApproval.status}. Gate evaluation will be blocked by backend.
                             </p>
                           )}
@@ -657,28 +872,32 @@ export function CheckoutGatePanel() {
               )}
 
               {useManualApproval && (
-                <div className="p-3 rounded border border-border bg-canvas space-y-2 text-xs">
+                <div className="p-3 rounded border border-border bg-surface-inset space-y-2 text-xs font-sans">
                   <div>
-                    <label className="block text-[10px] font-semibold text-muted uppercase mb-1">
+                    <label htmlFor="manual-approval-id" className="block text-xs font-semibold text-ink mb-1">
                       Approval ID (UUID)
                     </label>
                     <input
+                      id="manual-approval-id"
+                      name="manualApprovalId"
                       type="text"
                       placeholder="e.g. 11111111-1111-1111-1111-111111111111"
                       value={manualApprovalId}
                       onChange={(e) => setManualApprovalId(e.target.value)}
-                      className="w-full rounded border border-border bg-surface px-3 py-1.5 text-xs text-ink font-mono"
+                      className="w-full rounded border border-border bg-surface px-3 py-1.5 text-xs text-ink font-mono focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-semibold text-muted uppercase mb-1">
+                    <label htmlFor="manual-policy-id" className="block text-xs font-semibold text-ink mb-1">
                       Bound Policy Version
                     </label>
                     <select
+                      id="manual-policy-id"
+                      name="manualPolicyId"
                       value={manualPolicyId}
                       onChange={(e) => setManualPolicyId(e.target.value)}
-                      className="w-full rounded border border-border bg-surface px-3 py-1.5 text-xs text-ink"
+                      className="w-full rounded border border-border bg-surface px-3 py-1.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans cursor-pointer"
                     >
                       {AVAILABLE_POLICIES.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -697,27 +916,75 @@ export function CheckoutGatePanel() {
             </div>
 
             {/* Cart Header */}
-            <div className="flex items-center justify-between border-b border-border pb-3">
+            <div className="flex items-center justify-between border-b border-border pb-3 font-sans">
               <div className="flex items-center space-x-2">
                 <ShoppingCart className="w-4 h-4 text-accent" />
-                <h3 className="font-semibold text-xs text-ink uppercase tracking-wider">
+                <h3 className="font-semibold text-xs text-ink">
                   Proposed Cart Manifest
                 </h3>
               </div>
-              <span className="font-mono text-xs font-bold text-ink">
+              <span className="font-mono text-xs font-bold text-ink tabular-nums">
                 Total: ${(cartTotalMinor / 100).toFixed(2)} USD
               </span>
             </div>
 
+            {/* Interactive Tamper Presets (Video Scene 4 & Invariant Verification) */}
+            <div className="p-3.5 rounded-lg border border-red-500/30 bg-red-500/5 space-y-2.5 font-sans">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-deny flex items-center space-x-1.5">
+                  <ShieldAlert className="w-3.5 h-3.5 text-deny shrink-0" />
+                  <span>One-Click Tamper Attacks (Video Verification)</span>
+                </span>
+                <span className="text-[10px] font-mono text-muted uppercase">Invariants 1, 2 &amp; 5</span>
+              </div>
+              <p className="text-[11px] text-muted leading-relaxed">
+                Simulate shopping agent mutations and post-approval attacks against the pre-PayPal gate. The gate intercepts attacks and blocks order creation.
+              </p>
+              <div className="grid grid-cols-1 gap-2 pt-1">
+                <button
+                  type="button"
+                  data-testid="tamper-price-hike-btn"
+                  onClick={() => void handleTamperPriceHike()}
+                  disabled={isEvaluating || (!isLiveConfigValid && !useOfflineSimulation)}
+                  className="w-full inline-flex items-center justify-between px-3 py-2 rounded text-xs font-mono font-medium border border-deny/30 bg-surface hover:bg-deny/10 text-deny transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+                >
+                  <span className="font-semibold">Tamper: Post-Approval Price Hike (+$100.00)</span>
+                  <span className="text-[10px] text-muted font-sans hidden sm:inline">&rarr; DENY (SPEND_LIMIT_EXCEEDED)</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="tamper-prohibited-sku-btn"
+                  onClick={() => void handleTamperProhibitedSku()}
+                  disabled={isEvaluating || (!isLiveConfigValid && !useOfflineSimulation)}
+                  className="w-full inline-flex items-center justify-between px-3 py-2 rounded text-xs font-mono font-medium border border-deny/30 bg-surface hover:bg-deny/10 text-deny transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+                >
+                  <span className="font-semibold">Tamper: Prohibited SKU Swap (Gift Card)</span>
+                  <span className="text-[10px] text-muted font-sans hidden sm:inline">&rarr; DENY (PROHIBITED_CATEGORY)</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="tamper-nonce-replay-btn"
+                  onClick={() => void handleTamperNonceReplay()}
+                  disabled={isEvaluating || (!isLiveConfigValid && !useOfflineSimulation)}
+                  className="w-full inline-flex items-center justify-between px-3 py-2 rounded text-xs font-mono font-medium border border-deny/30 bg-surface hover:bg-deny/10 text-deny transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+                >
+                  <span className="font-semibold">Tamper: Nonce Replay</span>
+                  <span className="text-[10px] text-muted font-sans hidden sm:inline">&rarr; DENY (NONCE_REPLAYED)</span>
+                </button>
+              </div>
+            </div>
+
             {/* Scenario Picker */}
-            <div>
-              <label className="block text-[11px] font-semibold text-muted uppercase mb-1">
+            <div className="font-sans">
+              <label htmlFor="scenario-select" className="block text-xs font-semibold text-ink mb-1">
                 Cart Proposal Scenario
               </label>
               <select
+                id="scenario-select"
+                name="scenarioId"
                 value={selectedScenarioId}
                 onChange={(e) => handleScenarioChange(e.target.value)}
-                className="w-full rounded border border-border bg-canvas px-3 py-1.5 text-xs text-ink"
+                className="w-full rounded border border-border bg-surface-inset px-3 py-1.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans cursor-pointer"
               >
                 {PRESET_SCENARIOS.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -725,60 +992,64 @@ export function CheckoutGatePanel() {
                   </option>
                 ))}
               </select>
-              <p className="text-[11px] text-muted mt-1">
+              <p className="text-[11px] text-muted mt-1 font-sans">
                 {PRESET_SCENARIOS.find((s) => s.id === selectedScenarioId)?.description}
               </p>
             </div>
 
             {/* Merchant Details */}
-            <div>
-              <label className="block text-[11px] font-semibold text-muted uppercase mb-1">
+            <div className="font-sans">
+              <label htmlFor="merchant-name-input" className="block text-xs font-semibold text-ink mb-1">
                 Merchant
               </label>
               <input
+                id="merchant-name-input"
+                name="merchantName"
                 type="text"
                 value={merchantName}
                 onChange={(e) => setMerchantName(e.target.value)}
-                className="w-full rounded border border-border bg-canvas px-3 py-1.5 text-xs text-ink"
+                className="w-full rounded border border-border bg-surface-inset px-3 py-1.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans"
               />
             </div>
 
             {/* Evidence & Categorization Quality Selector */}
-            <div>
-              <label className="block text-[11px] font-semibold text-muted uppercase mb-1">
-                Evidence & Categorization Quality
+            <div className="font-sans">
+              <label htmlFor="evidence-variation-select" className="block text-xs font-semibold text-ink mb-1">
+                Evidence &amp; Categorization Quality
               </label>
               <select
+                id="evidence-variation-select"
+                name="evidenceVariation"
                 value={evidenceVariation}
                 onChange={(e) => setEvidenceVariation(e.target.value as "COMPLETE" | "STALE" | "MISSING")}
-                className="w-full rounded border border-border bg-canvas px-3 py-1.5 text-xs text-ink"
+                className="w-full rounded border border-border bg-surface-inset px-3 py-1.5 text-xs text-ink focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent font-sans cursor-pointer"
               >
                 <option value="COMPLETE">Verified &amp; Fresh Evidence (Categorized, Fresh Timestamp)</option>
                 <option value="STALE">Stale Evidence (14 Days Old — Evaluates to REVIEW)</option>
                 <option value="MISSING">Missing Critical Evidence (Low Confidence / Uncategorized — Evaluates to REVIEW)</option>
               </select>
-              <p className="text-[11px] text-muted mt-1">
+              <p className="text-[11px] text-muted mt-1 font-sans">
                 Decision D-003: Unreliable or missing critical evidence yields fail-closed REVIEW, preventing unauthorized order creation.
               </p>
             </div>
 
             {/* Cart Line Items */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-semibold text-muted uppercase">Line Items</div>
+            <div className="space-y-2 font-sans">
+              <div className="text-xs font-semibold text-muted">Line Items</div>
               {items.map((item) => (
                 <div
                   key={item.id}
-                  className="p-3 rounded border border-border bg-canvas/40 flex items-center justify-between text-xs"
+                  className="p-3 rounded border border-border bg-surface-inset flex items-center justify-between text-xs"
                 >
                   <div>
-                    <div className="font-semibold text-ink">{item.name}</div>
-                    <div className="text-[10px] text-muted">Category: {item.category}</div>
+                    <div className="font-semibold text-ink font-sans">{item.name}</div>
+                    <div className="text-[10px] text-muted font-sans">Category: {item.category}</div>
                   </div>
                   <div className="text-right font-mono">
-                    <div>
+                    <div className="text-muted tabular-nums">
                       {item.quantity} × ${(item.unitPriceMinor / 100).toFixed(2)}
                     </div>
-                    <div className="font-bold text-ink">
+                    <div className="font-bold text-ink tabular-nums">
                       ${((item.unitPriceMinor * item.quantity) / 100).toFixed(2)}
                     </div>
                   </div>
@@ -787,17 +1058,17 @@ export function CheckoutGatePanel() {
             </div>
 
             {/* Nonce & Anti-Replay Info */}
-            <div className="p-3 rounded bg-canvas border border-border text-[11px] text-muted space-y-1">
+            <div className="p-3 rounded bg-surface-inset border border-border text-[11px] text-muted space-y-1 font-sans">
               <div className="flex items-center space-x-1.5 font-semibold text-ink">
                 <Lock className="w-3.5 h-3.5 text-accent" />
-                <span>Single-Use Cryptographic Nonce</span>
+                <span className="text-xs font-semibold">Single-Use Cryptographic Nonce</span>
               </div>
-              <p className="text-[10px] text-muted leading-relaxed">
+              <p className="text-[10px] text-muted leading-relaxed font-sans">
                 A 256-bit single-use token will be atomically issued and consumed during proposal evaluation to prevent replay and double-submission.
               </p>
               {consumedNonce && (
-                <div className="font-mono text-[10px] text-accent truncate">
-                  Consumed Nonce: {consumedNonce.slice(0, 16)}...
+                <div className="pt-1">
+                  <HashBadge hash={consumedNonce} label="Consumed Nonce" prefixLength={10} suffixLength={8} />
                 </div>
               )}
             </div>
@@ -805,14 +1076,16 @@ export function CheckoutGatePanel() {
             {/* Mode & Submit Button */}
             <div className="pt-2 border-t border-border space-y-3">
               <div className="flex items-center justify-between text-xs">
-                <label className="flex items-center space-x-2 cursor-pointer text-muted hover:text-ink">
+                <label htmlFor="use-offline-simulation-checkbox" className="flex items-center space-x-2 cursor-pointer text-muted hover:text-ink font-sans">
                   <input
+                    id="use-offline-simulation-checkbox"
+                    name="useOfflineSimulation"
                     type="checkbox"
                     checked={useOfflineSimulation}
                     onChange={(e) => setUseOfflineSimulation(e.target.checked)}
                     className="rounded border-border text-accent focus:ring-accent"
                   />
-                  <span>Use Offline Simulation</span>
+                  <span className="text-xs">Use Offline Simulation</span>
                 </label>
                 <span className="text-[10px] text-muted font-mono">
                   {useOfflineSimulation ? "SIMULATION MODE" : "POST /api/checkout/proposals"}
@@ -820,18 +1093,18 @@ export function CheckoutGatePanel() {
               </div>
 
               {!isLiveConfigValid && !useOfflineSimulation && (
-                <div className="p-2.5 rounded bg-amber-50 border border-amber-300 text-xs text-amber-950 flex items-start space-x-2">
-                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                  <p className="text-[11px] leading-relaxed">
+                <div className="p-2.5 rounded-lg bg-warning/10 border border-warning/30 text-xs text-ink flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+                  <p className="text-[11px] leading-relaxed font-sans text-muted">
                     Select a valid active approval checkpoint above before submitting to the live gate, or check "Use Offline Simulation".
                   </p>
                 </div>
               )}
 
               {paypalOrderState?.isAmbiguous && (
-                <div className="p-2.5 rounded bg-amber-50 border border-amber-300 text-xs text-amber-950 flex items-start space-x-2">
-                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                  <p className="text-[11px] leading-relaxed">
+                <div className="p-2.5 rounded-lg bg-warning/10 border border-warning/30 text-xs text-ink flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+                  <p className="text-[11px] leading-relaxed font-sans text-muted">
                     A payment order is under an ambiguous reconciliation hold. Gate re-evaluation is locked to prevent duplicate spend.
                   </p>
                 </div>
@@ -846,7 +1119,7 @@ export function CheckoutGatePanel() {
                   isCreatingPayPalOrder ||
                   Boolean(paypalOrderState?.isAmbiguous)
                 }
-                className="w-full inline-flex items-center justify-center space-x-2 py-2 rounded font-semibold text-xs bg-accent text-white hover:bg-accent/90 transition-colors shadow-sm disabled:opacity-50"
+                className="w-full inline-flex items-center justify-center space-x-2 py-2.5 rounded font-mono font-semibold text-xs bg-accent text-white hover:bg-accent/90 active:bg-accent/80 transition-colors shadow-2xs disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-accent/30 cursor-pointer"
               >
                 {isEvaluating ? (
                   <>
@@ -865,19 +1138,19 @@ export function CheckoutGatePanel() {
         </div>
 
         {/* Right Column: Gate Decision & Reservation Feedback */}
-        <div className="lg:col-span-5 space-y-4">
+        <div className="md:col-span-6 space-y-4">
           {errorMessage && (
-            <div className="p-4 rounded bg-red-50 border border-red-200 text-xs text-red-950 space-y-1">
-              <div className="flex items-center space-x-1.5 font-semibold text-red-900">
-                <AlertCircle className="w-4 h-4 text-red-700 shrink-0" />
+            <div className="p-4 rounded-lg bg-deny/10 border border-deny/30 text-xs text-deny space-y-1">
+              <div className="flex items-center space-x-1.5 font-semibold">
+                <AlertCircle className="w-4 h-4 text-deny shrink-0" />
                 <span>Gate Submission Error</span>
               </div>
-              <p className="text-[11px] text-red-900 leading-relaxed">{errorMessage}</p>
+              <p className="text-[11px] text-muted leading-relaxed font-sans">{errorMessage}</p>
             </div>
           )}
 
           {evalResult ? (
-            <div className="space-y-4">
+            <>
               <DecisionResultCard
                 decision={evalResult.decision}
                 primaryReasonCode={evalResult.primaryReasonCode}
@@ -888,36 +1161,36 @@ export function CheckoutGatePanel() {
                 isDemoFixture={evalResult.isDemoSimulation}
               />
 
-              {/* Payment Order Execution Pipeline Card (Stages 1-4) */}
-              <PaymentOrderPipelineCard
-                decision={evalResult.decision}
-                primaryReasonCode={evalResult.primaryReasonCode}
-                reservationId={evalResult.reservationId}
-                reservationState={evalResult.reservationState}
-                amountMinor={evalResult.cartTotalMinor}
-                currency={evalResult.currency}
-                isDemoSimulation={evalResult.isDemoSimulation}
-                paypalOrderState={paypalOrderState || undefined}
-                onCreatePayPalOrder={
-                  evalResult.decision === "ALLOW" && evalResult.reservationId
-                    ? () => void handleCreatePayPalOrder()
-                    : undefined
-                }
-                onConfirmBuyerApproval={handleConfirmBuyerApproval}
-                onCapturePaymentOrder={handleCapturePaymentOrder}
-                onCancelPaymentOrder={handleCancelPaymentOrder}
-                onReconcilePaymentOrder={handleReconcilePaymentOrder}
-                onRefreshOrderDetails={handleRefreshOrderDetails}
-              />
-            </div>
+              {/* Payment Order Execution Pipeline Card (Stages 1-4) — Balanced Inside Right Column */}
+              <div className="w-full pt-2">
+                <PaymentOrderPipelineCard
+                  decision={evalResult.decision}
+                  primaryReasonCode={evalResult.primaryReasonCode}
+                  reservationId={evalResult.reservationId}
+                  reservationState={evalResult.reservationState}
+                  amountMinor={evalResult.cartTotalMinor}
+                  currency={evalResult.currency}
+                  isDemoSimulation={evalResult.isDemoSimulation}
+                  paypalOrderState={paypalOrderState || undefined}
+                  onCreatePayPalOrder={
+                    evalResult.decision === "ALLOW" && evalResult.reservationId
+                      ? () => void handleCreatePayPalOrder()
+                      : undefined
+                  }
+                  onConfirmBuyerApproval={handleConfirmBuyerApproval}
+                  onCapturePaymentOrder={handleCapturePaymentOrder}
+                  onCancelPaymentOrder={handleCancelPaymentOrder}
+                  onReconcilePaymentOrder={handleReconcilePaymentOrder}
+                  onRefreshOrderDetails={handleRefreshOrderDetails}
+                />
+              </div>
+            </>
           ) : (
-            <div className="p-8 text-center border border-dashed border-border rounded-panel bg-surface space-y-3">
-              <Layers className="w-8 h-8 text-muted mx-auto" />
-              <h3 className="font-semibold text-sm text-ink">Gate Evaluation Ready</h3>
-              <p className="text-xs text-muted max-w-xs mx-auto">
-                Submit the cart manifest to evaluate compliance against the approved policy rules and issue a single-use spend reservation.
-              </p>
-            </div>
+            <EmptyState
+              icon={<Layers className="w-8 h-8 mx-auto" />}
+              title="Gate Evaluation Ready"
+              description="Submit the cart manifest to evaluate compliance against the approved policy rules and issue a single-use spend reservation."
+            />
           )}
         </div>
       </div>

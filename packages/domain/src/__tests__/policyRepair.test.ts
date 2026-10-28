@@ -3,7 +3,7 @@ import { computePolicyDiff } from "../repair/policyDiff.js";
 import { proposePolicyRepair } from "../repair/policyRepairer.js";
 import { type PolicyDocument, type VerificationFinding } from "@warrant/contracts";
 
-describe("Phase 2 Policy Diff & Automated Repair", () => {
+describe("Policy Diff & Automated Repair", () => {
   const samplePolicyV1: PolicyDocument = {
     schemaVersion: "1.0",
     currency: "USD",
@@ -52,6 +52,47 @@ describe("Phase 2 Policy Diff & Automated Repair", () => {
       expect(diff.hasChanges).toBe(false);
       expect(diff.diffs).toHaveLength(0);
       expect(diff.summary).toContain("No semantic changes");
+    });
+
+    it("correctly identifies permissive changes (relaxed ceilings and removed restrictions)", () => {
+      const restrictivePolicy: PolicyDocument = {
+        schemaVersion: "1.0",
+        currency: "USD",
+        maxItemPriceMinor: 10000, // $100.00
+        maxCartTotalMinor: 25000, // $250.00
+        allowedCategories: ["Hardware"],
+        prohibitedCategories: ["Gift Cards", "Adult"],
+        requireEvidence: true,
+      };
+
+      const permissivePolicy: PolicyDocument = {
+        schemaVersion: "1.0",
+        currency: "USD",
+        maxItemPriceMinor: 20000, // Relaxed from $100 to $200
+        // maxCartTotalMinor removed (permissive!)
+        allowedCategories: ["Hardware", "Reference Books"], // added allowed category
+        prohibitedCategories: ["Adult"], // removed "Gift Cards" prohibition
+        requireEvidence: false, // relaxed evidence requirement
+      };
+
+      const diff = computePolicyDiff(restrictivePolicy, permissivePolicy);
+      expect(diff.hasChanges).toBe(true);
+
+      const itemDiff = diff.diffs.find((d) => d.field === "maxItemPriceMinor");
+      expect(itemDiff?.changeType).toBe("MODIFIED");
+      expect(itemDiff?.description).toContain("Relaxed per-item price ceiling");
+
+      const cartDiff = diff.diffs.find((d) => d.field === "maxCartTotalMinor");
+      expect(cartDiff?.changeType).toBe("REMOVED");
+      expect(cartDiff?.description).toContain("Removed whole-cart spending ceiling");
+
+      const prohDiff = diff.diffs.find((d) => d.field === "prohibitedCategories");
+      expect(prohDiff?.changeType).toBe("MODIFIED");
+      expect(prohDiff?.description).toContain("removed [Gift Cards]");
+
+      const evidenceDiff = diff.diffs.find((d) => d.field === "requireEvidence");
+      expect(evidenceDiff?.changeType).toBe("MODIFIED");
+      expect(evidenceDiff?.description).toContain("Changed evidence requirement from true to false");
     });
   });
 

@@ -11,13 +11,90 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 
-// 1. Users
+// 1. Organizations
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull().unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("organizations_slug_idx").on(table.slug),
+  ],
+);
+
+// 1.1 Users
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   authSubject: text("auth_subject").notNull().unique(),
+  email: text("email").unique(),
+  passwordHash: text("password_hash"),
+  name: text("name"),
+  role: text("role").notNull().default("REQUESTER"),
+  avatarUrl: text("avatar_url"),
+  jobTitle: text("job_title"),
+  department: text("department"),
+  phoneNumber: text("phone_number"),
+  bio: text("bio"),
+  organizationId: uuid("organization_id").references(() => organizations.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   disabledAt: timestamp("disabled_at", { withTimezone: true }),
 });
+
+// 1.2 Sessions
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: char("token_hash", { length: 64 }).notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("sessions_token_hash_idx").on(table.tokenHash),
+    index("sessions_user_id_idx").on(table.userId),
+  ],
+);
+
+// 1.3 Organization Memberships
+export const organizationMembers = pgTable(
+  "organization_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("MEMBER"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("org_member_unique_idx").on(table.organizationId, table.userId),
+    index("org_member_user_idx").on(table.userId),
+  ],
+);
+
+// 1.4 User Preferences
+export const userPreferences = pgTable(
+  "user_preferences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+    theme: text("theme").notNull().default("system"),
+    defaultPolicyId: text("default_policy_id"),
+    emailNotifications: text("email_notifications").notNull().default("true"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("user_preferences_user_idx").on(table.userId),
+  ],
+);
+
 
 // 2. Policies
 export const policies = pgTable(

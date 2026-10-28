@@ -393,4 +393,72 @@ describe("Approval Checkpoints and Checkout Gate Suite", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("18. submitCheckoutProposal strictly enforces fail-closed DENY when item price exceeds ceiling and avoids fallback to ALL_RULES_PASSED", async () => {
+    // 1. Offline simulation mode: item unit price $350.00 > $250.00 ceiling
+    const simResult = await submitCheckoutProposal({
+      approvalId: "appr_test_123",
+      merchantName: "High-End Hardware Vendor",
+      items: [
+        {
+          id: "sku_hw_overprice",
+          name: "Enterprise GPU Accelerator",
+          category: "Hardware",
+          unitPriceMinor: 35000,
+          quantity: 1,
+        },
+      ],
+      currency: "USD",
+      useOfflineSimulation: true,
+    });
+
+    expect(simResult.decision).toBe("DENY");
+    expect(simResult.primaryReasonCode).toBe(ReasonCode.ITEM_PRICE_LIMIT_EXCEEDED);
+    expect(simResult.reasonCodes).toContain(ReasonCode.ITEM_PRICE_LIMIT_EXCEEDED);
+    expect(simResult.reservationId).toBeUndefined();
+
+    // 2. Live API fallback safeguard: when decision is DENY and reasonCodes is empty, never default to ALL_RULES_PASSED
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          proposal: {
+            id: "prop_deny_fallback",
+            approvalId: "appr_test_123",
+            decision: "DENY",
+            reasonCodes: [],
+            cartTotalMinor: 35000,
+            currency: "USD",
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+
+    try {
+      const liveResult = await submitCheckoutProposal({
+        approvalId: "appr_test_123",
+        merchantName: "High-End Hardware Vendor",
+        items: [
+          {
+            id: "sku_hw_overprice",
+            name: "Enterprise GPU Accelerator",
+            category: "Hardware",
+            unitPriceMinor: 35000,
+            quantity: 1,
+          },
+        ],
+        currency: "USD",
+        useOfflineSimulation: false,
+      });
+
+      expect(liveResult.decision).toBe("DENY");
+      expect(liveResult.primaryReasonCode).not.toBe(ReasonCode.ALL_RULES_PASSED);
+      expect(liveResult.primaryReasonCode).toBe(ReasonCode.INTERNAL_EVALUATION_ERROR);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

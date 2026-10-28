@@ -12,6 +12,7 @@ import {
   Check,
 } from "lucide-react";
 import { proposeRepair, createPolicyVersion } from "../../api/policyService";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import type { ProposeRepairResponse, PolicyVersionRecord, VerificationFinding as ContractFinding } from "@warrant/contracts";
 import type { VerificationFinding } from "../../types/verification";
 
@@ -45,15 +46,8 @@ export function RepairProposalModal({
   const [appliedVersion, setAppliedVersion] = useState<PolicyVersionRecord | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  // Focus trap hook ensures keyboard navigation stays inside modal and restores focus on close
+  const modalContainerRef = useFocusTrap(isOpen, onClose);
 
   // Automatically request initial proposal when modal opens
   useEffect(() => {
@@ -176,14 +170,19 @@ export function RepairProposalModal({
 
   return (
     <div
+      data-lenis-prevent
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/40 backdrop-blur-xs overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-labelledby="repair-modal-title"
     >
-      <div className="relative w-full max-w-3xl max-h-[90vh] flex flex-col rounded-panel border border-border bg-surface shadow-xl overflow-hidden my-auto">
+      <div
+        ref={modalContainerRef}
+        data-lenis-prevent
+        className="relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-panel border border-border bg-surface shadow-xl overflow-hidden my-auto"
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-border bg-canvas/40">
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-border bg-surface-inset">
           <div className="flex items-center space-x-2.5">
             <Wrench className="w-5 h-5 text-accent shrink-0" aria-hidden="true" />
             <div>
@@ -198,7 +197,7 @@ export function RepairProposalModal({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded text-muted hover:text-ink hover:bg-canvas transition-colors"
+            className="p-1.5 rounded text-muted hover:text-ink hover:bg-surface-raised transition-colors"
             title="Close modal (Esc)"
             aria-label="Close modal"
           >
@@ -209,7 +208,7 @@ export function RepairProposalModal({
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5 text-xs">
           {/* Target version information */}
-          <div className="flex items-center justify-between p-3 rounded bg-canvas border border-border text-[11px] text-muted">
+          <div className="flex items-center justify-between p-3 rounded bg-surface-inset border border-border text-[11px] text-muted">
             <div>
               Target Policy Version: <code className="font-mono text-ink font-semibold">{policyVersionId}</code>
             </div>
@@ -233,12 +232,12 @@ export function RepairProposalModal({
 
           {/* Error State */}
           {error && (
-            <div className="p-4 rounded border border-red-300 bg-red-50 text-red-950 space-y-1">
-              <div className="font-bold text-red-900 flex items-center space-x-1.5">
+            <div className="p-4 rounded border border-deny/30 bg-deny/10 text-deny space-y-1">
+              <div className="font-bold flex items-center space-x-1.5">
                 <AlertTriangle className="w-4 h-4 text-deny" aria-hidden="true" />
                 <span>Repair Generation Error</span>
               </div>
-              <p>{error}</p>
+              <p className="text-xs text-ink">{error}</p>
             </div>
           )}
 
@@ -304,11 +303,11 @@ export function RepairProposalModal({
                       {proposal.diff.diffs.map((d, idx) => {
                         const changeBadge =
                           d.changeType === "ADDED"
-                            ? "bg-emerald-100 text-emerald-950 border-emerald-300"
+                            ? "bg-allow/10 text-allow border-allow/30"
                             : d.changeType === "REMOVED"
-                              ? "bg-red-100 text-red-950 border-red-300"
+                              ? "bg-deny/10 text-deny border-deny/30"
                               : d.changeType === "MODIFIED"
-                                ? "bg-amber-100 text-amber-950 border-amber-300"
+                                ? "bg-review/10 text-review border-review/30"
                                 : "bg-canvas text-muted border-border";
 
                         return (
@@ -336,13 +335,13 @@ export function RepairProposalModal({
               {/* Retest Required Invariant Banner */}
               <div
                 role="note"
-                className="p-3.5 rounded border border-amber-300 bg-amber-50 text-amber-950 space-y-1"
+                className="p-3.5 rounded-lg border border-review/40 bg-review/10 text-ink space-y-1"
               >
-                <div className="font-bold flex items-center space-x-1.5 text-amber-900">
-                  <AlertTriangle className="w-4 h-4 text-amber-800" aria-hidden="true" />
+                <div className="font-bold flex items-center space-x-1.5 text-review">
+                  <AlertTriangle className="w-4 h-4 text-review" aria-hidden="true" />
                   <span>Mandatory Fresh Retest Requirement (Decision D-014)</span>
                 </div>
-                <p className="text-[11px] leading-relaxed text-amber-900">
+                <p className="text-[11px] leading-relaxed text-muted">
                   Applying this repair will create an append-only, immutable new version. Existing approvals remain bound to their original policy version hash.
                   A <strong>fresh verification run</strong> is strictly required on the new version before it can be submitted for approval or authorize checkout.
                 </p>
@@ -350,16 +349,16 @@ export function RepairProposalModal({
 
               {/* Persistence Error */}
               {applyError && (
-                <div className="p-3 rounded bg-red-50 border border-red-200 text-red-900">
+                <div className="p-3 rounded-lg bg-deny/10 border border-deny/30 text-deny text-xs">
                   {applyError}
                 </div>
               )}
 
               {/* Version Created Confirmation */}
               {appliedVersion && (
-                <div className="p-3.5 rounded border border-emerald-300 bg-emerald-50 text-emerald-950 flex items-center justify-between">
+                <div className="p-3.5 rounded-lg border border-allow/40 bg-allow/10 text-ink flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" aria-hidden="true" />
+                    <CheckCircle2 className="w-4 h-4 text-allow shrink-0" aria-hidden="true" />
                     <span>
                       Created Version <strong>v{appliedVersion.versionNumber}</strong> (<code className="font-mono text-xs">{appliedVersion.id}</code>).
                     </span>

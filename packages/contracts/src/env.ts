@@ -17,7 +17,7 @@ export const ServerEnvSchema = z.object({
     errorMap: () => ({ message: "PAYPAL_ENV must be 'sandbox' for MVP. Live mode is prohibited." }),
   }).default("sandbox"),
 
-  // Sandbox credentials (optional during initial Phase 0 foundation)
+  // Sandbox credentials
   PAYPAL_CLIENT_ID: z.string().optional(),
   PAYPAL_CLIENT_SECRET: z.string().optional(),
   PAYPAL_WEBHOOK_ID: z.string().optional(),
@@ -30,6 +30,10 @@ export const ServerEnvSchema = z.object({
   // Search limits
   SEARCH_MAX_CANDIDATES: z.coerce.number().int().positive().default(100),
   SEARCH_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+
+  // Resend Email Configuration (Optional in development/test, used for transactional lifecycle events)
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().default("VORENT <notifications@warrant.studio>"),
 
   // Logging & CORS
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),

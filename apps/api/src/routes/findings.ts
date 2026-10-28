@@ -1,5 +1,4 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
-import { randomUUID } from "node:crypto";
 import {
   AcceptRiskRequestSchema,
   FindingListResponseSchema,
@@ -12,27 +11,7 @@ import {
   listFindings,
   resolveFinding,
 } from "../db/repositories/verificationRunRepository.js";
-
-function extractRequestId(request: FastifyRequest): string {
-  const incoming = request.headers["x-request-id"];
-  if (typeof incoming === "string" && incoming.trim().length > 0) {
-    return incoming.trim();
-  }
-  return `req_${randomUUID()}`;
-}
-
-function isDbConnectionError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const e = err as any;
-  return (
-    e.code === "28P01" ||
-    e.code === "ECONNREFUSED" ||
-    e.code === "ETIMEDOUT" ||
-    e.code === "ENOTFOUND" ||
-    (typeof e.message === "string" &&
-      (e.message.includes("connection") || e.message.includes("authentication failed")))
-  );
-}
+import { extractRequestId, isDbConnectionError } from "./routeUtils.js";
 
 export const findingRoutes: FastifyPluginAsync = async (fastify) => {
   // 1. GET / - List findings

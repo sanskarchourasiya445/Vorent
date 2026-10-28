@@ -77,8 +77,8 @@ export function FindingsList({
               onClick={() => setFilter("UNRESOLVED_AMBIGUITY")}
               className={`px-2.5 py-1 rounded transition-colors font-medium flex items-center space-x-1 ${
                 filter === "UNRESOLVED_AMBIGUITY"
-                  ? "bg-surface text-amber-900 shadow-xs font-semibold"
-                  : "text-muted hover:text-amber-900"
+                  ? "bg-surface text-ink shadow-xs font-semibold"
+                  : "text-muted hover:text-ink"
               }`}
             >
               <span>Unresolved ({unresolvedCount})</span>
@@ -90,7 +90,7 @@ export function FindingsList({
       {/* Empty State: Zero Findings in Run */}
       {findings.length === 0 ? (
         <div className="py-8 text-center space-y-2">
-          <div className="inline-flex p-3 rounded-full bg-emerald-50 text-emerald-700 mb-1">
+          <div className="inline-flex p-3 rounded-full bg-emerald-50 dark:bg-allow/10 text-emerald-700 dark:text-allow mb-1">
             <CheckCircle2 className="w-6 h-6" aria-hidden="true" />
           </div>
           <h4 className="text-sm font-semibold text-ink">
@@ -106,7 +106,7 @@ export function FindingsList({
           No findings match the selected classification filter.
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
           {filteredFindings.map((finding) => {
             const isCounterexample = finding.classification === "COUNTEREXAMPLE";
             const isSelected = selectedFindingId === finding.id;
@@ -133,51 +133,51 @@ export function FindingsList({
                 role="button"
                 aria-pressed={isSelected}
                 aria-label={`Inspect finding: ${finding.title}`}
-                className={`p-4 rounded border text-left cursor-pointer transition-all space-y-3 ${
+                className={`p-4 rounded-lg border text-left cursor-pointer transition-all flex flex-col justify-between ${
                   isSelected
                     ? "border-accent ring-2 ring-accent/30 bg-accent/5"
                     : isCounterexample
-                      ? "border-red-200 bg-surface hover:border-red-300 hover:shadow-xs"
-                      : "border-amber-200 bg-surface hover:border-amber-300 hover:shadow-xs"
+                      ? "border-red-200 dark:border-deny/40 bg-surface hover:border-red-300 dark:hover:border-deny hover:shadow-xs"
+                      : "border-amber-200 dark:border-review/40 bg-surface hover:border-amber-300 dark:hover:border-review hover:shadow-xs"
                 } focus:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
               >
-                {/* Header row */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center space-x-2">
+                {/* Header row with consistent min-height for stable cross-card vertical alignment */}
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 min-h-[4.75rem]">
+                  <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">
                     {isCounterexample ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-100 text-red-950 border border-red-300">
-                        <XCircle className="w-3 h-3 mr-1 text-red-700" aria-hidden="true" />
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-100 dark:bg-deny/20 text-red-950 dark:text-deny border border-red-300 dark:border-deny/40 shrink-0">
+                        <XCircle className="w-3 h-3 mr-1 text-red-700 dark:text-deny" aria-hidden="true" />
                         Counterexample
                       </span>
                     ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-950 border border-amber-300">
-                        <AlertTriangle className="w-3 h-3 mr-1 text-amber-800" aria-hidden="true" />
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-100 dark:bg-review/20 text-amber-950 dark:text-review border border-amber-300 dark:border-review/40 shrink-0">
+                        <AlertTriangle className="w-3 h-3 mr-1 text-amber-800 dark:text-review" aria-hidden="true" />
                         Unresolved Ambiguity
                       </span>
                     )}
 
                     {finding.severity && (
                       <span
-                        className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-bold uppercase border ${
+                        className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-bold uppercase border shrink-0 ${
                           finding.severity === "CRITICAL"
-                            ? "bg-red-200 text-red-950 border-red-400"
+                            ? "bg-red-200 dark:bg-red-950/60 text-red-950 dark:text-red-200 border-red-400 dark:border-red-800"
                             : finding.severity === "HIGH"
-                              ? "bg-red-100 text-red-900 border-red-300"
+                              ? "bg-red-100 dark:bg-red-950/40 text-red-900 dark:text-red-300 border-red-300 dark:border-red-800"
                               : finding.severity === "MEDIUM"
-                                ? "bg-amber-100 text-amber-900 border-amber-300"
-                                : "bg-slate-100 text-slate-800 border-slate-300"
+                                ? "bg-amber-100 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 border-amber-300 dark:border-amber-800"
+                                : "bg-slate-100 dark:bg-slate-900/40 text-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-800"
                         }`}
                       >
                         {finding.severity}
                       </span>
                     )}
 
-                    <h4 className="text-xs font-bold text-ink hover:text-accent transition-colors">
+                    <h4 className="text-xs font-bold text-ink hover:text-accent transition-colors break-words">
                       {finding.title}
                     </h4>
                   </div>
 
-                  <div className="flex items-center space-x-2 text-[11px] shrink-0">
+                  <div className="flex items-center space-x-2 text-[11px] shrink-0 self-start sm:self-auto pt-0.5">
                     <span className="text-muted">
                       Expected: <code className="font-mono text-ink font-semibold">{finding.expectedDecision}</code>
                     </span>
@@ -189,7 +189,7 @@ export function FindingsList({
                           finding.actualResult.decision === "DENY"
                             ? "text-deny"
                             : finding.actualResult.decision === "REVIEW"
-                              ? "text-amber-800"
+                              ? "text-amber-800 dark:text-amber-300"
                               : "text-allow"
                         }`}
                       >
@@ -200,23 +200,27 @@ export function FindingsList({
                   </div>
                 </div>
 
-                {/* Summary */}
-                <p className="text-xs text-muted leading-relaxed line-clamp-2">
-                  {finding.summary}
-                </p>
+                {/* Summary / Description section with consistent min-height & natural text wrapping */}
+                <div className="flex-1 min-h-[2.75rem] my-2.5">
+                  <p className="text-xs text-muted leading-relaxed">
+                    {finding.summary}
+                  </p>
+                </div>
 
-                {/* Footer metadata: Reason code & cart preview */}
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/60 text-[11px]">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-muted font-medium">Triggered:</span>
-                    <code className="font-mono font-semibold px-1.5 py-0.5 rounded bg-canvas border border-border text-ink text-[10px]">
+                {/* Footer metadata: Distinct, vertically aligned Triggered and Cart/Amount rows */}
+                <div className="mt-auto pt-2.5 border-t border-border/60 text-[11px] space-y-1.5">
+                  {/* Triggered reason code row */}
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <span className="text-muted font-medium shrink-0">Triggered:</span>
+                    <code className="font-mono font-semibold px-1.5 py-0.5 rounded bg-canvas border border-border text-ink text-[10px] shrink-0">
                       {finding.actualResult.primaryReasonCode}
                     </code>
-                    <span className="text-muted hidden sm:inline">({primaryFormatted.headline})</span>
+                    <span className="text-muted">({primaryFormatted.headline})</span>
                   </div>
 
+                  {/* Cart preview & total amount row */}
                   <div className="flex items-center space-x-1.5 text-muted font-mono">
-                    <ShoppingCart className="w-3 h-3 text-accent" aria-hidden="true" />
+                    <ShoppingCart className="w-3.5 h-3.5 text-accent shrink-0" aria-hidden="true" />
                     <span>
                       {finding.candidateCart.items.length} item(s) • ${totalFormatted}{" "}
                       {finding.candidateCart.currency}
