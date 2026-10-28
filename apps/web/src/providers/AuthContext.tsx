@@ -160,9 +160,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
 
   const switchPersona = async (email: string, plainPassword?: string) => {
     setError(null);
-    // Find persona password if not provided
+    // Find persona password if available in non-production
     const targetPersona = personas.find((p) => p.email.toLowerCase() === email.toLowerCase());
-    const pass = plainPassword || targetPersona?.passwordHint || "AdminPass123!";
+    const pass = plainPassword || targetPersona?.passwordHint || (process.env.NODE_ENV !== "production" ? "AdminPass123!" : undefined);
+    if (!pass) {
+      throw new Error(`Password required to authenticate as ${email}.`);
+    }
     try {
       const res = await authService.login({ email, password: pass });
       setUser(res.user);

@@ -11,7 +11,6 @@ export default defineConfig({
     },
   },
   server: {
-    allowedHosts: ['antivirus-spiffy-unlit.ngrok-free.dev'],
     port: 5173,
     proxy: {
       "/health": {
@@ -21,6 +20,17 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:3001",
         changeOrigin: true,
+      },
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ["react", "react-dom"],
+          three: ["three"],
+          icons: ["lucide-react"],
+        },
       },
     },
   },

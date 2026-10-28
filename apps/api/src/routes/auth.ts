@@ -152,16 +152,20 @@ export const authRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
    * GET /api/auth/personas
    * Provides available starter personas for testing each role
    * (ADMINISTRATOR, APPROVER, FINANCE_AUDITOR, REQUESTER)
+   *
+   * SECURITY ENFORCEMENT:
+   * In production, password hints are strictly suppressed to prevent credential leakage.
    */
   app.get("/personas", async (request, reply) => {
     const requestId = extractRequestId(request);
     reply.header("x-request-id", requestId);
 
+    const isProduction = process.env.NODE_ENV === "production";
     const personas = CANONICAL_STARTER_USERS.map((p) => ({
       email: p.email,
       name: p.name,
       role: p.role,
-      passwordHint: p.plainPassword,
+      passwordHint: isProduction ? "" : p.plainPassword,
     }));
 
     return reply.status(200).send({

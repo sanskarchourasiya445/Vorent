@@ -101,6 +101,18 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
     credentials: true,
   });
 
+  // Global defensive HTTP security headers for production defense-in-depth
+  app.addHook("onSend", async (_request, reply, payload) => {
+    reply.header("x-content-type-options", "nosniff");
+    reply.header("x-frame-options", "DENY");
+    reply.header("referrer-policy", "strict-origin-when-cross-origin");
+    reply.header("content-security-policy", "frame-ancestors 'none'");
+    if (env.NODE_ENV === "production") {
+      reply.header("strict-transport-security", "max-age=31536000; includeSubDomains");
+    }
+    return payload;
+  });
+
   // Register routes
   await app.register(healthRoutes, { checkDb: options.checkDb });
 

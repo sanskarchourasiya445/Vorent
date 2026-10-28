@@ -42,7 +42,10 @@ export async function fetchFindings(
 
   const res = await fetch(url, {
     method: "GET",
-    headers: { Accept: "application/json" },
+    headers: {
+      Accept: "application/json",
+      ...safeAuthHeaders(),
+    },
   });
 
   if (!res.ok) {
@@ -70,7 +73,10 @@ export async function fetchFindingDetail(id: string): Promise<FindingRecord> {
 
   const res = await fetch(url, {
     method: "GET",
-    headers: { Accept: "application/json" },
+    headers: {
+      Accept: "application/json",
+      ...safeAuthHeaders(),
+    },
   });
 
   if (!res.ok) {

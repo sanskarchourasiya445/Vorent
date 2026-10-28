@@ -3,6 +3,7 @@ import {
   AcceptRiskRequestSchema,
   FindingListResponseSchema,
   ResolveFindingRequestSchema,
+  UserRole,
 } from "@warrant/contracts";
 import { db } from "../db/index.js";
 import {
@@ -11,7 +12,11 @@ import {
   listFindings,
   resolveFinding,
 } from "../db/repositories/verificationRunRepository.js";
-import { extractRequestId, isDbConnectionError } from "./routeUtils.js";
+import {
+  extractRequestId,
+  isDbConnectionError,
+  resolveAuthorizedUserOrReject,
+} from "./routeUtils.js";
 
 export const findingRoutes: FastifyPluginAsync = async (fastify) => {
   // 1. GET / - List findings
@@ -113,6 +118,12 @@ export const findingRoutes: FastifyPluginAsync = async (fastify) => {
       const requestId = extractRequestId(request);
       reply.header("x-request-id", requestId);
 
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        requiredRoles: [UserRole.APPROVER, UserRole.ADMINISTRATOR],
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+
       const { id } = request.params;
       const parseResult = ResolveFindingRequestSchema.safeParse(request.body);
       if (!parseResult.success) {
@@ -174,6 +185,12 @@ export const findingRoutes: FastifyPluginAsync = async (fastify) => {
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       const requestId = extractRequestId(request);
       reply.header("x-request-id", requestId);
+
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        requiredRoles: [UserRole.APPROVER, UserRole.ADMINISTRATOR],
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
 
       const { id } = request.params;
       const parseResult = AcceptRiskRequestSchema.safeParse(request.body);

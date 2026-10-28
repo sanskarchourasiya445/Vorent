@@ -61,7 +61,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onOpenSettings, onLoginSuc
       closeAuthModal();
       onLoginSuccess?.();
     } catch {
-      // Handled in context
+      // In production or when credentials require explicit entry, prefill email for user
+      setEmail(pEmail);
+      setTab("login");
     } finally {
       setIsSubmitting(false);
     }

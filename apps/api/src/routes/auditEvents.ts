@@ -2,7 +2,12 @@ import type { FastifyInstance, FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { listAuditEvents } from "../db/repositories/auditRepository.js";
 import { db } from "../db/index.js";
-import { extractRequestId, isDbConnectionError } from "./routeUtils.js";
+import {
+  extractRequestId,
+  isDbConnectionError,
+  resolveAuthorizedUserOrReject,
+} from "./routeUtils.js";
+import { UserRole } from "@warrant/contracts";
 
 const ListAuditEventsQuerySchema = z.object({
   ownerId: z.string().uuid().optional(),
@@ -30,6 +35,12 @@ export const auditEventRoutes: FastifyPluginAsync = async (app: FastifyInstance)
         requestId,
       });
     }
+
+    const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+      requiredRoles: [UserRole.ADMINISTRATOR, UserRole.FINANCE_AUDITOR],
+      allowDefaultFallbackInDev: true,
+    });
+    if (!authResult) return;
 
     try {
       const { events, total } = await listAuditEvents(db, parseResult.data);
