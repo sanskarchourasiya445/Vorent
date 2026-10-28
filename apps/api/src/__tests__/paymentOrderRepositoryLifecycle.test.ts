@@ -18,7 +18,7 @@ import {
   webhookEvents,
 } from "../db/schema.js";
 
-describe("PaymentOrderRepository Comprehensive Lifecycle Tests (Phase 1)", () => {
+describe("PaymentOrderRepository Comprehensive Lifecycle Tests", () => {
   const validOwnerId = "11111111-1111-1111-1111-111111111111";
   const validOrderId = "44444444-4444-4444-4444-444444444444";
   const validProposalId = "22222222-2222-2222-2222-222222222222";

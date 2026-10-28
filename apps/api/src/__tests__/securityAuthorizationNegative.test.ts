@@ -13,6 +13,9 @@ import { ReasonCode } from "@warrant/contracts";
 
 describe("Security, Authorization & Negative Vulnerability Tests", () => {
   let server: FastifyInstance;
+  let adminToken: string;
+  let approverToken: string;
+  let requesterToken: string;
 
   const ownerA = "11111111-1111-1111-1111-111111111111";
   const ownerB = "99999999-9999-9999-9999-999999999999";
@@ -26,6 +29,28 @@ describe("Security, Authorization & Negative Vulnerability Tests", () => {
     server = await buildServer({
       checkDb: async () => ({ configured: true, connected: false }),
     });
+    await server.ready();
+
+    const adminRes = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "admin@warrant.studio", password: "AdminPass123!" },
+    });
+    adminToken = adminRes.json().token;
+
+    const approverRes = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "approver@warrant.studio", password: "ApproverPass123!" },
+    });
+    approverToken = approverRes.json().token;
+
+    const requesterRes = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email: "requester@warrant.studio", password: "RequesterPass123!" },
+    });
+    requesterToken = requesterRes.json().token;
   });
 
   afterAll(async () => {
@@ -56,6 +81,7 @@ describe("Security, Authorization & Negative Vulnerability Tests", () => {
       const response = await server.inject({
         method: "POST",
         url: "/api/approvals",
+        headers: { authorization: `Bearer ${adminToken}` },
         payload: {
           policyVersionId: validPolicyVersionId,
           policyHash: validPolicyHash,
@@ -71,12 +97,12 @@ describe("Security, Authorization & Negative Vulnerability Tests", () => {
       });
 
       expect(response.statusCode).toBe(201);
-      // Verify that createApproval was called ONLY with the bound ownerA from session,
+      // Verify that createApproval was called ONLY with the bound identity from session,
       // and NOT with ownerB or any injected role
       expect(createSpy).toHaveBeenCalledWith(
         expect.anything(),
         expect.not.objectContaining({ role: "SUPER_ADMIN", canApprove: true, tenantId: "global-root" }),
-        ownerA
+        "00000000-0000-0000-0000-000000000001"
       );
     });
 
@@ -200,6 +226,7 @@ describe("Security, Authorization & Negative Vulnerability Tests", () => {
       const response = await server.inject({
         method: "POST",
         url: "/api/approvals",
+        headers: { authorization: `Bearer ${adminToken}` },
         payload: {
           policyVersionId: validPolicyVersionId,
           policyHash: validPolicyHash,
@@ -377,6 +404,130 @@ describe("Security, Authorization & Negative Vulnerability Tests", () => {
       // Assert zero leak of raw password/database message in response body
       expect(JSON.stringify(json)).not.toContain("password authentication failed");
       expect(JSON.stringify(json)).not.toContain("postgres_secret_admin");
+    });
+  });
+
+  // =========================================================================
+  // 6. EXPLICIT AUTHENTICATION & RBAC GATES (SEC-001, PAY-002, PAY-003)
+  // =========================================================================
+  describe("6. Explicit Authentication & RBAC Authorization Gates (SEC-001, PAY-002, PAY-003)", () => {
+    it("rejects unauthenticated requests to protected mutative endpoints with HTTP 401 UNAUTHENTICATED", async () => {
+      const unauthEndpoints = [
+        { method: "GET" as const, url: "/api/auth/me" },
+        { method: "GET" as const, url: "/api/account/profile" },
+        { method: "PATCH" as const, url: "/api/account/profile", payload: { fullName: "Unauthorized Update" } },
+        { method: "GET" as const, url: "/api/account/preferences" },
+        { method: "POST" as const, url: "/api/account/change-password", payload: { currentPassword: "Old", newPassword: "NewPass123!" } },
+        { method: "POST" as const, url: "/api/account/organization/members", payload: { email: "new@warrant.studio", role: "BUYER" } },
+      ];
+
+      for (const ep of unauthEndpoints) {
+        const res = await server.inject({
+          method: ep.method,
+          url: ep.url,
+          payload: (ep as any).payload,
+        });
+        expect(res.statusCode).toBe(401);
+        expect(res.json().error.code).toBe("UNAUTHENTICATED");
+      }
+    });
+
+    it("rejects requests from users with insufficient role with HTTP 403 FORBIDDEN", async () => {
+      // 1. Requester cannot capture payment order (requires APPROVER or ADMINISTRATOR)
+      const captureRes = await server.inject({
+        method: "POST",
+        url: "/api/payment-orders/capture",
+        headers: { authorization: `Bearer ${requesterToken}` },
+        payload: { orderId: randomUUID(), paypalOrderId: "TEST-ORDER-1" },
+      });
+      expect(captureRes.statusCode).toBe(403);
+      expect(captureRes.json().error.code).toBe("FORBIDDEN");
+
+      // 2. Requester cannot create policies (requires APPROVER or ADMINISTRATOR)
+      const policyRes = await server.inject({
+        method: "POST",
+        url: "/api/policies",
+        headers: { authorization: `Bearer ${requesterToken}` },
+        payload: {
+          name: "Requester Policy",
+          sourceMandate: "Laptops and development monitors.",
+          confirmationState: "CONFIRMED",
+          intent: {
+            name: "Requester Policy",
+            currency: "USD",
+            allowedCategories: ["Hardware"],
+            prohibitedCategories: ["Gaming"],
+            requireEvidence: true,
+          },
+          policy: {
+            schemaVersion: "1.0",
+            currency: "USD",
+            maxItemPriceMinor: 40000,
+            maxCartTotalMinor: 80000,
+            allowedCategories: ["Hardware"],
+            prohibitedCategories: ["Gaming"],
+          },
+        },
+      });
+      expect(policyRes.statusCode).toBe(403);
+      expect(policyRes.json().error.code).toBe("FORBIDDEN");
+
+      // 3. Approver cannot archive policies (requires ADMINISTRATOR)
+      const archiveRes = await server.inject({
+        method: "DELETE",
+        url: `/api/policies/${randomUUID()}`,
+        headers: { authorization: `Bearer ${approverToken}` },
+      });
+      expect(archiveRes.statusCode).toBe(403);
+      expect(archiveRes.json().error.code).toBe("FORBIDDEN");
+
+      // 4. Requester cannot trigger PayPal sync (requires FINANCE_AUDITOR or ADMINISTRATOR)
+      const syncRes = await server.inject({
+        method: "POST",
+        url: "/api/paypal/sync",
+        headers: { authorization: `Bearer ${requesterToken}` },
+      });
+      expect(syncRes.statusCode).toBe(403);
+      expect(syncRes.json().error.code).toBe("FORBIDDEN");
+    });
+
+    it("prevents cross-user IDOR access when querying payment order details", async () => {
+      const orderId = randomUUID();
+      // Mock getPaymentOrder to return null when scoped to requester's ID (different from owner)
+      vi.spyOn(paymentOrderRepo, "getPaymentOrder").mockResolvedValueOnce(null);
+
+      const res = await server.inject({
+        method: "GET",
+        url: `/api/payment-orders/${orderId}`,
+        headers: { authorization: `Bearer ${requesterToken}` },
+      });
+
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error.code).toBe("ORDER_NOT_FOUND");
+    });
+
+    it("handles post-capture database failure with HTTP 409 and CAPTURE_SUCCEEDED_DATABASE_FAILED (PAY-003)", async () => {
+      vi.spyOn(paymentOrderRepo, "capturePaymentOrder").mockRejectedValueOnce(
+        new CheckoutError(
+          "CAPTURE_SUCCEEDED_DATABASE_FAILED",
+          "Payment captured successfully by PayPal (Capture ID: CAP-999), but database record update failed. Order held for reconciliation."
+        )
+      );
+
+      const res = await server.inject({
+        method: "POST",
+        url: "/api/payment-orders/capture",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          orderId: randomUUID(),
+          paypalOrderId: "PAYPAL-ORDER-123",
+        },
+      });
+
+      expect(res.statusCode).toBe(409);
+      const json = res.json();
+      expect(json.error.code).toBe("CAPTURE_SUCCEEDED_DATABASE_FAILED");
+      expect(json.error.message).toContain("Capture ID: CAP-999");
     });
   });
 });

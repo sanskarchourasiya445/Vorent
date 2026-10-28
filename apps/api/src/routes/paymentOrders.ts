@@ -12,13 +12,18 @@ import {
   ReconcilePaymentOrderResponseSchema,
   PaymentOrderListResponseSchema,
   ReconciliationAlertsResponseSchema,
+  UserRole,
 } from "@warrant/contracts";
 import { db } from "../db/index.js";
-import * as policyRepo from "../db/repositories/policyRepository.js";
 import * as paymentOrderRepo from "../db/repositories/paymentOrderRepository.js";
 import { CheckoutError } from "../db/repositories/checkoutProposalRepository.js";
 import { PayPalService, defaultPayPalService } from "../services/paypalService.js";
-import { extractRequestId, isDbConnectionError } from "./routeUtils.js";
+import {
+  extractRequestId,
+  isDbConnectionError,
+  resolveAuthorizedUserOrReject,
+} from "./routeUtils.js";
+import { emailService } from "../services/emailService.js";
 
 function handleRouteError(
   err: unknown,
@@ -60,6 +65,7 @@ function handleRouteError(
       "RECONCILIATION_HOLD",
       "CAPTURE_OUTCOME_AMBIGUOUS",
       "ORDER_TERMINAL_STATE",
+      "CAPTURE_SUCCEEDED_DATABASE_FAILED",
     ];
     const unprocessableCodes = [
       "CANNOT_CANCEL_CAPTURED_ORDER",
@@ -113,6 +119,12 @@ export const paymentOrderRoutes: FastifyPluginAsync<PaymentOrderRoutesOptions> =
     const requestId = extractRequestId(request);
     reply.header("x-request-id", requestId);
 
+    const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+      allowDefaultFallbackInDev: true,
+    });
+    if (!authResult) return;
+    const { ownerId } = authResult;
+
     const parseResult = CreatePaymentOrderRequestSchema.safeParse(request.body);
     if (!parseResult.success) {
       return reply.status(400).send({
@@ -126,7 +138,7 @@ export const paymentOrderRoutes: FastifyPluginAsync<PaymentOrderRoutesOptions> =
     }
 
     try {
-      const ownerId = await policyRepo.ensureDefaultUser(db);
+
       const result = await paymentOrderRepo.createPaymentOrder(
         db,
         {
@@ -145,23 +157,28 @@ export const paymentOrderRoutes: FastifyPluginAsync<PaymentOrderRoutesOptions> =
   });
 
   // 1.1 GET / - List all payment orders with optional filters (dashboard support)
-  fastify.get(
+  fastify.get<{
+    Querystring: { status?: string; reservationId?: string; limit?: number };
+  }>(
     "/",
-    async (
-      request: FastifyRequest<{
-        Querystring: { status?: string; reservationId?: string; limit?: number };
-      }>,
-      reply: FastifyReply
-    ) => {
+    async (request, reply) => {
       const requestId = extractRequestId(request);
       reply.header("x-request-id", requestId);
 
       try {
-        const ownerId = await policyRepo.ensureDefaultUser(db);
+        const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+          allowDefaultFallbackInDev: true,
+        });
+        if (!authResult) return;
+        const { user, ownerId } = authResult;
+        const isAdminOrAuditor =
+          user &&
+          (user.role === UserRole.ADMINISTRATOR || user.role === UserRole.FINANCE_AUDITOR);
+        const filterOwnerId = isAdminOrAuditor ? undefined : ownerId;
         const { status, reservationId, limit } = request.query;
 
         const result = await paymentOrderRepo.listPaymentOrders(db, {
-          ownerId,
+          ownerId: filterOwnerId,
           status: status as any,
           reservationId,
           limit: limit ? Number(limit) : undefined,
@@ -176,24 +193,33 @@ export const paymentOrderRoutes: FastifyPluginAsync<PaymentOrderRoutesOptions> =
   );
 
   // 1.2 GET /reconciliation-alerts - Retrieve orders requiring reconciliation and held reservations
-  fastify.get("/reconciliation-alerts", async (request: FastifyRequest, reply: FastifyReply) => {
-    const requestId = extractRequestId(request);
-    reply.header("x-request-id", requestId);
+  fastify.get(
+    "/reconciliation-alerts",
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const requestId = extractRequestId(request);
+      reply.header("x-request-id", requestId);
 
-    try {
-      const ownerId = await policyRepo.ensureDefaultUser(db);
-      const alerts = await paymentOrderRepo.getReconciliationAlerts(db, ownerId);
-      const validated = ReconciliationAlertsResponseSchema.parse(alerts);
-      return reply.status(200).send(validated);
-    } catch (err: unknown) {
-      return handleRouteError(err, request, reply, requestId, "Failed to retrieve reconciliation alerts");
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        requiredRoles: [UserRole.APPROVER, UserRole.FINANCE_AUDITOR, UserRole.ADMINISTRATOR],
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+      const { ownerId } = authResult;
+
+      try {
+        const alerts = await paymentOrderRepo.getReconciliationAlerts(db, ownerId);
+        const validated = ReconciliationAlertsResponseSchema.parse(alerts);
+        return reply.status(200).send(validated);
+      } catch (err: unknown) {
+        return handleRouteError(err, request, reply, requestId, "Failed to retrieve reconciliation alerts");
+      }
     }
-  });
+  );
 
   // 2. GET /:id - Retrieve payment order details
-  fastify.get(
+  fastify.get<{ Params: { id: string } }>(
     "/:id",
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (request, reply) => {
       const requestId = extractRequestId(request);
       reply.header("x-request-id", requestId);
 
@@ -208,9 +234,19 @@ export const paymentOrderRoutes: FastifyPluginAsync<PaymentOrderRoutesOptions> =
         });
       }
 
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+      const { user, ownerId } = authResult;
+
       try {
-        const ownerId = await policyRepo.ensureDefaultUser(db);
-        const order = await paymentOrderRepo.getPaymentOrder(db, id, ownerId);
+        const isAdminOrAuditor =
+          user &&
+          (user.role === UserRole.ADMINISTRATOR ||
+            user.role === UserRole.FINANCE_AUDITOR);
+        const queryOwnerId = isAdminOrAuditor ? undefined : (user?.id ?? ownerId);
+        const order = await paymentOrderRepo.getPaymentOrder(db, id, queryOwnerId);
 
         if (!order) {
           return reply.status(404).send({
@@ -230,57 +266,67 @@ export const paymentOrderRoutes: FastifyPluginAsync<PaymentOrderRoutesOptions> =
   );
 
   // 3. POST /buyer-approval - Confirm buyer approval (idempotent return flow)
-  fastify.post("/buyer-approval", async (request: FastifyRequest, reply: FastifyReply) => {
-    const requestId = extractRequestId(request);
-    reply.header("x-request-id", requestId);
+  fastify.post(
+    "/buyer-approval",
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const requestId = extractRequestId(request);
+      reply.header("x-request-id", requestId);
 
-    const parseResult = ConfirmBuyerApprovalRequestSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: {
-          code: "BAD_REQUEST",
-          message: "Invalid buyer approval request payload.",
-          details: parseResult.error.format(),
-        },
-        requestId,
+      const parseResult = ConfirmBuyerApprovalRequestSchema.safeParse(request.body);
+      if (!parseResult.success) {
+        return reply.status(400).send({
+          error: {
+            code: "BAD_REQUEST",
+            message: "Invalid buyer approval request payload.",
+            details: parseResult.error.format(),
+          },
+          requestId,
+        });
+      }
+
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        allowDefaultFallbackInDev: true,
       });
-    }
+      if (!authResult) return;
+      const { ownerId } = authResult;
 
-    try {
-      const ownerId = await policyRepo.ensureDefaultUser(db);
-      const result = await paymentOrderRepo.confirmBuyerApproval(
-        db,
-        {
-          orderId: parseResult.data.orderId,
-          paypalOrderId: parseResult.data.paypalOrderId,
-          payerId: parseResult.data.payerId,
-          ownerId,
-        },
-        paypalService
-      );
+      try {
+        const result = await paymentOrderRepo.confirmBuyerApproval(
+          db,
+          {
+            orderId: parseResult.data.orderId,
+            paypalOrderId: parseResult.data.paypalOrderId,
+            payerId: parseResult.data.payerId,
+            ownerId,
+          },
+          paypalService
+        );
 
-      const validated = ConfirmBuyerApprovalResponseSchema.parse(result);
-      return reply.status(200).send(validated);
-    } catch (err: unknown) {
-      return handleRouteError(err, request, reply, requestId, "Failed to confirm buyer approval");
+        const validated = ConfirmBuyerApprovalResponseSchema.parse(result);
+        return reply.status(200).send(validated);
+      } catch (err: unknown) {
+        return handleRouteError(err, request, reply, requestId, "Failed to confirm buyer approval");
+      }
     }
-  });
+  );
 
   // 4. POST /:id/buyer-approval - Confirm buyer approval with ID in URL path
-  fastify.post(
+  fastify.post<{ Params: { id: string }; Body: Record<string, any> }>(
     "/:id/buyer-approval",
-    async (
-      request: FastifyRequest<{ Params: { id: string }; Body: Record<string, any> }>,
-      reply: FastifyReply
-    ) => {
+    async (request, reply) => {
       const requestId = extractRequestId(request);
       reply.header("x-request-id", requestId);
 
       const { id } = request.params;
       const body = request.body || {};
 
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+      const { ownerId } = authResult;
+
       try {
-        const ownerId = await policyRepo.ensureDefaultUser(db);
         const result = await paymentOrderRepo.confirmBuyerApproval(
           db,
           {
@@ -301,57 +347,67 @@ export const paymentOrderRoutes: FastifyPluginAsync<PaymentOrderRoutesOptions> =
   );
 
   // 5. POST /cancel - Cancel payment order and safely release spend reservation
-  fastify.post("/cancel", async (request: FastifyRequest, reply: FastifyReply) => {
-    const requestId = extractRequestId(request);
-    reply.header("x-request-id", requestId);
+  fastify.post(
+    "/cancel",
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const requestId = extractRequestId(request);
+      reply.header("x-request-id", requestId);
 
-    const parseResult = CancelPaymentOrderRequestSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: {
-          code: "BAD_REQUEST",
-          message: "Invalid cancel order request payload.",
-          details: parseResult.error.format(),
-        },
-        requestId,
+      const parseResult = CancelPaymentOrderRequestSchema.safeParse(request.body);
+      if (!parseResult.success) {
+        return reply.status(400).send({
+          error: {
+            code: "BAD_REQUEST",
+            message: "Invalid cancel order request payload.",
+            details: parseResult.error.format(),
+          },
+          requestId,
+        });
+      }
+
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        allowDefaultFallbackInDev: true,
       });
-    }
+      if (!authResult) return;
+      const { ownerId } = authResult;
 
-    try {
-      const ownerId = await policyRepo.ensureDefaultUser(db);
-      const result = await paymentOrderRepo.cancelPaymentOrder(
-        db,
-        {
-          orderId: parseResult.data.orderId,
-          paypalOrderId: parseResult.data.paypalOrderId,
-          reason: parseResult.data.reason,
-          ownerId,
-        },
-        paypalService
-      );
+      try {
+        const result = await paymentOrderRepo.cancelPaymentOrder(
+          db,
+          {
+            orderId: parseResult.data.orderId,
+            paypalOrderId: parseResult.data.paypalOrderId,
+            reason: parseResult.data.reason,
+            ownerId,
+          },
+          paypalService
+        );
 
-      const validated = CancelPaymentOrderResponseSchema.parse(result);
-      return reply.status(200).send(validated);
-    } catch (err: unknown) {
-      return handleRouteError(err, request, reply, requestId, "Failed to cancel payment order");
+        const validated = CancelPaymentOrderResponseSchema.parse(result);
+        return reply.status(200).send(validated);
+      } catch (err: unknown) {
+        return handleRouteError(err, request, reply, requestId, "Failed to cancel payment order");
+      }
     }
-  });
+  );
 
   // 6. POST /:id/cancel - Cancel payment order with ID in path
-  fastify.post(
+  fastify.post<{ Params: { id: string }; Body?: Record<string, any> }>(
     "/:id/cancel",
-    async (
-      request: FastifyRequest<{ Params: { id: string }; Body?: Record<string, any> }>,
-      reply: FastifyReply
-    ) => {
+    async (request, reply) => {
       const requestId = extractRequestId(request);
       reply.header("x-request-id", requestId);
 
       const { id } = request.params;
       const body = request.body || {};
 
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+      const { ownerId } = authResult;
+
       try {
-        const ownerId = await policyRepo.ensureDefaultUser(db);
         const result = await paymentOrderRepo.cancelPaymentOrder(
           db,
           {
@@ -372,67 +428,121 @@ export const paymentOrderRoutes: FastifyPluginAsync<PaymentOrderRoutesOptions> =
   );
 
   // 7. POST /capture - Server-side capture
-  fastify.post("/capture", async (request: FastifyRequest, reply: FastifyReply) => {
-    const requestId = extractRequestId(request);
-    reply.header("x-request-id", requestId);
+  fastify.post(
+    "/capture",
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const requestId = extractRequestId(request);
+      reply.header("x-request-id", requestId);
 
-    const parseResult = CapturePaymentOrderRequestSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: {
-          code: "BAD_REQUEST",
-          message: "Invalid capture order request payload.",
-          details: parseResult.error.format(),
-        },
-        requestId,
+      const parseResult = CapturePaymentOrderRequestSchema.safeParse(request.body);
+      if (!parseResult.success) {
+        return reply.status(400).send({
+          error: {
+            code: "BAD_REQUEST",
+            message: "Invalid capture order request payload.",
+            details: parseResult.error.format(),
+          },
+          requestId,
+        });
+      }
+
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        requiredRoles: [UserRole.APPROVER, UserRole.ADMINISTRATOR],
+        allowDefaultFallbackInDev: true,
       });
-    }
+      if (!authResult) return;
+      const { user, ownerId } = authResult;
+      const targetOwnerId = (user?.role === UserRole.ADMINISTRATOR || user?.role === UserRole.APPROVER)
+        ? undefined
+        : ownerId;
 
-    try {
-      const ownerId = await policyRepo.ensureDefaultUser(db);
-      const result = await paymentOrderRepo.capturePaymentOrder(
-        db,
-        {
-          orderId: parseResult.data.orderId,
-          paypalOrderId: parseResult.data.paypalOrderId,
-          ownerId,
-        },
-        paypalService
-      );
+      try {
+        const result = await paymentOrderRepo.capturePaymentOrder(
+          db,
+          {
+            orderId: parseResult.data.orderId,
+            paypalOrderId: parseResult.data.paypalOrderId,
+            ownerId: targetOwnerId,
+          },
+          paypalService
+        );
 
-      const validated = CapturePaymentOrderResponseSchema.parse(result);
-      return reply.status(200).send(validated);
-    } catch (err: unknown) {
-      return handleRouteError(err, request, reply, requestId, "Failed to capture payment order");
+        const validated = CapturePaymentOrderResponseSchema.parse(result);
+
+        // Asynchronous, non-blocking email confirmation
+        if (result.status === "CAPTURED" || result.order.status === "CAPTURED") {
+          emailService.dispatchOrderCapturedAsync(
+            {
+              recipientEmail: user?.email || "buyer@warrant.studio",
+              orderId: result.order.id,
+              paypalOrderId: result.paypalOrderId,
+              captureId: result.captureId,
+              amount: result.capturedAmountMinor / 100,
+              currency: result.currency,
+              items: [],
+              capturedAt: new Date().toISOString(),
+            },
+            ownerId,
+          );
+        }
+
+        return reply.status(200).send(validated);
+      } catch (err: unknown) {
+        return handleRouteError(err, request, reply, requestId, "Failed to capture payment order");
+      }
     }
-  });
+  );
 
   // 8. POST /:id/capture - Server-side capture with ID in path
-  fastify.post(
+  fastify.post<{ Params: { id: string }; Body?: Record<string, any> }>(
     "/:id/capture",
-    async (
-      request: FastifyRequest<{ Params: { id: string }; Body?: Record<string, any> }>,
-      reply: FastifyReply
-    ) => {
+    async (request, reply) => {
       const requestId = extractRequestId(request);
       reply.header("x-request-id", requestId);
 
       const { id } = request.params;
       const body = request.body || {};
 
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        requiredRoles: [UserRole.APPROVER, UserRole.ADMINISTRATOR],
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+      const { user, ownerId } = authResult;
+      const targetOwnerId = (user?.role === UserRole.ADMINISTRATOR || user?.role === UserRole.APPROVER)
+        ? undefined
+        : ownerId;
+
       try {
-        const ownerId = await policyRepo.ensureDefaultUser(db);
         const result = await paymentOrderRepo.capturePaymentOrder(
           db,
           {
             orderId: id,
             paypalOrderId: body.paypalOrderId,
-            ownerId,
+            ownerId: targetOwnerId,
           },
           paypalService
         );
 
         const validated = CapturePaymentOrderResponseSchema.parse(result);
+
+        // Asynchronous, non-blocking email confirmation
+        if (result.status === "CAPTURED" || result.order.status === "CAPTURED") {
+          emailService.dispatchOrderCapturedAsync(
+            {
+              recipientEmail: user?.email || "buyer@warrant.studio",
+              orderId: result.order.id,
+              paypalOrderId: result.paypalOrderId,
+              captureId: result.captureId,
+              amount: result.capturedAmountMinor / 100,
+              currency: result.currency,
+              items: [],
+              capturedAt: new Date().toISOString(),
+            },
+            ownerId,
+          );
+        }
+
         return reply.status(200).send(validated);
       } catch (err: unknown) {
         return handleRouteError(err, request, reply, requestId, "Failed to capture payment order");
@@ -441,67 +551,121 @@ export const paymentOrderRoutes: FastifyPluginAsync<PaymentOrderRoutesOptions> =
   );
 
   // 9. POST /reconcile - Reconcile order against PayPal APIs
-  fastify.post("/reconcile", async (request: FastifyRequest, reply: FastifyReply) => {
-    const requestId = extractRequestId(request);
-    reply.header("x-request-id", requestId);
+  fastify.post(
+    "/reconcile",
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const requestId = extractRequestId(request);
+      reply.header("x-request-id", requestId);
 
-    const parseResult = ReconcilePaymentOrderRequestSchema.safeParse(request.body);
-    if (!parseResult.success) {
-      return reply.status(400).send({
-        error: {
-          code: "BAD_REQUEST",
-          message: "Invalid reconcile order request payload.",
-          details: parseResult.error.format(),
-        },
-        requestId,
+      const parseResult = ReconcilePaymentOrderRequestSchema.safeParse(request.body);
+      if (!parseResult.success) {
+        return reply.status(400).send({
+          error: {
+            code: "BAD_REQUEST",
+            message: "Invalid reconcile order request payload.",
+            details: parseResult.error.format(),
+          },
+          requestId,
+        });
+      }
+
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        requiredRoles: [UserRole.FINANCE_AUDITOR, UserRole.ADMINISTRATOR],
+        allowDefaultFallbackInDev: true,
       });
-    }
+      if (!authResult) return;
+      const { user, ownerId } = authResult;
+      const targetOwnerId = (user?.role === UserRole.ADMINISTRATOR || user?.role === UserRole.FINANCE_AUDITOR)
+        ? undefined
+        : ownerId;
 
-    try {
-      const ownerId = await policyRepo.ensureDefaultUser(db);
-      const result = await paymentOrderRepo.reconcilePaymentOrder(
-        db,
-        {
-          orderId: parseResult.data.orderId,
-          paypalOrderId: parseResult.data.paypalOrderId,
-          ownerId,
-        },
-        paypalService
-      );
+      try {
+        const result = await paymentOrderRepo.reconcilePaymentOrder(
+          db,
+          {
+            orderId: parseResult.data.orderId,
+            paypalOrderId: parseResult.data.paypalOrderId,
+            ownerId: targetOwnerId,
+          },
+          paypalService
+        );
 
-      const validated = ReconcilePaymentOrderResponseSchema.parse(result);
-      return reply.status(200).send(validated);
-    } catch (err: unknown) {
-      return handleRouteError(err, request, reply, requestId, "Failed to reconcile payment order");
+        const validated = ReconcilePaymentOrderResponseSchema.parse(result);
+
+        // Asynchronous, non-blocking alert if reconciliation detected an issue or placed hold
+        if (!result.reconciled || result.reservationState === "RECONCILIATION_HOLD") {
+          emailService.dispatchReconciliationAlertAsync(
+            {
+              recipientEmail: "compliance@warrant.studio",
+              orderId: result.order.id,
+              discrepancyType: result.externalStatus || "UNRECONCILED_LEDGER_STATE",
+              expectedAmount: result.order.amountMinor / 100,
+              actualAmount: result.order.amountMinor / 100,
+              currency: result.order.currency,
+              detectedAt: new Date().toISOString(),
+              reason: result.notes || "Discrepancy detected during PayPal API reconciliation.",
+            },
+            ownerId,
+          );
+        }
+
+        return reply.status(200).send(validated);
+      } catch (err: unknown) {
+        return handleRouteError(err, request, reply, requestId, "Failed to reconcile payment order");
+      }
     }
-  });
+  );
 
   // 10. POST /:id/reconcile - Reconcile order with ID in path
-  fastify.post(
+  fastify.post<{ Params: { id: string }; Body?: Record<string, any> }>(
     "/:id/reconcile",
-    async (
-      request: FastifyRequest<{ Params: { id: string }; Body?: Record<string, any> }>,
-      reply: FastifyReply
-    ) => {
+    async (request, reply) => {
       const requestId = extractRequestId(request);
       reply.header("x-request-id", requestId);
 
       const { id } = request.params;
       const body = request.body || {};
 
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        requiredRoles: [UserRole.FINANCE_AUDITOR, UserRole.ADMINISTRATOR],
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+      const { user, ownerId } = authResult;
+      const targetOwnerId = (user?.role === UserRole.ADMINISTRATOR || user?.role === UserRole.FINANCE_AUDITOR)
+        ? undefined
+        : ownerId;
+
       try {
-        const ownerId = await policyRepo.ensureDefaultUser(db);
         const result = await paymentOrderRepo.reconcilePaymentOrder(
           db,
           {
             orderId: id,
             paypalOrderId: body.paypalOrderId,
-            ownerId,
+            ownerId: targetOwnerId,
           },
           paypalService
         );
 
         const validated = ReconcilePaymentOrderResponseSchema.parse(result);
+
+        // Asynchronous, non-blocking alert if reconciliation detected an issue or placed hold
+        if (!result.reconciled || result.reservationState === "RECONCILIATION_HOLD") {
+          emailService.dispatchReconciliationAlertAsync(
+            {
+              recipientEmail: "compliance@warrant.studio",
+              orderId: result.order.id,
+              discrepancyType: result.externalStatus || "UNRECONCILED_LEDGER_STATE",
+              expectedAmount: result.order.amountMinor / 100,
+              actualAmount: result.order.amountMinor / 100,
+              currency: result.order.currency,
+              detectedAt: new Date().toISOString(),
+              reason: result.notes || "Discrepancy detected during PayPal API reconciliation.",
+            },
+            ownerId,
+          );
+        }
+
         return reply.status(200).send(validated);
       } catch (err: unknown) {
         return handleRouteError(err, request, reply, requestId, "Failed to reconcile payment order");

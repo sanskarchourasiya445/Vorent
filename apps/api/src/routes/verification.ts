@@ -1,11 +1,23 @@
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from "fastify";
-import { extractRequestId, isDbConnectionError } from "./routeUtils.js";
+import {
+  extractRequestId,
+  isDbConnectionError,
+  createRateLimiter,
+  authenticateRequest,
+  resolveAuthorizedUserOrReject,
+} from "./routeUtils.js";
+
+export const verificationRateLimiter = createRateLimiter({
+  max: 30,
+  windowMs: 60 * 1000,
+});
 import {
   type VerificationReport,
   type VerificationRequest,
   PresetVerificationRequestSchema,
   VerificationReportSchema,
   VerificationRequestSchema,
+  UserRole,
 } from "@warrant/contracts";
 import { verifyPolicy } from "@warrant/domain";
 import {
@@ -16,7 +28,6 @@ import {
 import { db } from "../db/index.js";
 import {
   getPolicyVersion,
-  ensureDefaultUser,
   resolveOrCreatePresetVersion,
 } from "../db/repositories/policyRepository.js";
 import {
@@ -44,6 +55,15 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
   const handleVerificationRun = async (request: FastifyRequest, reply: FastifyReply, persistRun: boolean = false) => {
     const requestId = extractRequestId(request);
     reply.header("x-request-id", requestId);
+
+    const shouldPersist = persistRun || (request.query as any)?.persist === "true";
+    let authUser: { user: any; ownerId: string } | null = null;
+    if (shouldPersist) {
+      authUser = await resolveAuthorizedUserOrReject(request, reply, {
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authUser) return;
+    }
 
     const body = request.body;
     if (!body || typeof body !== "object") {
@@ -211,9 +231,9 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
     const validated = VerificationReportSchema.parse(report);
 
     // Save to database if persistence is requested
-    if (persistRun || (request.query as any)?.persist === "true") {
+    if (shouldPersist && authUser) {
       try {
-        const ownerId = await ensureDefaultUser(db);
+        const ownerId = authUser.ownerId;
         let targetPolicyVersionId = verificationRequest.config?.policyVersionId || "unknown";
         let targetPolicyHash = verificationRequest.config?.policyHash || validated.policyHash;
 
@@ -275,9 +295,16 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
     reply.header("x-request-id", requestId);
 
     try {
+      const user = await authenticateRequest(request);
       const limit = request.query?.limit ? parseInt(request.query.limit, 10) : 50;
+      const ownerId =
+        user && (user.role === UserRole.ADMINISTRATOR || user.role === UserRole.FINANCE_AUDITOR)
+          ? undefined
+          : user?.id;
+
       const runs = await listVerificationRuns(db, {
         policyVersionId: request.query?.policyVersionId,
+        ownerId,
         limit: Number.isNaN(limit) ? 50 : limit,
       });
 
@@ -383,11 +410,11 @@ export const verificationRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // POST /runs - Execute and persist verification run
-  fastify.post("/runs", (request, reply) => handleVerificationRun(request, reply, true));
+  fastify.post("/runs", { preHandler: [verificationRateLimiter] }, (request, reply) => handleVerificationRun(request, reply, true));
 
-  // POST /run - Pure execution (Phase 3 contract)
-  fastify.post("/run", (request, reply) => handleVerificationRun(request, reply, false));
+  // POST /run - Pure execution
+  fastify.post("/run", { preHandler: [verificationRateLimiter] }, (request, reply) => handleVerificationRun(request, reply, false));
 
   // POST / (convenience alias)
-  fastify.post("/", (request, reply) => handleVerificationRun(request, reply, false));
+  fastify.post("/", { preHandler: [verificationRateLimiter] }, (request, reply) => handleVerificationRun(request, reply, false));
 };

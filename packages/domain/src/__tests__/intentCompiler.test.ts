@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { compileIntent } from "../compiler/intentCompiler.js";
 import { MANDATE_FIXTURES } from "@warrant/test-fixtures";
 
-describe("Phase 2 Intent Compiler (Deterministic)", () => {
+describe("Intent Compiler (Deterministic)", () => {
   it("compiles a clear, unambiguous mandate into valid PolicyDocument and ConfirmedIntent", () => {
     const mandate = MANDATE_FIXTURES.engineeringClear.text;
     const response = compileIntent({ mandateText: mandate });

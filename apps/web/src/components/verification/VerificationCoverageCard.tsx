@@ -23,6 +23,7 @@ interface VerificationCoverageCardProps {
   summary?: string;
   runId?: string;
   errorMessage?: string;
+  mode?: "all" | "status" | "metrics";
 }
 
 export function VerificationCoverageCard({
@@ -37,6 +38,7 @@ export function VerificationCoverageCard({
   summary,
   runId,
   errorMessage,
+  mode = "all",
 }: VerificationCoverageCardProps) {
   const getStatusBadge = () => {
     switch (status) {
@@ -93,6 +95,117 @@ export function VerificationCoverageCard({
   };
 
   const badge = getStatusBadge();
+
+  if (mode === "metrics") {
+    if (!coverage || status === "IDLE") return null;
+
+    const percent = Math.min(
+      100,
+      Math.round((coverage.totalCandidatesEvaluated / coverage.candidateBudget) * 100),
+    );
+
+    return (
+      <div className="w-full space-y-4" role="region" aria-label="Candidate Results and Verification Metrics">
+        {/* Coverage & Candidate Metrics Grid - 4 Evenly Sized Metric Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-4 rounded-lg border border-border bg-surface shadow-2xs space-y-1">
+            <div className="text-muted text-[11px] font-medium font-sans">Candidates Evaluated</div>
+            <div className="text-xl font-bold font-mono text-ink tabular-nums">
+              {coverage.totalCandidatesEvaluated} / {coverage.candidateBudget}
+            </div>
+            <div className="text-[10px] text-muted font-sans">
+              {coverage.isExhaustive ? "100% of candidate space" : `${percent}% budget consumed`}
+            </div>
+          </div>
+
+          <div className="p-4 rounded-lg border border-border bg-surface shadow-2xs space-y-1">
+            <div className="text-muted text-[11px] font-medium font-sans">Search Completeness</div>
+            <div className="text-sm font-semibold font-sans mt-0.5">
+              {coverage.isExhaustive ? (
+                <span className="text-allow font-semibold">Exhaustive</span>
+              ) : (
+                <span className="text-amber-700 dark:text-amber-400 font-semibold">Budget Bound</span>
+              )}
+            </div>
+            <div className="text-[10px] text-muted font-sans">
+              {coverage.isExhaustive
+                ? "Space fully explored"
+                : "Unsearched space remains"}
+            </div>
+          </div>
+
+          <div className="p-4 rounded-lg border border-border bg-surface shadow-2xs space-y-1">
+            <div className="text-muted text-[11px] font-medium font-sans">Counterexamples Found</div>
+            <div className={`text-xl font-bold font-mono tabular-nums ${counterexampleCount > 0 ? "text-deny" : "text-allow"}`}>
+              {counterexampleCount}
+            </div>
+            <div className="text-[10px] text-muted font-sans">
+              {counterexampleCount === 0 ? "Zero violations detected" : "Reproducible loopholes"}
+            </div>
+          </div>
+
+          <div className="p-4 rounded-lg border border-border bg-surface shadow-2xs space-y-1">
+            <div className="text-muted text-[11px] font-medium font-sans">Unresolved Cases</div>
+            <div className={`text-xl font-bold font-mono tabular-nums ${unresolvedCount > 0 ? "text-amber-700 dark:text-amber-400" : "text-muted"}`}>
+              {unresolvedCount}
+            </div>
+            <div className="text-[10px] text-muted font-sans">
+              {unresolvedCount > 0 ? "Ambiguous evidence (held)" : "No ambiguities"}
+            </div>
+          </div>
+        </div>
+
+        {/* Exhaustive vs Budget Bound vs Timed Out vs Empty Space Callouts */}
+        {status === "TIMED_OUT" && (
+          <div
+            role="note"
+            className="p-4 rounded-lg bg-review/10 border border-review/40 text-xs text-ink space-y-1 shadow-2xs"
+          >
+            <div className="font-semibold flex items-center space-x-1.5 text-review">
+              <Clock className="w-3.5 h-3.5 text-review shrink-0" aria-hidden="true" />
+              <span>Search Duration Limit Reached: Partial Exploration Disclaimer</span>
+            </div>
+            <p className="text-muted text-[11px] leading-relaxed">
+              Exploration halted because the allocated timeout ({coverage.durationMs}ms) was reached before the declared search domain could be exhausted.
+              Findings discovered before the timeout are valid counterexamples, but <strong>this run does not prove universal safety</strong>.
+            </p>
+          </div>
+        )}
+
+        {status === "EMPTY_SEARCH_SPACE" && (
+          <div
+            role="note"
+            className="p-4 rounded-lg bg-surface border border-border text-xs text-ink space-y-1 shadow-2xs"
+          >
+            <div className="font-semibold flex items-center space-x-1.5 text-muted">
+              <Info className="w-3.5 h-3.5 text-accent shrink-0" aria-hidden="true" />
+              <span>Empty Search Domain</span>
+            </div>
+            <p className="text-muted text-[11px] leading-relaxed">
+              Zero candidate permutations were generated. The declared search space definition contains no reachable cart combinations.
+            </p>
+          </div>
+        )}
+
+        {status === "BUDGET_EXHAUSTED" && (
+          <div
+            role="note"
+            className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-ink space-y-1.5 shadow-2xs"
+          >
+            <div className="font-semibold flex items-center space-x-1.5 text-review">
+              <AlertTriangle className="w-4 h-4 text-review shrink-0" aria-hidden="true" />
+              <span>Search Budget Exhausted: Partial Exploration Disclaimer</span>
+            </div>
+            <p className="text-ink-muted text-xs leading-relaxed">
+              Exploration ceased when candidate budget limit ({coverage.candidateBudget} candidates) was reached.
+              This result confirms findings discovered within this budget bound, but <strong className="text-ink">does not prove universal safety</strong>.
+              Additional unexplored permutations remain in the input space.
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (status === "IDLE") {
     return (
@@ -209,8 +322,8 @@ export function VerificationCoverageCard({
         </div>
       )}
 
-      {/* Coverage & Candidate Metrics Grid - Engineered Precision Bar */}
-      {coverage && (
+      {/* Coverage & Candidate Metrics Grid - Included when mode is "all" */}
+      {mode === "all" && coverage && (
         <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border bg-surface text-xs">
           <div className="p-3.5 space-y-1">
             <div className="text-muted text-[11px] font-medium font-sans">Candidates Evaluated</div>
@@ -260,8 +373,8 @@ export function VerificationCoverageCard({
         </div>
       )}
 
-      {/* Exhaustive vs Budget Bound vs Timed Out vs Empty Space Callouts */}
-      {coverage && status === "TIMED_OUT" && (
+      {/* Exhaustive vs Budget Bound vs Timed Out vs Empty Space Callouts - Included when mode is "all" */}
+      {mode === "all" && coverage && status === "TIMED_OUT" && (
         <div
           role="note"
           className="p-3 rounded-lg bg-review/10 border border-review/40 text-xs text-ink space-y-1"
@@ -277,7 +390,7 @@ export function VerificationCoverageCard({
         </div>
       )}
 
-      {coverage && status === "EMPTY_SEARCH_SPACE" && (
+      {mode === "all" && coverage && status === "EMPTY_SEARCH_SPACE" && (
         <div
           role="note"
           className="p-3 rounded-lg bg-surface border border-border text-xs text-ink space-y-1"
@@ -292,7 +405,7 @@ export function VerificationCoverageCard({
         </div>
       )}
 
-      {coverage && status === "BUDGET_EXHAUSTED" && (
+      {mode === "all" && coverage && status === "BUDGET_EXHAUSTED" && (
         <div
           role="note"
           className="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-ink space-y-1.5"

@@ -5,7 +5,7 @@ import { PolicyDocumentSchema } from "./policy.js";
 import { ConfirmedIntentSchema, VerificationFindingSchema } from "./verification.js";
 
 /**
- * Warrant Phase 2 — Policy Compilation & Repair Contracts
+ * Warrant — Policy Compilation & Repair Contracts
  * Defines schemas for natural-language intent compilation, semantic policy diffing,
  * and automated policy repair proposals.
  */

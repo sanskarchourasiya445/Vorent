@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { App, WORKSTATION_GROUPS, ALL_WORKSTATIONS } from "../App";
 import { AVAILABLE_POLICIES } from "../api/verificationService";
 
-describe("Global App Shell, Navigation & 9-Route Sanity Check (Phase 2)", () => {
+describe("Global App Shell, Navigation & 9-Route Sanity Check", () => {
   beforeEach(() => {
     // Stub window in Node environment
     vi.stubGlobal("window", {
@@ -30,8 +30,7 @@ describe("Global App Shell, Navigation & 9-Route Sanity Check (Phase 2)", () => 
       expect(html).toContain("text-ink");
 
       // Header branding
-      expect(html).toContain("WARRANT");
-      expect(html).toContain("STUDIO");
+      expect(html).toContain("VORENT");
       expect(html).toContain("Purchase Authorization &amp; Cryptographic Policy Engine");
 
       // Sandbox indicator
@@ -77,7 +76,7 @@ describe("Global App Shell, Navigation & 9-Route Sanity Check (Phase 2)", () => 
       expect(html).toContain("border-transparent");
 
       // Engine status footer
-      expect(html).toContain("Warrant Engine");
+      expect(html).toContain("VORENT Engine");
       expect(html).toContain("v0.1.0-sandbox");
     });
 
@@ -217,6 +216,12 @@ describe("Global App Shell, Navigation & 9-Route Sanity Check (Phase 2)", () => 
       const html = renderToStaticMarkup(React.createElement(App, { initialWorkstation: "unknown-route-xyz" }));
       expect(html).toContain("Workstation in Development");
       expect(html).toContain("Open Verification Studio");
+    });
+
+    it("Workstation header navbar: omits Return to Landing Page button", () => {
+      const html = renderToStaticMarkup(React.createElement(App, { initialWorkstation: "overview" }));
+      expect(html).not.toContain('data-testid="return-to-landing-btn"');
+      expect(html).not.toContain("View Product Landing Page");
     });
   });
 });

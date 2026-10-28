@@ -265,27 +265,23 @@ export async function submitCheckoutProposal(
     });
 
     // 3. Authoritative Cart Normalization (Price & Category Trust Boundary)
-    // Client cannot forge price or category. We resolve each SKU from the authoritative catalog.
+    // Client cannot forge price or category. We resolve each SKU strictly from the authoritative catalog.
+    // If any SKU is not present in the authoritative catalog, fail-closed immediately.
     const normalizedItems = input.cart.items.map((it: any) => {
       const catalogItem = resolveCatalogItem(it.sku);
-      if (catalogItem) {
-        return {
-          ...it,
-          sku: catalogItem.sku,
-          title: catalogItem.title,
-          category: catalogItem.category,
-          unitPriceMinor: catalogItem.unitPriceMinor,
-          currency: catalogItem.currency || input.cart.currency,
-          quantity: it.quantity,
-        };
+      if (!catalogItem) {
+        throw new CheckoutError(
+          "UNKNOWN_CATALOG_SKU",
+          `Item with SKU '${it.sku}' is not present in the authoritative product catalog.`
+        );
       }
       return {
         ...it,
-        sku: it.sku,
-        title: it.title || it.name || it.sku,
-        category: it.category || "Uncategorized",
-        unitPriceMinor: typeof it.unitPriceMinor === "number" ? it.unitPriceMinor : 0,
-        currency: it.currency || input.cart.currency,
+        sku: catalogItem.sku,
+        title: catalogItem.title,
+        category: catalogItem.category,
+        unitPriceMinor: catalogItem.unitPriceMinor,
+        currency: catalogItem.currency || input.cart.currency,
         quantity: it.quantity,
       };
     });

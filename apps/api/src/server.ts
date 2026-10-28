@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance, type FastifyError } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyError, type FastifyServerOptions } from "fastify";
 import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
 import { randomUUID } from "node:crypto";
@@ -16,11 +16,13 @@ import { evaluationRoutes } from "./routes/evaluation.js";
 import { auditEventRoutes } from "./routes/auditEvents.js";
 import { evidencePacketRoutes } from "./routes/evidencePackets.js";
 import { authRoutes } from "./routes/auth.js";
+import { accountRoutes } from "./routes/account.js";
 import { env } from "./config/env.js";
 import { pool } from "./db/index.js";
 
 export interface ServerOptions extends HealthRoutesOptions, PaymentOrderRoutesOptions, PayPalRoutesOptions, WebhookRoutesOptions {
   logStream?: NodeJS.WritableStream;
+  trustProxy?: boolean | string | string[] | ((address: string, hop: number) => boolean);
 }
 
 export async function buildServer(options: ServerOptions = {}): Promise<FastifyInstance> {
@@ -40,9 +42,19 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
         },
       };
 
-  const app = Fastify({
+  // Narrowly scoped trustProxy topology:
+  // Trusts reverse proxies on loopback (127.0.0.1/::1) and private subnets (Render, ALB, Docker).
+  // Untrusted public clients attempting direct connections cannot spoof X-Forwarded-For.
+  const trustProxyConfig = options.trustProxy !== undefined
+    ? options.trustProxy
+    : ["loopback", "linklocal", "uniquelocal"];
+
+  const fastifyOptions: FastifyServerOptions = {
     logger: loggerConfig,
-  });
+    trustProxy: trustProxyConfig,
+  };
+
+  const app = Fastify(fastifyOptions);
 
   // Standardized error handler: Sanitizes all unhandled framework & runtime errors into contract envelope
   app.setErrorHandler((error: FastifyError, request, reply) => {
@@ -93,9 +105,10 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
   await app.register(healthRoutes, { checkDb: options.checkDb });
 
   // Standard route definitions: canonical prefix and backward-compatibility aliases
-  // Note: /api/v1/* and /api/audit-packets are preserved for client and test compatibility (LEAN-005)
+  // Note: /api/v1/* and /api/audit-packets are preserved for client and test compatibility
   const apiRouteDefinitions = [
     { plugin: authRoutes, prefixes: ["/api/auth", "/api/v1/auth"] },
+    { plugin: accountRoutes, prefixes: ["/api/account", "/api/v1/account"] },
     { plugin: verificationRoutes, prefixes: ["/api/verification", "/api/v1/verification"] },
     { plugin: policyRoutes, prefixes: ["/api/policies", "/api/v1/policies"] },
     { plugin: policyWorkflowRoutes, prefixes: ["/api/policies", "/api/v1/policies", "/api/mandates", "/api/v1/mandates"] },

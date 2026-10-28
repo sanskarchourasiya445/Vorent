@@ -11,7 +11,7 @@ import { computePolicyDiff } from "./policyDiff.js";
 import { computePolicyHash } from "../verification/policyHash.js";
 
 /**
- * Warrant Phase 2 Policy Repair Engine
+ * Warrant Policy Repair Engine
  *
  * Deterministically analyzes verification findings (reproducible counterexamples)
  * and generates a targeted, minimal repair to the PolicyDocument that closes discovered gaps.

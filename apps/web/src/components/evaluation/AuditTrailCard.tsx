@@ -17,6 +17,7 @@ import {
   FileText,
 } from "lucide-react";
 import type { AuditTrailLoadResult, AuditEventRecord } from "../../types/evaluation";
+import { SkeletonTable } from "../ui/Skeleton";
 
 interface AuditTrailCardProps {
   auditResult: AuditTrailLoadResult;
@@ -248,9 +249,15 @@ export function AuditTrailCard({ auditResult, isLoading, onRefresh }: AuditTrail
       {/* Content Area */}
       <div className="p-4 sm:p-5">
         {isLoading ? (
-          <div className="p-8 text-center text-muted space-y-2" data-testid="audit-loading">
-            <RefreshCw className="w-6 h-6 animate-spin mx-auto text-accent" aria-hidden="true" />
-            <p className="text-xs font-medium font-mono">Querying authoritative audit trail...</p>
+          <div className="space-y-4" data-testid="audit-loading">
+            <div className="p-3 rounded-lg border border-border bg-surface-inset text-center text-muted flex items-center justify-center space-x-2.5">
+              <RefreshCw className="w-4 h-4 animate-spin text-accent" aria-hidden="true" />
+              <p className="text-xs font-medium font-mono">Querying authoritative audit trail...</p>
+            </div>
+            <SkeletonTable
+              columns={["Timestamp", "Event Type", "Target Entity", "Actor", "Action"]}
+              rows={4}
+            />
           </div>
         ) : filteredEvents.length === 0 ? (
           <div className="p-8 text-center border border-dashed border-border rounded bg-surface-inset" data-testid="audit-empty-state">

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { UserRole } from "@warrant/contracts";
 import { authService } from "../api/authService";
 
-describe("Frontend Auth Service (Master Brief Section 7)", () => {
+describe("Frontend Auth Service", () => {
   it("provides role enum constants", () => {
     expect(UserRole.ADMINISTRATOR).toBe("ADMINISTRATOR");
     expect(UserRole.APPROVER).toBe("APPROVER");

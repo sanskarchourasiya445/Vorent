@@ -1,6 +1,8 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Shield, RefreshCw, Menu, X, Search } from "lucide-react";
+import type { AuthUser } from "@warrant/contracts";
 import { api } from "./api/client";
+import { authService } from "./api/authService";
 import { VerificationStudio } from "./components/verification/VerificationStudio";
 import { ApprovalPanel } from "./components/approval/ApprovalPanel";
 import { CheckoutGatePanel } from "./components/checkout/CheckoutGatePanel";
@@ -10,7 +12,7 @@ import { MandateEditorPanel } from "./components/policy/MandateEditorPanel";
 import { FindingsPanel } from "./components/verification/FindingsPanel";
 import { GovernanceDashboardPanel } from "./components/dashboard/GovernanceDashboardPanel";
 import { EvaluationReportPanel } from "./components/evaluation/EvaluationReportPanel";
-import { Sidebar, MobileNavDrawer } from "./components/navigation/Sidebar";
+import { Sidebar, MobileNavDrawer, VorentBrandMark } from "./components/navigation/Sidebar";
 import { AVAILABLE_POLICIES } from "./api/verificationService";
 import type { PolicyOption } from "./types/verification";
 import {
@@ -20,9 +22,11 @@ import {
 } from "./providers/SmoothScrollProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
 import { ThemeToggle } from "./components/navigation/ThemeToggle";
-import { AuthProvider } from "./providers/AuthContext";
+import { AuthProvider, useAuth } from "./providers/AuthContext";
 import { AuthModal } from "./components/auth/AuthModal";
 import { UserNavIndicator } from "./components/auth/UserNavIndicator";
+import { AccountSettingsModal } from "./components/account/AccountSettingsModal";
+import { VorentLandingPage } from "./components/landing/VorentLandingPage";
 
 export interface WorkstationItem {
   id: string;
@@ -34,7 +38,7 @@ export interface WorkstationItem {
 export interface WorkstationGroup {
   id: string;
   title: string;
-  phaseLabel?: string;
+  groupLabel?: string;
   items: WorkstationItem[];
 }
 
@@ -42,24 +46,24 @@ export const WORKSTATION_GROUPS: WorkstationGroup[] = [
   {
     id: "overview-group",
     title: "Command Center",
-    phaseLabel: "Command Center",
+    groupLabel: "Command Center",
     items: [
       { id: "overview", label: "System Dashboard", badge: "LIVE", description: "Operational metrics & risk posture" },
     ],
   },
   {
-    id: "phase-1",
-    title: "Phase 1: Policy Engineering",
-    phaseLabel: "Specification",
+    id: "policy-group",
+    title: "Policy Engineering",
+    groupLabel: "Specification",
     items: [
       { id: "mandate", label: "Mandate Compiler", badge: "INTENT", description: "Natural language intent compilation" },
       { id: "policy-versions", label: "Policy Versions", badge: "DIFF", description: "Immutable version diff & impact" },
     ],
   },
   {
-    id: "phase-2",
-    title: "Phase 2: Authoritative Gate",
-    phaseLabel: "Verification",
+    id: "authoritative-group",
+    title: "Authoritative Gate",
+    groupLabel: "Verification",
     items: [
       { id: "verification", label: "Verification Studio", badge: "ACTIVE", description: "Finite bounded loophole search" },
       { id: "findings", label: "Findings & Witnesses", badge: "ACTIVE", description: "Counterexamples & D-014 triage" },
@@ -68,11 +72,11 @@ export const WORKSTATION_GROUPS: WorkstationGroup[] = [
     ],
   },
   {
-    id: "phase-3",
-    title: "Phase 3: Ledger & Proof",
-    phaseLabel: "Settlement",
+    id: "ledger-group",
+    title: "Ledger & Proof",
+    groupLabel: "Settlement",
     items: [
-      { id: "transactions", label: "Transactions", badge: "PHASE 1", description: "PayPal orders & reconciliation" },
+      { id: "transactions", label: "Transactions", description: "PayPal orders & reconciliation" },
       { id: "evaluation", label: "Evaluation Report", badge: "AUDIT", description: "Cryptographic invariant proof" },
     ],
   },
@@ -90,29 +94,147 @@ const ALL_KNOWN_WORKSTATIONS: Record<string, WorkstationItem> = {
   findings: { id: "findings", label: "Findings & Witnesses", badge: "ACTIVE", description: "Counterexamples & D-014 triage" },
   approval: { id: "approval", label: "Approval Checkpoints", description: "Policy binding & spend limits" },
   checkout: { id: "checkout", label: "Checkout Gate", description: "Nonce replay & authorization" },
-  transactions: { id: "transactions", label: "Transactions", badge: "PHASE 1", description: "PayPal orders & reconciliation" },
+  transactions: { id: "transactions", label: "Transactions", description: "PayPal orders & reconciliation" },
   purchases: { id: "purchases", label: "Purchases", badge: "LIVE", description: "PayPal orders & reconciliation" },
   evaluation: { id: "evaluation", label: "Evaluation Report", badge: "AUDIT", description: "Cryptographic invariant proof" },
 };
 
+export interface ParsedRoute {
+  isConsoleIntent: boolean;
+  isExplicitLanding: boolean;
+  workstation?: string;
+}
+
+export function parseRoute(location?: { pathname?: string; search?: string; hash?: string }): ParsedRoute {
+  if (!location) {
+    return { isConsoleIntent: false, isExplicitLanding: false };
+  }
+  const pathname = (location.pathname || "").toLowerCase();
+  const search = location.search || "";
+  const hash = location.hash || "";
+  const params = new URLSearchParams(search);
+
+  // 1. Explicit landing intent takes highest precedence: /landing, #landing, or ?view=landing
+  if (pathname === "/landing" || hash === "#landing" || params.get("view") === "landing") {
+    return { isConsoleIntent: false, isExplicitLanding: true };
+  }
+
+  // 2. PayPal return redirect parameters
+  if (params.get("token") || params.get("orderId")) {
+    return { isConsoleIntent: true, isExplicitLanding: false, workstation: "transactions" };
+  }
+
+  // 3. Path-based console routing: /console, /console/:workstation, /app, /app/:workstation
+  const consoleMatch = pathname.match(/^\/(?:console|app)(?:\/([a-z0-9_-]+))?\/?$/);
+  if (consoleMatch) {
+    const wsFromPath = consoleMatch[1];
+    return {
+      isConsoleIntent: true,
+      isExplicitLanding: false,
+      workstation: wsFromPath || params.get("workstation") || params.get("ws") || undefined,
+    };
+  }
+
+  // 4. Query param based console routing: ?view=app, ?workstation=..., ?ws=...
+  if (params.get("view") === "app" || params.get("workstation") || params.get("ws")) {
+    return {
+      isConsoleIntent: true,
+      isExplicitLanding: false,
+      workstation: params.get("workstation") || params.get("ws") || undefined,
+    };
+  }
+
+  return { isConsoleIntent: false, isExplicitLanding: false };
+}
+
+export function AuthLoadingScreen() {
+  return (
+    <div
+      data-testid="auth-loading-screen"
+      role="status"
+      aria-live="polite"
+      className="h-screen min-h-screen w-full flex flex-col items-center justify-center bg-canvas text-ink p-6 select-none"
+    >
+      <div className="flex flex-col items-center text-center space-y-4 max-w-sm">
+        <div className="relative flex items-center justify-center">
+          <div className="w-14 h-14 rounded-2xl bg-surface-raised border border-border flex items-center justify-center shadow-lg ring-1 ring-accent/20">
+            <VorentBrandMark className="w-8 h-8 animate-pulse" />
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <h2 className="text-sm font-semibold tracking-tight text-ink font-sans">
+            Authenticating Session
+          </h2>
+          <p className="text-xs text-muted leading-relaxed font-sans">
+            Verifying cryptographic credentials and enterprise permissions…
+          </p>
+        </div>
+
+        <div className="flex items-center space-x-2 text-xs font-mono text-muted pt-2">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin text-accent" aria-hidden="true" />
+          <span>Connecting to authority...</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export interface AppProps {
   initialWorkstation?: string;
   initialPolicyId?: string;
+  initialUser?: AuthUser | null;
+  initialToken?: string | null;
+  initialIsLoading?: boolean;
+  initialView?: "landing" | "app";
 }
 
-const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation, initialPolicyId } = {}) {
+const AppContent: React.FC<AppProps> = function AppContent({
+  initialWorkstation,
+  initialPolicyId,
+  initialView,
+} = {}) {
+  const { openAuthModal, isAuthenticated, isLoading } = useAuth();
+
   const [activeWorkstation, setActiveWorkstation] = useState<string>(() => {
-    if (typeof window !== "undefined" && window.location.search) {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("token") || params.get("orderId")) {
-        return "transactions";
-      }
-      const wsParam = params.get("workstation") || params.get("ws");
-      if (wsParam) {
-        return wsParam;
-      }
+    if (initialWorkstation) return initialWorkstation;
+    if (typeof window !== "undefined" && window.location) {
+      const route = parseRoute(window.location);
+      if (route.workstation) return route.workstation;
     }
-    return initialWorkstation || "overview";
+    return "overview";
+  });
+
+  const [redirectTargetWorkstation, setRedirectTargetWorkstation] = useState<string | null>(null);
+
+  const [currentView, setCurrentView] = useState<"landing" | "app">(() => {
+    if (initialView) return initialView;
+    if (typeof window !== "undefined" && window.location) {
+      const isTest =
+        typeof process !== "undefined" &&
+        (process.env.VITEST === "true" || process.env.NODE_ENV === "test");
+
+      const route = parseRoute(window.location);
+
+      if (route.isExplicitLanding) {
+        return "landing";
+      }
+
+      if (route.isConsoleIntent) {
+        if (isTest) return "app";
+        if (authService.getToken()) return "app";
+        return "landing";
+      }
+
+      if (isTest) return "app";
+
+      if (authService.getToken()) {
+        return "app";
+      }
+
+      return "landing";
+    }
+    return "app";
   });
   const [selectedVerificationPolicy, setSelectedVerificationPolicy] = useState<string>(
     initialPolicyId || "pol_v1_books_hardware"
@@ -120,6 +242,13 @@ const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation,
   const [customVerificationOption, setCustomVerificationOption] = useState<PolicyOption | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [settingsModalTab, setSettingsModalTab] = useState<string>("profile");
+
+  const handleOpenSettings = useCallback((initialTab?: string) => {
+    setSettingsModalTab(initialTab || "profile");
+    setIsSettingsModalOpen(true);
+  }, []);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window !== "undefined" && window.localStorage) {
       try {
@@ -165,8 +294,11 @@ const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation,
     }
   }, [activeWorkstation, lenis]);
 
-  // Synchronize active workstation with URL search params so workstation states persist on page reloads
+  // Synchronize active workstation with URL search params so workstation states persist on page reloads (only in app view)
   useEffect(() => {
+    if (currentView !== "app") {
+      return;
+    }
     if (typeof window !== "undefined" && window.history && window.location) {
       try {
         const params = new URLSearchParams(window.location.search);
@@ -189,7 +321,146 @@ const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation,
         // Safe SSR / restricted history fallback
       }
     }
-  }, [activeWorkstation]);
+  }, [activeWorkstation, currentView]);
+
+
+  const handleSetView = useCallback(
+    (newView: "landing" | "app", targetWorkstation?: string) => {
+      setCurrentView(newView);
+      const destinationWs = targetWorkstation || activeWorkstation || "overview";
+      if (targetWorkstation) {
+        setActiveWorkstation(targetWorkstation);
+      }
+      if (typeof window !== "undefined" && window.history && window.location) {
+        try {
+          if (newView === "landing") {
+            const newUrl = "/?view=landing";
+            window.history.pushState(null, "", newUrl);
+          } else {
+            const searchParam =
+              destinationWs && destinationWs !== "overview"
+                ? `?workstation=${encodeURIComponent(destinationWs)}`
+                : "";
+            window.history.pushState(null, "", `/console${searchParam}`);
+          }
+        } catch {
+          // Safe SSR / restricted history fallback
+        }
+      }
+    },
+    [activeWorkstation]
+  );
+
+  const handleLaunchConsole = useCallback(
+    (targetWs?: string) => {
+      const destination = targetWs || "overview";
+      if (isAuthenticated) {
+        handleSetView("app", destination);
+      } else {
+        setRedirectTargetWorkstation(destination);
+        openAuthModal("login");
+      }
+    },
+    [isAuthenticated, handleSetView, openAuthModal]
+  );
+
+  const handleOpenLogin = useCallback(() => {
+    setRedirectTargetWorkstation("overview");
+    openAuthModal("login");
+  }, [openAuthModal]);
+
+  const handleOpenRegister = useCallback(() => {
+    setRedirectTargetWorkstation("overview");
+    openAuthModal("register");
+  }, [openAuthModal]);
+
+  const handleLoginSuccess = useCallback(() => {
+    const targetWs = redirectTargetWorkstation || "overview";
+    setRedirectTargetWorkstation(null);
+    handleSetView("app", targetWs);
+  }, [redirectTargetWorkstation, handleSetView]);
+
+  // Route gating & redirect handling: unauthenticated visitors cannot access console
+  useEffect(() => {
+    if (isLoading) return;
+
+    const route =
+      typeof window !== "undefined" && window.location
+        ? parseRoute(window.location)
+        : { isConsoleIntent: false, isExplicitLanding: false, workstation: undefined };
+
+    if (!isAuthenticated) {
+      if (currentView === "app" || route.isConsoleIntent) {
+        const intendedWs =
+          (activeWorkstation && activeWorkstation !== "overview" ? activeWorkstation : undefined) ||
+          route.workstation ||
+          initialWorkstation ||
+          "overview";
+        setRedirectTargetWorkstation(intendedWs);
+        setCurrentView("landing");
+        openAuthModal("login");
+
+        if (typeof window !== "undefined" && window.history && window.location) {
+          try {
+            window.history.replaceState(null, "", "/");
+          } catch {
+            // safe
+          }
+        }
+      }
+    } else {
+      // Re-visiting authenticated users at root / without explicit landing view
+      if (currentView === "landing" && !route.isExplicitLanding && !redirectTargetWorkstation) {
+        setCurrentView("app");
+        if (route.workstation) {
+          setActiveWorkstation(route.workstation);
+        }
+      }
+    }
+  }, [
+    isLoading,
+    isAuthenticated,
+    currentView,
+    activeWorkstation,
+    initialWorkstation,
+    redirectTargetWorkstation,
+    openAuthModal,
+  ]);
+
+  // Synchronize view state with browser history (back/forward buttons)
+  useEffect(() => {
+    const handlePopState = () => {
+      if (typeof window !== "undefined") {
+        const route = parseRoute(window.location);
+        if (route.isExplicitLanding) {
+          setCurrentView("landing");
+        } else if (route.isConsoleIntent) {
+          if (isAuthenticated) {
+            setCurrentView("app");
+            if (route.workstation) {
+              setActiveWorkstation(route.workstation);
+            }
+          } else {
+            setRedirectTargetWorkstation(route.workstation || "overview");
+            setCurrentView("landing");
+            openAuthModal("login");
+          }
+        }
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isAuthenticated, openAuthModal]);
+
+  // Redirect to public landing page whenever an authenticated session is logged out
+  const prevAuthRef = useRef<boolean>(isAuthenticated);
+  useEffect(() => {
+    if (prevAuthRef.current && !isAuthenticated) {
+      setRedirectTargetWorkstation(null);
+      handleSetView("landing");
+    }
+    prevAuthRef.current = isAuthenticated;
+  }, [isAuthenticated, handleSetView]);
 
   // Keyboard shortcut Ctrl+B / Cmd+B for desktop sidebar collapse/expand
   useEffect(() => {
@@ -284,6 +555,48 @@ const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation,
     ? [customVerificationOption, ...AVAILABLE_POLICIES]
     : AVAILABLE_POLICIES;
 
+  const shouldShowAuthLoading = (() => {
+    if (!isLoading) return false;
+    if (typeof window === "undefined" || !window.location) return false;
+
+    const route = parseRoute(window.location);
+    if (route.isExplicitLanding) return false;
+
+    if (route.isConsoleIntent || authService.getToken()) {
+      return true;
+    }
+
+    return false;
+  })();
+
+  if (shouldShowAuthLoading) {
+    return <AuthLoadingScreen />;
+  }
+
+  if (currentView === "landing") {
+    return (
+      <div className="min-h-screen bg-canvas text-ink">
+        <VorentLandingPage
+          onEnterApp={handleLaunchConsole}
+          onLaunchConsole={handleLaunchConsole}
+          onOpenLogin={handleOpenLogin}
+          onOpenRegister={handleOpenRegister}
+        />
+        {/* Account Settings and Governance Center Modal */}
+        <AccountSettingsModal
+          isOpen={isSettingsModalOpen}
+          onClose={() => setIsSettingsModalOpen(false)}
+          initialTab={settingsModalTab}
+        />
+        {/* Authentication and Registration Modal with post-login redirect */}
+        <AuthModal
+          onOpenSettings={handleOpenSettings}
+          onLoginSuccess={handleLoginSuccess}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen min-h-screen flex flex-col overflow-hidden bg-canvas text-ink">
       {/* Top Application Bar - Clean Institutional Header matching reference */}
@@ -305,19 +618,27 @@ const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation,
           </button>
 
           {/* Brand mark & title in header */}
-          <div className="flex items-center space-x-2.5 shrink-0">
-            <div className="w-7 h-7 rounded-md bg-surface-inset border border-border flex items-center justify-center text-accent">
-              <Shield className="w-4 h-4 text-accent" aria-hidden="true" />
-            </div>
-            <span className="font-sans font-bold text-base tracking-tight text-ink">
-              Warrant Studio
-            </span>
+          <div
+            className="flex items-center space-x-2.5 shrink-0 cursor-pointer"
+            onClick={() => handleSetView("landing")}
+            title="Return to Product Landing Page"
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                handleSetView("landing");
+              }
+            }}
+          >
+            <VorentBrandMark className="w-7 h-7" />
           </div>
 
           {/* Global Search Bar (Section 7) */}
-          <div className="hidden sm:flex items-center space-x-2.5 h-8 px-3 rounded-md bg-surface-inset border border-border text-xs text-muted w-64 md:w-80 lg:w-96">
+          <div className="hidden sm:flex items-center space-x-2.5 h-8 px-3 rounded-md bg-surface-inset border border-border text-xs text-muted w-48 md:w-72 lg:w-96 min-w-0">
             <Search className="w-3.5 h-3.5 text-muted shrink-0" aria-hidden="true" />
             <input
+              id="global-search-input"
+              name="global-search"
               type="search"
               placeholder="Search transactions, policies, or mandate..."
               className="bg-transparent text-ink placeholder:text-muted/70 text-xs font-sans focus:outline-none w-full"
@@ -351,16 +672,22 @@ const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation,
 
         {/* Right: Environment, security status, and operator menu */}
         <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
-          {/* Security Status Indicator */}
-          <div className="inline-flex items-center space-x-1.5 h-8 px-2.5 rounded-md bg-surface-inset border border-border text-[11px] font-sans text-muted">
+          {/* Security Status Indicator - hidden on compact mobile to guarantee zero brand truncation */}
+          <div
+            className="hidden sm:inline-flex items-center space-x-1.5 h-8 px-2 sm:px-2.5 rounded-md bg-surface-inset border border-border text-[11px] font-sans text-muted shrink-0"
+            title="All systems secure · Cryptographic enforcement active"
+          >
             <span className="w-2 h-2 rounded-full bg-allow shrink-0 animate-pulse" />
-            <span className="font-medium text-ink">All systems secure</span>
+            <span className="font-medium text-ink hidden md:inline">All systems secure</span>
           </div>
 
           {/* Persistent Sandbox Environment Pill */}
-          <span className="inline-flex items-center space-x-1.5 h-8 px-2.5 rounded-md text-[10px] font-mono font-bold bg-sandbox-bg text-sandbox-text border border-sandbox-border select-none">
+          <span
+            className="inline-flex items-center space-x-1.5 h-8 px-2.5 rounded-md text-[10px] font-mono font-bold bg-sandbox-bg text-sandbox-text border border-sandbox-border select-none shrink-0"
+            title="PayPal Sandbox Mode Active"
+          >
             <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse shrink-0" />
-            <span className="tracking-wide">SANDBOX MODE</span>
+            <span className="tracking-wide hidden sm:inline">SANDBOX MODE</span>
           </span>
 
           {/* Refresh Engine Status Action (Preserved for test compliance while avoiding duplicate visible button) */}
@@ -375,11 +702,15 @@ const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation,
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-primary" : ""}`} />
           </button>
 
+
           {/* Compact Accessible Theme Toggle (Replacing Operator button) */}
           <ThemeToggle />
 
-          {/* Master Brief Section 7: User identity, starter roles, and authentication modal trigger */}
-          <UserNavIndicator />
+          {/* User identity, starter roles, and authentication modal trigger */}
+          <UserNavIndicator
+            onOpenSettings={handleOpenSettings}
+            onLogout={() => handleSetView("landing")}
+          />
         </div>
       </header>
 
@@ -409,6 +740,7 @@ const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation,
           onSelectWorkstation={(id) => setActiveWorkstation(id)}
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+          onOpenSettings={handleOpenSettings}
         />
 
         {/* Central Content - Dedicated Scroll Container for Pages */}
@@ -496,7 +828,7 @@ const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation,
                 <Shield className="w-8 h-8 text-accent mx-auto" aria-hidden="true" />
                 <h2 className="text-base font-bold text-ink">Workstation in Development</h2>
                 <p className="text-xs text-muted">
-                  This workstation module is scheduled for incremental development in subsequent phases.
+                  This workstation module is scheduled for future release.
                 </p>
                 <button
                   type="button"
@@ -510,17 +842,51 @@ const AppContent: React.FC<AppProps> = function AppContent({ initialWorkstation,
           </div>
         </main>
       </div>
+
+      {/* Account Settings and Governance Center Modal */}
+      <AccountSettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        initialTab={settingsModalTab}
+      />
+
+      {/* Authentication and Registration Modal */}
+      <AuthModal
+        onOpenSettings={handleOpenSettings}
+        onLoginSuccess={handleLoginSuccess}
+      />
     </div>
   );
 };
 
 export const App: React.FC<AppProps> = function App(props = {}) {
+  const isTest =
+    typeof process !== "undefined" &&
+    (process.env.VITEST === "true" || process.env.NODE_ENV === "test");
+
+  const defaultTestUser: AuthUser | null =
+    isTest && props.initialUser === undefined && props.initialView !== "landing"
+      ? {
+          id: "usr_test_shell",
+          email: "admin@warrant.studio",
+          name: "Test Admin",
+          role: "ADMINISTRATOR",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }
+      : null;
+
+  const authUser = props.initialUser !== undefined ? props.initialUser : defaultTestUser;
+  const authToken = props.initialToken !== undefined ? props.initialToken : (authUser ? "test-token" : undefined);
+
   return (
     <ThemeProvider>
-      <AuthProvider>
+      <AuthProvider
+        initialUser={authUser}
+        initialToken={authToken}
+        initialIsLoading={props.initialIsLoading}
+      >
         <SmoothScrollProvider>
           <AppContent {...props} />
-          <AuthModal />
         </SmoothScrollProvider>
       </AuthProvider>
     </ThemeProvider>

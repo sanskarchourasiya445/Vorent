@@ -18,7 +18,12 @@ export const pool = new Pool({
   connectionString: getEffectiveConnectionString(env.DATABASE_URL),
   max: 10,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 3000,
+  connectionTimeoutMillis: 10000, // 10s timeout to absorb Neon serverless wake-up latency
+});
+
+// Guard against unhandled errors on idle clients in PgBouncer pooler mode
+pool.on("error", (err) => {
+  console.error("[PostgresPool:Error] Unexpected idle client error:", err.message);
 });
 
 export const db = drizzle(pool, { schema });

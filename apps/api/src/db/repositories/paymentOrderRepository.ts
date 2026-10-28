@@ -49,11 +49,11 @@ export interface CancelPaymentOrderContext extends CancelPaymentOrderRequest {
 }
 
 export interface CapturePaymentOrderContext extends CapturePaymentOrderRequest {
-  ownerId: string;
+  ownerId?: string;
 }
 
 export interface ReconcilePaymentOrderContext extends ReconcilePaymentOrderRequest {
-  ownerId: string;
+  ownerId?: string;
 }
 
 function mapPaymentOrderRecord(o: any): PaymentOrderRecord {
@@ -147,6 +147,30 @@ export async function createPaymentOrder(
       "PROPOSAL_NOT_ALLOWED",
       `Payment order creation requires an ALLOW decision (current: ${proposal.decision})`
     );
+  }
+
+  // 1.1 Verify linked approval status if bound to reservation
+  if (reservation.approvalId) {
+    const approvalsList = await db
+      .select()
+      .from(approvals)
+      .where(eq(approvals.id, reservation.approvalId));
+
+    const approval = approvalsList[0];
+    if (approval) {
+      if (approval.revokedAt) {
+        throw new CheckoutError("REVOKED_APPROVAL", "Linked approval checkpoint has been revoked");
+      }
+      if (approval.expiresAt && new Date(approval.expiresAt) <= new Date()) {
+        throw new CheckoutError("EXPIRED_APPROVAL", "Linked approval checkpoint has expired");
+      }
+      if (approval.policyHash !== proposal.policyHash) {
+        throw new CheckoutError(
+          "POLICY_HASH_MISMATCH",
+          `Approval policy hash ${approval.policyHash} does not match proposal policy hash ${proposal.policyHash}`
+        );
+      }
+    }
   }
 
   // 2. Check for existing payment order (Idempotency and Reconciliation)
@@ -855,51 +879,85 @@ export async function capturePaymentOrder(
   const finalReservationState: ReservationState = isCompleted ? "COMMITTED" : "RESERVED";
   const now = new Date();
 
-  const [persistedOrder] = await db.transaction(async (tx: any) => {
-    const [up] = await tx
-      .update(paymentOrders)
-      .set({
-        status: finalStatus,
-        captureId: captureResult.captureId,
-        updatedAt: now,
-      })
-      .where(eq(paymentOrders.id, order.id))
-      .returning();
+  let persistedOrder: any;
+  try {
+    const [txResult] = await db.transaction(async (tx: any) => {
+      const [up] = await tx
+        .update(paymentOrders)
+        .set({
+          status: finalStatus,
+          captureId: captureResult.captureId,
+          updatedAt: now,
+        })
+        .where(eq(paymentOrders.id, order.id))
+        .returning();
 
-    await tx
-      .update(spendReservations)
-      .set({
-        state: finalReservationState,
-        updatedAt: now,
-      })
-      .where(eq(spendReservations.id, reservation.id));
+      await tx
+        .update(spendReservations)
+        .set({
+          state: finalReservationState,
+          updatedAt: now,
+        })
+        .where(eq(spendReservations.id, reservation.id));
 
-    await logAuditEvent(tx, {
-      ownerId: order.ownerId,
-      actorType: "USER",
-      eventType: "PAYMENT_ORDER_CAPTURED",
-      entityType: "PAYMENT_ORDER",
-      entityId: order.id,
-      payload: {
-        captureId: captureResult.captureId,
-        amountMinor: order.amountMinor,
-        status: finalStatus,
-      },
+      await logAuditEvent(tx, {
+        ownerId: order.ownerId,
+        actorType: "USER",
+        eventType: "PAYMENT_ORDER_CAPTURED",
+        entityType: "PAYMENT_ORDER",
+        entityId: order.id,
+        payload: {
+          captureId: captureResult.captureId,
+          amountMinor: order.amountMinor,
+          status: finalStatus,
+        },
+      });
+
+      await logAuditEvent(tx, {
+        ownerId: order.ownerId,
+        actorType: "SYSTEM",
+        eventType: "SPEND_RESERVATION_COMMITTED",
+        entityType: "SPEND_RESERVATION",
+        entityId: reservation.id,
+        payload: {
+          state: finalReservationState,
+        },
+      });
+
+      return [up];
     });
+    persistedOrder = txResult;
+  } catch (postCaptureDbErr: unknown) {
+    // Post-capture database persistence failed.
+    // The funds were successfully captured in PayPal (captureId: captureResult.captureId),
+    // but the local database transaction failed. We must attempt to flag the order
+    // for reconciliation with its captureId so repeated captures are prevented and reconciliation can resolve it.
+    try {
+      await db
+        .update(paymentOrders)
+        .set({
+          status: "UNKNOWN_REQUIRES_RECONCILIATION",
+          captureId: captureResult.captureId,
+          updatedAt: new Date(),
+        })
+        .where(eq(paymentOrders.id, order.id));
 
-    await logAuditEvent(tx, {
-      ownerId: order.ownerId,
-      actorType: "SYSTEM",
-      eventType: "SPEND_RESERVATION_COMMITTED",
-      entityType: "SPEND_RESERVATION",
-      entityId: reservation.id,
-      payload: {
-        state: finalReservationState,
-      },
-    });
+      await db
+        .update(spendReservations)
+        .set({
+          state: "RECONCILIATION_HOLD",
+          updatedAt: new Date(),
+        })
+        .where(eq(spendReservations.id, reservation.id));
+    } catch {
+      // Best-effort safety update in case the main transaction crashed
+    }
 
-    return [up];
-  });
+    throw new CheckoutError(
+      "CAPTURE_SUCCEEDED_DATABASE_FAILED",
+      `Payment captured successfully by PayPal (Capture ID: ${captureResult.captureId}), but database record update failed. Order held for reconciliation.`
+    );
+  }
 
   return {
     order: mapPaymentOrderRecord(persistedOrder),
@@ -907,8 +965,8 @@ export async function capturePaymentOrder(
     paypalOrderId: order.providerOrderId,
     status: finalStatus,
     reservationState: finalReservationState,
-    capturedAmountMinor: Number(persistedOrder.amountMinor),
-    currency: persistedOrder.currency,
+    capturedAmountMinor: Number(persistedOrder?.amountMinor ?? order.amountMinor),
+    currency: persistedOrder?.currency ?? order.currency,
   };
 }
 
@@ -1322,18 +1380,36 @@ export async function processWebhookEvent(
       actionTaken = `UNHANDLED_EVENT_${event.event_type}`;
   }
 
-  // 4. Durably persist event in webhookEvents
-  await db.insert(webhookEvents).values({
-    id: randomUUID(),
-    eventId: event.id,
-    eventType: event.event_type,
-    resourceType: event.resource_type ?? null,
-    resourceId: event.resource?.id ?? null,
-    status: "PROCESSED",
-    payload: event,
-    createdAt: now,
-    processedAt: now,
-  });
+  // 4. Durably persist event in webhookEvents (handles concurrent duplicate deliveries)
+  try {
+    await db.insert(webhookEvents).values({
+      id: randomUUID(),
+      eventId: event.id,
+      eventType: event.event_type,
+      resourceType: event.resource_type ?? null,
+      resourceId: event.resource?.id ?? null,
+      status: "PROCESSED",
+      payload: event,
+      createdAt: now,
+      processedAt: now,
+    });
+  } catch (insertErr: any) {
+    if (
+      insertErr?.code === "23505" ||
+      insertErr?.message?.includes("unique") ||
+      insertErr?.message?.includes("duplicate") ||
+      insertErr?.message?.includes("UNIQUE")
+    ) {
+      return {
+        received: true,
+        duplicate: true,
+        eventId: event.id,
+        eventType: event.event_type,
+        actionTaken: "DUPLICATE_EVENT_IGNORED",
+      };
+    }
+    throw insertErr;
+  }
 
   return {
     received: true,
@@ -1341,7 +1417,7 @@ export async function processWebhookEvent(
     eventType: event.event_type,
     actionTaken,
   };
-}
+};
 
 /**
  * Lists payment orders with optional filtering by status and reservation.

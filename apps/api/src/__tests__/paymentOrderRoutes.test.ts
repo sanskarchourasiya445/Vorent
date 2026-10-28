@@ -10,6 +10,7 @@ import {
   paymentOrders,
   spendReservations,
   checkoutProposals,
+  approvals,
 } from "../db/schema.js";
 
 describe("Payment Orders Routes & Repository (PayPal Sandbox Integration)", () => {
@@ -234,9 +235,13 @@ describe("Payment Orders Routes & Repository (PayPal Sandbox Integration)", () =
   // ==========================================
 
   describe("paymentOrderRepository.createPaymentOrder logic", () => {
+    const validApprovalId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const validPolicyHash = "93258bd2e0e10160490d8d690e79028c1886f96de0806b749e1822619a3cbbb5";
+
     function createMockDb(setup: {
       reservation?: any;
       proposal?: any;
+      approval?: any;
       existingOrders?: any[];
       transactionResult?: any[];
     }) {
@@ -251,10 +256,23 @@ describe("Payment Orders Routes & Repository (PayPal Sandbox Integration)", () =
                 return setup.reservation ? [setup.reservation] : [];
               }
               if (table === checkoutProposals) {
-                return setup.proposal ? [setup.proposal] : [];
+                return setup.proposal ? [{ policyHash: validPolicyHash, ...setup.proposal }] : [];
               }
               if (table === paymentOrders) {
                 return setup.existingOrders ?? [];
+              }
+              if (table === approvals) {
+                return setup.approval !== undefined
+                  ? setup.approval ? [setup.approval] : []
+                  : [
+                      {
+                        id: validApprovalId,
+                        ownerId: validOwnerId,
+                        policyHash: validPolicyHash,
+                        revokedAt: null,
+                        expiresAt: new Date(Date.now() + 86400000),
+                      },
+                    ];
               }
               return [];
             }),
@@ -336,6 +354,114 @@ describe("Payment Orders Routes & Repository (PayPal Sandbox Integration)", () =
           {} as any
         )
       ).rejects.toThrowError(/Payment order creation requires an ALLOW decision/);
+    });
+
+    it("rejects when linked approval checkpoint has been revoked", async () => {
+      const mockDb = createMockDb({
+        reservation: {
+          id: validReservationId,
+          ownerId: validOwnerId,
+          proposalId: validProposalId,
+          approvalId: validApprovalId,
+          state: "ORDER_CREATION_PENDING",
+        },
+        proposal: {
+          id: validProposalId,
+          decision: "ALLOW",
+          policyHash: validPolicyHash,
+        },
+        approval: {
+          id: validApprovalId,
+          ownerId: validOwnerId,
+          policyHash: validPolicyHash,
+          revokedAt: new Date(),
+          expiresAt: new Date(Date.now() + 86400000),
+        },
+      });
+
+      await expect(
+        paymentOrderRepo.createPaymentOrder(
+          mockDb as any,
+          {
+            reservationId: validReservationId,
+            proposalId: validProposalId,
+            ownerId: validOwnerId,
+          },
+          {} as any
+        )
+      ).rejects.toThrowError(/REVOKED_APPROVAL/);
+    });
+
+    it("rejects when linked approval checkpoint has expired", async () => {
+      const mockDb = createMockDb({
+        reservation: {
+          id: validReservationId,
+          ownerId: validOwnerId,
+          proposalId: validProposalId,
+          approvalId: validApprovalId,
+          state: "ORDER_CREATION_PENDING",
+        },
+        proposal: {
+          id: validProposalId,
+          decision: "ALLOW",
+          policyHash: validPolicyHash,
+        },
+        approval: {
+          id: validApprovalId,
+          ownerId: validOwnerId,
+          policyHash: validPolicyHash,
+          revokedAt: null,
+          expiresAt: new Date(Date.now() - 10000),
+        },
+      });
+
+      await expect(
+        paymentOrderRepo.createPaymentOrder(
+          mockDb as any,
+          {
+            reservationId: validReservationId,
+            proposalId: validProposalId,
+            ownerId: validOwnerId,
+          },
+          {} as any
+        )
+      ).rejects.toThrowError(/EXPIRED_APPROVAL/);
+    });
+
+    it("rejects when approval policy hash does not match proposal policy hash", async () => {
+      const mockDb = createMockDb({
+        reservation: {
+          id: validReservationId,
+          ownerId: validOwnerId,
+          proposalId: validProposalId,
+          approvalId: validApprovalId,
+          state: "ORDER_CREATION_PENDING",
+        },
+        proposal: {
+          id: validProposalId,
+          decision: "ALLOW",
+          policyHash: "different-hash-00000000000000000000000000000000000000000000000000000000",
+        },
+        approval: {
+          id: validApprovalId,
+          ownerId: validOwnerId,
+          policyHash: validPolicyHash,
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 86400000),
+        },
+      });
+
+      await expect(
+        paymentOrderRepo.createPaymentOrder(
+          mockDb as any,
+          {
+            reservationId: validReservationId,
+            proposalId: validProposalId,
+            ownerId: validOwnerId,
+          },
+          {} as any
+        )
+      ).rejects.toThrowError(/POLICY_HASH_MISMATCH/);
     });
 
     it("idempotently returns existing order without invoking PayPal API", async () => {

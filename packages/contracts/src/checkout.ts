@@ -89,7 +89,7 @@ export const CheckoutProposalRecordSchema = z.object({
   policyHash: z.string().length(64),
   consumedNonceId: z.string().uuid(),
   cartHash: z.string().length(64),
-  proposedCart: CartSchema,
+  proposedCart: z.union([CartSchema, ClientCartSchema]),
   normalizedCart: CartSchema,
   evidenceSnapshot: EvidenceSnapshotSchema,
   decision: DecisionZodSchema,

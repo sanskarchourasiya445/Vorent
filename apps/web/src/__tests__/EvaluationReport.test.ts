@@ -645,7 +645,7 @@ describe("Evaluation Report Workstation (Workstation 9) Suite", () => {
     });
   });
 
-  describe("9. INV-02 Policy Evaluation & Regression Tests (LEAN-002)", () => {
+  describe("9. INV-02 Policy Evaluation & Regression Tests", () => {
     const repairedPolicy = {
       schemaVersion: "1.0" as const,
       currency: "USD",

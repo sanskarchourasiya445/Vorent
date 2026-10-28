@@ -40,7 +40,7 @@ export async function compileMandateWithLLM(
     /bypass (all )?(policy|rules|guardrails)/i.test(text);
 
   if (!apiKey || apiKey.trim() === "" || apiKey === "mock" || apiKey === "demo" || apiKey.startsWith("placeholder_")) {
-    // Deterministic fallback mode (Task AI.3)
+    // Deterministic fallback mode
     const deterministic = compileIntent(normalizedRequest);
     if (isAdversarial) {
       return {
@@ -162,7 +162,7 @@ Return ONLY valid JSON matching this structure:
 
     return CompileIntentResponseSchema.parse(response);
   } catch {
-    // Deterministic fallback (Task AI.3)
+    // Deterministic fallback
     const fallback = compileIntent(normalizedRequest);
     return {
       ...fallback,

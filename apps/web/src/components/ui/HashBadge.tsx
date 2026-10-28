@@ -26,7 +26,9 @@ export function HashBadge({
   const isShort = hash.length <= prefixLength + suffixLength;
   const displayHash = isShort
     ? hash
-    : `${hash.slice(0, prefixLength)}...${hash.slice(-suffixLength)}`;
+    : suffixLength > 0
+      ? `${hash.slice(0, prefixLength)}...${hash.slice(-suffixLength)}`
+      : `${hash.slice(0, prefixLength)}...`;
 
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();

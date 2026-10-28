@@ -11,7 +11,7 @@ import type {
   VerificationRequest,
 } from "@warrant/contracts";
 
-describe("Phase 2 Bounded Verification Engine (@warrant/domain)", () => {
+describe("Bounded Verification Engine (@warrant/domain)", () => {
   const confirmedIntent: ConfirmedIntent = {
     name: "Book Purchase Mandate (Max $60 Total, No Gift Cards)",
     currency: "USD",

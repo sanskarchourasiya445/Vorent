@@ -14,15 +14,20 @@ import {
   extractRequestId,
   extractToken,
   requireAuth,
+  createRateLimiter,
 } from "./routeUtils.js";
 
+export const authRateLimiter = createRateLimiter({
+  max: 10,
+  windowMs: 60 * 1000,
+});
 
 export const authRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   /**
    * POST /api/auth/register
    * Section 7.2: Public registration with least-privileged role (REQUESTER).
    */
-  app.post("/register", async (request, reply) => {
+  app.post("/register", { preHandler: [authRateLimiter] }, async (request, reply) => {
     const requestId = extractRequestId(request);
     reply.header("x-request-id", requestId);
 
@@ -69,7 +74,7 @@ export const authRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
    * POST /api/auth/login
    * Validates credentials and returns session token + user profile.
    */
-  app.post("/login", async (request, reply) => {
+  app.post("/login", { preHandler: [authRateLimiter] }, async (request, reply) => {
     const requestId = extractRequestId(request);
     reply.header("x-request-id", requestId);
 

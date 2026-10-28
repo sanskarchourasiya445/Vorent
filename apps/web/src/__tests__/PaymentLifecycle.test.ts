@@ -14,7 +14,7 @@ import {
 import type { PayPalOrderPresentationState } from "../types/paymentOrder";
 import type { PaymentOrderRecord } from "@warrant/contracts";
 
-describe("Phase 1 Payment Lifecycle - Frontend Unit & Contract Suite", () => {
+describe("Payment Lifecycle - Frontend Unit & Contract Suite", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {

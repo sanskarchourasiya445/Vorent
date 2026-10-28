@@ -9,7 +9,7 @@ export type PipelineStageStatus =
   | "SUCCESS"
   | "FAILED"
   | "BLOCKED"
-  | "FUTURE_PHASE";
+  | "STANDBY";
 
 export interface PipelineStageInfo {
   id: "warrant_gate" | "spend_reservation" | "paypal_order" | "buyer_approval";

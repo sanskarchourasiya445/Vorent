@@ -1,8 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { X, Shield, Lock, Mail, User, CheckCircle2, AlertCircle } from "lucide-react";
+import { X, Lock, Mail, User, CheckCircle2, AlertCircle } from "lucide-react";
 import { useAuth } from "../../providers/AuthContext";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
-export const AuthModal: React.FC = () => {
+export interface AuthModalProps {
+  onOpenSettings?: (initialTab?: string) => void;
+  onLoginSuccess?: () => void;
+}
+
+export const AuthModal: React.FC<AuthModalProps> = ({ onOpenSettings, onLoginSuccess }) => {
   const {
     isAuthModalOpen,
     closeAuthModal,
@@ -26,16 +32,8 @@ export const AuthModal: React.FC = () => {
     clearError();
   }, [authModalTab, isAuthModalOpen]);
 
-  // Handle ESC key to close
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isAuthModalOpen) {
-        closeAuthModal();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isAuthModalOpen, closeAuthModal]);
+  // WCAG AA dialog focus trap and restoration management
+  const modalContainerRef = useFocusTrap(isAuthModalOpen, closeAuthModal);
 
   if (!isAuthModalOpen) return null;
 
@@ -48,6 +46,7 @@ export const AuthModal: React.FC = () => {
       } else {
         await register(email, password, name.trim() || undefined);
       }
+      onLoginSuccess?.();
     } catch {
       // Error handled in context
     } finally {
@@ -60,6 +59,7 @@ export const AuthModal: React.FC = () => {
     try {
       await switchPersona(pEmail);
       closeAuthModal();
+      onLoginSuccess?.();
     } catch {
       // Handled in context
     } finally {
@@ -69,24 +69,26 @@ export const AuthModal: React.FC = () => {
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="auth-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200"
+      onClick={closeAuthModal}
     >
       <div
+        ref={modalContainerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
         className="w-full max-w-xl sm:max-w-2xl bg-panel border border-border text-ink rounded-xl shadow-2xl p-5 sm:p-6 relative max-h-[min(90vh,680px)] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between pb-3.5 border-b border-border/60">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-surface border border-border text-accent">
-              <Shield className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-lg overflow-hidden bg-black/60 border border-white/10 flex items-center justify-center shrink-0 shadow-xs ring-1 ring-sky-500/20">
+              <img src="/brand/vorent-emblem-32.png" alt="VORENT" width={24} height={24} className="w-6 h-6 object-contain" />
             </div>
             <div>
               <h2 id="auth-modal-title" className="text-base font-semibold tracking-tight text-ink">
-                {tab === "login" ? "Sign In to Warrant Studio" : "Create Requester Account"}
+                {tab === "login" ? "Sign In to VORENT" : "Create Requester Account"}
               </h2>
               <p className="text-xs text-ink-muted">
                 Enterprise policy governance & authorization
@@ -135,7 +137,7 @@ export const AuthModal: React.FC = () => {
           </button>
         </div>
 
-        {/* Master Brief 7.2 Safety Notice on Register */}
+        {/* Safety Notice on Register */}
         {tab === "register" && (
           <div className="mb-3 px-3 py-2 bg-accent/10 border border-accent/25 rounded-lg text-xs text-ink flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-accent shrink-0" />
@@ -242,6 +244,32 @@ export const AuthModal: React.FC = () => {
               <span>Register Account</span>
             )}
           </button>
+
+          {/* Legal Compliance Disclosures */}
+          <div className="mt-3 text-center text-[11px] text-ink-muted leading-relaxed font-sans">
+            By signing in or registering, you acknowledge VORENT&apos;s{" "}
+            <button
+              type="button"
+              onClick={() => {
+                closeAuthModal();
+                onOpenSettings?.("help");
+              }}
+              className="text-accent underline hover:text-accent/80 font-medium cursor-pointer"
+            >
+              Terms of Service
+            </button>{" "}
+            and{" "}
+            <button
+              type="button"
+              onClick={() => {
+                closeAuthModal();
+                onOpenSettings?.("help");
+              }}
+              className="text-accent underline hover:text-accent/80 font-medium cursor-pointer"
+            >
+              Privacy Policy
+            </button>.
+          </div>
         </form>
 
         {/* Quick Persona Switcher for Evaluation */}

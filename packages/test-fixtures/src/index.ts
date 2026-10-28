@@ -252,7 +252,7 @@ export const SEARCH_SPACES_FIXTURES: Record<string, SearchSpaceDefinition> = {
   },
 };
 
-// 5. Canonical Policy Presets (Single Source of Truth for LEAN-001 & LEAN-009)
+// 5. Canonical Policy Presets
 export interface CanonicalPolicyPreset {
   id: string;
   name: string;

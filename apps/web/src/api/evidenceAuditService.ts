@@ -270,7 +270,7 @@ export function evaluatePersistedInvariants(
 
 /**
  * Fetches an authentic Evidence Packet from backend (GET /api/evidence-packets/...).
- * LEAN-008: Directly queries the canonical endpoint without sequential trial-and-error loops.
+ * Directly queries the canonical endpoint without sequential trial-and-error loops.
  */
 export async function fetchEvidencePacket(
   targetParams?: { entityType?: string; entityId?: string }
@@ -501,7 +501,7 @@ async function synthesizeAuditFromLiveRecords(): Promise<AuditEventRecord[]> {
 
 /**
  * Fetches the immutable audit trail from backend (GET /api/audit-events).
- * LEAN-008: Directly queries canonical endpoint, falling back to verifiable live entity audit on offline/standby.
+ * Directly queries canonical endpoint, falling back to verifiable live entity audit on offline/standby.
  */
 export async function fetchAuditTrail(
   params?: { entityType?: string; limit?: number }

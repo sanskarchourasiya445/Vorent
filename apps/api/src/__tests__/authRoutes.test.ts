@@ -3,7 +3,7 @@ import { buildServer } from "../server.js";
 import type { FastifyInstance } from "fastify";
 import { UserRole } from "@warrant/contracts";
 
-describe("Authentication & Authorization Routes (Master Brief Section 7)", () => {
+describe("Authentication & Authorization Routes", () => {
   let server: FastifyInstance;
 
   beforeAll(async () => {
@@ -36,7 +36,7 @@ describe("Authentication & Authorization Routes (Master Brief Section 7)", () =>
       expect(body.user).toBeDefined();
       expect(body.user.email).toBe(uniqueEmail.toLowerCase());
       expect(body.user.name).toBe("Test Requester");
-      // MASTER BRIEF SECTION 7.2: Server unconditionally assigns least-privileged REQUESTER role
+      // Server unconditionally assigns least-privileged REQUESTER role
       expect(body.user.role).toBe(UserRole.REQUESTER);
       expect(body.expiresAt).toBeDefined();
     });
@@ -249,7 +249,7 @@ describe("Authentication & Authorization Routes (Master Brief Section 7)", () =>
   });
 
   describe("Personas Endpoint (GET /api/auth/personas)", () => {
-    it("returns starter personas covering all four Master Brief roles", async () => {
+    it("returns starter personas covering all four roles", async () => {
       const res = await server.inject({
         method: "GET",
         url: "/api/auth/personas",

@@ -5,7 +5,7 @@ import * as paymentOrderRepo from "../db/repositories/paymentOrderRepository.js"
 import * as policyRepo from "../db/repositories/policyRepository.js";
 import { CheckoutError } from "../db/repositories/checkoutProposalRepository.js";
 
-describe("Payment Order Complete Lifecycle (Phase 1)", () => {
+describe("Payment Order Complete Lifecycle", () => {
   let server: FastifyInstance;
 
   const validOwnerId = "11111111-1111-1111-1111-111111111111";

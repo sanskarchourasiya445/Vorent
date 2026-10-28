@@ -106,7 +106,7 @@ export function FindingsList({
           No findings match the selected classification filter.
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
           {filteredFindings.map((finding) => {
             const isCounterexample = finding.classification === "COUNTEREXAMPLE";
             const isSelected = selectedFindingId === finding.id;
@@ -133,7 +133,7 @@ export function FindingsList({
                 role="button"
                 aria-pressed={isSelected}
                 aria-label={`Inspect finding: ${finding.title}`}
-                className={`p-4 rounded border text-left cursor-pointer transition-all space-y-3 ${
+                className={`p-4 rounded-lg border text-left cursor-pointer transition-all flex flex-col justify-between ${
                   isSelected
                     ? "border-accent ring-2 ring-accent/30 bg-accent/5"
                     : isCounterexample
@@ -141,9 +141,9 @@ export function FindingsList({
                       : "border-amber-200 dark:border-review/40 bg-surface hover:border-amber-300 dark:hover:border-review hover:shadow-xs"
                 } focus:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
               >
-                {/* Header row */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                {/* Header row with consistent min-height for stable cross-card vertical alignment */}
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 min-h-[4.75rem]">
+                  <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">
                     {isCounterexample ? (
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-100 dark:bg-deny/20 text-red-950 dark:text-deny border border-red-300 dark:border-deny/40 shrink-0">
                         <XCircle className="w-3 h-3 mr-1 text-red-700 dark:text-deny" aria-hidden="true" />
@@ -177,7 +177,7 @@ export function FindingsList({
                     </h4>
                   </div>
 
-                  <div className="flex items-center space-x-2 text-[11px] shrink-0 self-start md:self-auto">
+                  <div className="flex items-center space-x-2 text-[11px] shrink-0 self-start sm:self-auto pt-0.5">
                     <span className="text-muted">
                       Expected: <code className="font-mono text-ink font-semibold">{finding.expectedDecision}</code>
                     </span>
@@ -200,23 +200,27 @@ export function FindingsList({
                   </div>
                 </div>
 
-                {/* Summary */}
-                <p className="text-xs text-muted leading-relaxed line-clamp-2">
-                  {finding.summary}
-                </p>
+                {/* Summary / Description section with consistent min-height & natural text wrapping */}
+                <div className="flex-1 min-h-[2.75rem] my-2.5">
+                  <p className="text-xs text-muted leading-relaxed">
+                    {finding.summary}
+                  </p>
+                </div>
 
-                {/* Footer metadata: Reason code & cart preview */}
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/60 text-[11px]">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-muted font-medium">Triggered:</span>
-                    <code className="font-mono font-semibold px-1.5 py-0.5 rounded bg-canvas border border-border text-ink text-[10px]">
+                {/* Footer metadata: Distinct, vertically aligned Triggered and Cart/Amount rows */}
+                <div className="mt-auto pt-2.5 border-t border-border/60 text-[11px] space-y-1.5">
+                  {/* Triggered reason code row */}
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <span className="text-muted font-medium shrink-0">Triggered:</span>
+                    <code className="font-mono font-semibold px-1.5 py-0.5 rounded bg-canvas border border-border text-ink text-[10px] shrink-0">
                       {finding.actualResult.primaryReasonCode}
                     </code>
-                    <span className="text-muted hidden sm:inline">({primaryFormatted.headline})</span>
+                    <span className="text-muted">({primaryFormatted.headline})</span>
                   </div>
 
+                  {/* Cart preview & total amount row */}
                   <div className="flex items-center space-x-1.5 text-muted font-mono">
-                    <ShoppingCart className="w-3 h-3 text-accent" aria-hidden="true" />
+                    <ShoppingCart className="w-3.5 h-3.5 text-accent shrink-0" aria-hidden="true" />
                     <span>
                       {finding.candidateCart.items.length} item(s) • ${totalFormatted}{" "}
                       {finding.candidateCart.currency}

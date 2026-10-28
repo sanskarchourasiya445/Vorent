@@ -726,4 +726,36 @@ describe("Checkout Proposal Repository", () => {
     expect(result.reasonCodes).toContain(ReasonCode.PROHIBITED_CATEGORY);
     expect(result.reservation).toBeNull();
   });
+
+  it("fails closed and throws UNKNOWN_CATALOG_SKU when an item is not in the authoritative catalog (PAY-001)", async () => {
+    const nonce = await issueCheckoutNonce(db, {
+      ownerId,
+      approvalId,
+      policyVersionId,
+      policyHash,
+    });
+
+    const unknownSkuCart = {
+      currency: "USD",
+      items: [
+        {
+          sku: "unlisted-fake-hardware-sku-999",
+          title: "Malicious Zero Price Exploit",
+          quantity: 1,
+        },
+      ],
+    };
+
+    await expect(
+      submitCheckoutProposal(db, {
+        ownerId,
+        approvalId,
+        policyVersionId,
+        policyHash,
+        nonceId: nonce.id,
+        cart: unknownSkuCart as any,
+        evidenceSnapshot: sampleEvidence,
+      })
+    ).rejects.toThrowError(/UNKNOWN_CATALOG_SKU/);
+  });
 });

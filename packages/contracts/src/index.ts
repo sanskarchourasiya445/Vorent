@@ -15,4 +15,6 @@ export * from "./audit.js";
 export * from "./evidencePacket.js";
 export * from "./auth.js";
 export * from "./catalog.js";
+export * from "./account.js";
+export * from "./email.js";
 

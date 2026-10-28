@@ -42,10 +42,10 @@ export function DecisionResultCard({
   const isReview = decision === "REVIEW";
 
   const containerStyles = isAllow
-    ? "border-emerald-300 bg-emerald-50/40 dark:border-allow/40 dark:bg-allow/10 text-ink"
+    ? "border-emerald-300 dark:border-allow-border bg-emerald-50/40 dark:bg-allow-bg text-ink"
     : isDeny
-      ? "border-red-300 bg-red-50/40 dark:border-deny/40 dark:bg-deny/10 text-ink"
-      : "border-amber-300 bg-amber-50/50 dark:border-review/40 dark:bg-review/10 text-ink";
+      ? "border-red-300 dark:border-deny-border bg-red-50/40 dark:bg-deny-bg text-ink"
+      : "border-amber-300 dark:border-review-border bg-amber-50/50 dark:bg-review-bg text-ink";
 
   const badgeStyles = isAllow
     ? "bg-emerald-700 text-white border-emerald-800 dark:bg-allow dark:text-canvas dark:border-allow-border"
@@ -80,9 +80,9 @@ export function DecisionResultCard({
       {isDemoFixture && (
         <div
           role="note"
-          className="px-3 py-1.5 rounded text-xs font-semibold tracking-wide uppercase bg-amber-100 text-amber-950 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-200 dark:border-amber-800 flex items-center space-x-1.5"
+          className="px-3 py-1.5 rounded text-xs font-semibold tracking-wide uppercase bg-amber-100 text-amber-950 border border-amber-300 dark:bg-review-bg dark:text-review dark:border-review-border flex items-center space-x-1.5"
         >
-          <Info className="w-3.5 h-3.5 text-amber-800 dark:text-amber-400 flex-shrink-0" />
+          <Info className="w-3.5 h-3.5 text-amber-800 dark:text-review flex-shrink-0" />
           <span>Demo Fixture — Illustrative Data Only (Not an Authorized Decision)</span>
         </div>
       )}
@@ -145,7 +145,7 @@ export function DecisionResultCard({
         </div>
       </header>
 
-      {/* Explicit Hackathon Invariant Confirmation: Pre-PayPal Gate Decision */}
+      {/* Pre-PayPal Gate Decision Confirmation */}
       {isDeny && (
         <div
           role="status"
@@ -169,7 +169,7 @@ export function DecisionResultCard({
             Primary Deterministic Rule Outcome
           </span>
           {effectivePrimaryCode && (
-            <code className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-surface border border-border text-ink">
+            <code className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-surface dark:bg-surface-inset border border-border text-ink">
               {effectivePrimaryCode}
             </code>
           )}
@@ -194,7 +194,7 @@ export function DecisionResultCard({
               return (
                 <li
                   key={code}
-                  className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2 p-2 rounded bg-surface/70 border border-border/60"
+                  className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2 p-2 rounded bg-surface/70 dark:bg-surface-inset border border-border/60 dark:border-border text-ink"
                 >
                   <code className="font-mono font-semibold text-ink shrink-0">{code}</code>
                   <span className="text-muted font-medium">— {formatted.headline}:</span>
@@ -210,22 +210,22 @@ export function DecisionResultCard({
       {(uncertaintyNotes.length > 0 || isReview) && (
         <section
           aria-labelledby="uncertainty-heading"
-          className="p-3.5 rounded bg-amber-50 border border-amber-300 dark:bg-amber-950/40 dark:border-amber-800 text-xs text-amber-950 dark:text-amber-200 space-y-1.5"
+          className="p-3.5 rounded-lg bg-amber-50 border border-amber-300 dark:bg-review-bg dark:border-review-border text-xs text-amber-950 dark:text-ink space-y-1.5"
         >
           <div className="flex items-center space-x-1.5 font-bold tracking-tight">
-            <AlertTriangle className="w-4 h-4 text-amber-800 dark:text-amber-400 flex-shrink-0" aria-hidden="true" />
-            <h4 id="uncertainty-heading" className="text-amber-950 dark:text-amber-200 font-semibold">
+            <AlertTriangle className="w-4 h-4 text-amber-800 dark:text-review flex-shrink-0" aria-hidden="true" />
+            <h4 id="uncertainty-heading" className="text-amber-950 dark:text-review font-semibold">
               Conditions Requiring Resolution (Fail-Closed Gate)
             </h4>
           </div>
           {uncertaintyNotes.length > 0 ? (
-            <ul className="list-disc list-inside space-y-1 text-amber-900 dark:text-amber-300 pl-1">
+            <ul className="list-disc list-inside space-y-1 text-amber-900 dark:text-ink/90 pl-1">
               {uncertaintyNotes.map((note, idx) => (
                 <li key={idx}>{note}</li>
               ))}
             </ul>
           ) : (
-            <p className="text-amber-900 dark:text-amber-300">
+            <p className="text-amber-900 dark:text-ink/90">
               Deterministic rule evaluation identified missing evidence or unresolvable rule ambiguity.
               This transaction is held in a fail-closed state and cannot proceed to order creation without
               an authoritative policy repair or verified evidence.
@@ -236,14 +236,14 @@ export function DecisionResultCard({
 
       {/* Inspectable Evidence Attributes (Rendered only when supplied) */}
       {evidenceItems.length > 0 && (
-        <section aria-labelledby="evidence-heading" className="space-y-2 pt-2 border-t border-border/40">
-          <h4 id="evidence-heading" className="text-xs font-semibold uppercase tracking-wider text-muted flex items-center space-x-1.5">
+        <section aria-labelledby="evidence-heading" className="p-3.5 rounded-lg bg-surface-inset dark:bg-surface-inset border border-border space-y-3 pt-3">
+          <h4 id="evidence-heading" className="text-xs font-semibold uppercase tracking-wider text-muted dark:text-muted flex items-center space-x-1.5">
             <Layers className="w-3.5 h-3.5 text-accent" aria-hidden="true" />
             <span>Associated Evidence Snapshot</span>
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 text-xs">
             {evidenceItems.map((item, idx) => (
-              <div key={idx} className="p-2.5 rounded bg-surface border border-border space-y-1">
+              <div key={idx} className="p-3 rounded-md bg-surface dark:bg-surface border border-border shadow-xs space-y-1.5">
                 <div className="text-muted text-[11px] font-medium">{item.label}</div>
                 <div className="font-semibold text-ink font-mono break-all">{item.value}</div>
                 {item.observedAt && (
@@ -257,15 +257,15 @@ export function DecisionResultCard({
                     <span
                       className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border ${
                         item.verified
-                          ? "bg-emerald-100 text-emerald-950 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-800"
-                          : "bg-amber-100 text-amber-950 border-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-800"
+                          ? "bg-emerald-100 text-emerald-950 border-emerald-300 dark:bg-allow-bg dark:text-allow dark:border-allow-border"
+                          : "bg-amber-100 text-amber-950 border-amber-300 dark:bg-review-bg dark:text-review dark:border-review-border"
                       }`}
                     >
                       {item.verified ? "Verified Authenticity" : "Unverified Merchant Claim"}
                     </span>
                   )}
                   {item.isStale && (
-                    <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-950 border-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-800">
+                    <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-950 border-amber-300 dark:bg-review-bg dark:text-review dark:border-review-border">
                       Stale Evidence
                     </span>
                   )}

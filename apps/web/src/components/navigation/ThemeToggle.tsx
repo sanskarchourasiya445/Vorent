@@ -115,7 +115,7 @@ export function ThemeToggle() {
           >
             <div className="flex items-center space-x-2">
               <Sun className="w-3.5 h-3.5 text-brass shrink-0" aria-hidden="true" />
-              <span>Light (Forest Green)</span>
+              <span>Light (Slate)</span>
             </div>
             {theme === "light" && <Check className="w-3.5 h-3.5 text-primary" aria-hidden="true" />}
           </button>

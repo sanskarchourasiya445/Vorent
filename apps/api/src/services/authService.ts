@@ -1,8 +1,8 @@
 import { randomBytes, scrypt, timingSafeEqual, createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { eq, and, isNull, gt } from "drizzle-orm";
-import { db, users, sessions } from "../db/index.js";
-import { UserRole, type AuthUser, type RegisterRequest, type LoginRequest } from "@warrant/contracts";
+import { db, users, sessions, organizations, organizationMembers } from "../db/index.js";
+import { UserRole, type AuthUser, type RegisterRequest, type LoginRequest, type AccountActivityItem } from "@warrant/contracts";
 import { logAuditEvent } from "../db/repositories/auditRepository.js";
 
 const scryptAsync = promisify(scrypt);
@@ -48,6 +48,12 @@ export interface InMemoryUserRecord {
   passwordHash: string;
   name: string | null;
   role: UserRole;
+  avatarUrl?: string | null;
+  jobTitle?: string | null;
+  department?: string | null;
+  phoneNumber?: string | null;
+  bio?: string | null;
+  organizationId?: string | null;
   createdAt: Date;
   updatedAt: Date;
   disabledAt: Date | null;
@@ -63,9 +69,56 @@ export interface InMemorySessionRecord {
 }
 
 // In-memory identity cache for fast unit tests or standalone execution without external Postgres
-const inMemoryUsers = new Map<string, InMemoryUserRecord>(); // key: id
-const inMemoryUsersByEmail = new Map<string, InMemoryUserRecord>(); // key: lowercase email
-const inMemorySessions = new Map<string, InMemorySessionRecord>(); // key: tokenHash
+export const inMemoryUsers = new Map<string, InMemoryUserRecord>(); // key: id
+export const inMemoryUsersByEmail = new Map<string, InMemoryUserRecord>(); // key: lowercase email
+export const inMemorySessions = new Map<string, InMemorySessionRecord>(); // key: tokenHash
+export const inMemoryActivity = new Map<string, AccountActivityItem[]>(); // key: userId
+
+export function recordInMemoryActivity(
+  userId: string,
+  event: {
+    eventType: string;
+    entityType: string;
+    entityId: string | null;
+    actorType: string;
+    payload?: Record<string, any>;
+  }
+): void {
+  const userEvents = inMemoryActivity.get(userId) || [];
+  userEvents.unshift({
+    id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    eventType: event.eventType,
+    entityType: event.entityType,
+    entityId: event.entityId,
+    actorType: event.actorType,
+    payload: event.payload || {},
+    createdAt: new Date().toISOString(),
+  });
+  inMemoryActivity.set(userId, userEvents);
+}
+
+export function getInMemoryUserById(id: string): InMemoryUserRecord | undefined {
+  return inMemoryUsers.get(id);
+}
+
+export function getInMemoryUserByEmail(email: string): InMemoryUserRecord | undefined {
+  return inMemoryUsersByEmail.get(email.toLowerCase().trim());
+}
+
+export function updateInMemoryUser(id: string, updates: Partial<InMemoryUserRecord>): InMemoryUserRecord | undefined {
+  const existing = inMemoryUsers.get(id);
+  if (!existing) return undefined;
+  const updated: InMemoryUserRecord = {
+    ...existing,
+    ...updates,
+    updatedAt: new Date(),
+  };
+  inMemoryUsers.set(id, updated);
+  if (updated.email) {
+    inMemoryUsersByEmail.set(updated.email.toLowerCase(), updated);
+  }
+  return updated;
+}
 
 export const CANONICAL_STARTER_USERS: Array<{
   id: string;
@@ -73,6 +126,10 @@ export const CANONICAL_STARTER_USERS: Array<{
   name: string;
   role: UserRole;
   plainPassword: string;
+  jobTitle: string;
+  department: string;
+  phoneNumber: string;
+  bio: string;
 }> = [
   {
     id: "00000000-0000-0000-0000-000000000001",
@@ -80,6 +137,10 @@ export const CANONICAL_STARTER_USERS: Array<{
     name: "System Administrator",
     role: UserRole.ADMINISTRATOR,
     plainPassword: "AdminPass123!",
+    jobTitle: "Lead Security Architect",
+    department: "InfoSec & Governance",
+    phoneNumber: "+1 (555) 019-2831",
+    bio: "Lead security and governance architect managing Warrant purchase policies and cryptographic limits.",
   },
   {
     id: "00000000-0000-0000-0000-000000000002",
@@ -87,6 +148,10 @@ export const CANONICAL_STARTER_USERS: Array<{
     name: "Department Approver",
     role: UserRole.APPROVER,
     plainPassword: "ApproverPass123!",
+    jobTitle: "Procurement Director",
+    department: "Finance & Operations",
+    phoneNumber: "+1 (555) 019-4820",
+    bio: "Authorizes and monitors departmental procurement budgets and spend thresholds.",
   },
   {
     id: "00000000-0000-0000-0000-000000000003",
@@ -94,6 +159,10 @@ export const CANONICAL_STARTER_USERS: Array<{
     name: "Finance Auditor",
     role: UserRole.FINANCE_AUDITOR,
     plainPassword: "AuditorPass123!",
+    jobTitle: "Lead Compliance Auditor",
+    department: "Internal Audit & Risk",
+    phoneNumber: "+1 (555) 019-3392",
+    bio: "Audits RFC 8785 attestation packets, ledger reconciliation, and invariant adherence.",
   },
   {
     id: "00000000-0000-0000-0000-000000000004",
@@ -101,6 +170,10 @@ export const CANONICAL_STARTER_USERS: Array<{
     name: "Staff Requester",
     role: UserRole.REQUESTER,
     plainPassword: "RequesterPass123!",
+    jobTitle: "Staff Systems Engineer",
+    department: "Cloud Platform",
+    phoneNumber: "+1 (555) 019-7104",
+    bio: "Requests autonomous purchasing mandates for dev environments and hardware tooling.",
   },
 ];
 
@@ -117,6 +190,11 @@ export async function initStarterUsers(): Promise<void> {
       passwordHash,
       name: starter.name,
       role: starter.role,
+      jobTitle: starter.jobTitle,
+      department: starter.department,
+      phoneNumber: starter.phoneNumber,
+      bio: starter.bio,
+      organizationId: "00000000-0000-0000-0000-000000000010",
       createdAt: new Date("2026-01-01T00:00:00Z"),
       updatedAt: new Date("2026-01-01T00:00:00Z"),
       disabledAt: null,
@@ -127,6 +205,15 @@ export async function initStarterUsers(): Promise<void> {
     // Also attempt seeding to database if DB is available
     try {
       await db
+        .insert(organizations)
+        .values({
+          id: "00000000-0000-0000-0000-000000000010",
+          name: "Warrant Enterprise HQ",
+          slug: "warrant-hq",
+        })
+        .onConflictDoNothing();
+
+      await db
         .insert(users)
         .values({
           id: starter.id,
@@ -135,6 +222,26 @@ export async function initStarterUsers(): Promise<void> {
           passwordHash,
           name: starter.name,
           role: starter.role,
+          jobTitle: starter.jobTitle,
+          department: starter.department,
+          phoneNumber: starter.phoneNumber,
+          bio: starter.bio,
+          organizationId: "00000000-0000-0000-0000-000000000010",
+        })
+        .onConflictDoNothing();
+
+      await db
+        .update(users)
+        .set({ organizationId: "00000000-0000-0000-0000-000000000010" })
+        .where(eq(users.id, starter.id));
+
+      await db
+        .insert(organizationMembers)
+        .values({
+          id: `00000000-0000-0000-0000-00000000002${starter.id.slice(-1)}`,
+          organizationId: "00000000-0000-0000-0000-000000000010",
+          userId: starter.id,
+          role: starter.role === UserRole.ADMINISTRATOR ? "OWNER" : starter.role === UserRole.APPROVER ? "ADMIN" : "MEMBER",
         })
         .onConflictDoNothing();
     } catch {
@@ -227,7 +334,14 @@ export async function registerUser(input: RegisterRequest): Promise<{
       createdAt: now,
       updatedAt: now,
     });
-  } catch {
+  } catch (dbErr: any) {
+    if (process.env.NODE_ENV === "production") {
+      inMemoryUsers.delete(newUserId);
+      inMemoryUsersByEmail.delete(normalizedEmail);
+      const err = new Error("Database unavailable for user registration persistence");
+      (err as any).code = "DATABASE_UNAVAILABLE";
+      throw err;
+    }
     // DB write failure tolerated if running in fallback mode
   }
 
@@ -254,13 +368,22 @@ export async function registerUser(input: RegisterRequest): Promise<{
       expiresAt,
       createdAt: now,
     });
-  } catch {
+  } catch (dbErr: any) {
+    if (process.env.NODE_ENV === "production") {
+      inMemoryUsers.delete(newUserId);
+      inMemoryUsersByEmail.delete(normalizedEmail);
+      inMemorySessions.delete(tokenHash);
+      const err = new Error("Database unavailable for session token persistence");
+      (err as any).code = "DATABASE_UNAVAILABLE";
+      throw err;
+    }
     // Fallback mode
   }
 
   // Audit registration
   try {
     await logAuditEvent(db as any, {
+      ownerId: newUserId,
       actorType: "USER",
       eventType: "USER_REGISTERED",
       entityType: "USER",
@@ -270,6 +393,14 @@ export async function registerUser(input: RegisterRequest): Promise<{
   } catch {
     // Non-blocking audit
   }
+
+  recordInMemoryActivity(newUserId, {
+    eventType: "USER_REGISTERED",
+    entityType: "USER",
+    entityId: newUserId,
+    actorType: "USER",
+    payload: { email: normalizedEmail, role: userRole },
+  });
 
 
   return {
@@ -357,13 +488,20 @@ export async function loginUser(input: LoginRequest): Promise<{
       expiresAt,
       createdAt: now,
     });
-  } catch {
+  } catch (dbErr: any) {
+    if (process.env.NODE_ENV === "production") {
+      inMemorySessions.delete(tokenHash);
+      const err = new Error("Database unavailable for session token persistence");
+      (err as any).code = "DATABASE_UNAVAILABLE";
+      throw err;
+    }
     // Fallback mode
   }
 
   // Audit login
   try {
     await logAuditEvent(db as any, {
+      ownerId: userRecord.id,
       actorType: "USER",
       eventType: "USER_LOGGED_IN",
       entityType: "USER",
@@ -373,6 +511,14 @@ export async function loginUser(input: LoginRequest): Promise<{
   } catch {
     // Non-blocking
   }
+
+  recordInMemoryActivity(userRecord.id, {
+    eventType: "USER_LOGGED_IN",
+    entityType: "USER",
+    entityId: userRecord.id,
+    actorType: "USER",
+    payload: { email: normalizedEmail, role: userRecord.role },
+  });
 
 
   return {

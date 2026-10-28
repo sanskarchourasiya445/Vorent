@@ -4,7 +4,7 @@ import type { FastifyInstance } from "fastify";
 import * as paymentOrderRepo from "../db/repositories/paymentOrderRepository.js";
 import { CheckoutError } from "../db/repositories/checkoutProposalRepository.js";
 
-describe("PayPal Webhooks Route & Processing (Phase 1)", () => {
+describe("PayPal Webhooks Route & Processing", () => {
   let server: FastifyInstance;
 
   const validHeaders = {
