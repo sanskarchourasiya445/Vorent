@@ -7,8 +7,7 @@ import {
   EvidencePacketNotFoundError,
 } from "../services/evidencePacketService.js";
 import { db } from "../db/index.js";
-import { ensureDefaultUser } from "../db/repositories/policyRepository.js";
-import { extractRequestId, isDbConnectionError } from "./routeUtils.js";
+import { extractRequestId, isDbConnectionError, resolveAuthorizedUserOrReject } from "./routeUtils.js";
 
 const ParamIdSchema = z.object({
   id: z.string().min(1),
@@ -35,8 +34,13 @@ export const evidencePacketRoutes: FastifyPluginAsync = async (app: FastifyInsta
       });
     }
 
+    const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+      allowDefaultFallbackInDev: true,
+    });
+    if (!authResult) return;
+    const { ownerId } = authResult;
+
     try {
-      const ownerId = await ensureDefaultUser(db);
       const packet = await buildEvidencePacketForProposal(parse.data.id, db, ownerId);
       return reply.status(200).send({ packet });
     } catch (err: unknown) {
@@ -85,8 +89,13 @@ export const evidencePacketRoutes: FastifyPluginAsync = async (app: FastifyInsta
       });
     }
 
+    const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+      allowDefaultFallbackInDev: true,
+    });
+    if (!authResult) return;
+    const { ownerId } = authResult;
+
     try {
-      const ownerId = await ensureDefaultUser(db);
       const packet = await buildEvidencePacketForOrder(parse.data.id, db, ownerId);
       return reply.status(200).send({ packet });
     } catch (err: unknown) {

@@ -13,7 +13,7 @@ import {
   type SearchSpaceDefinition,
 } from "../index.js";
 
-describe("Phase 2 Verification Contracts (@warrant/contracts)", () => {
+describe("Verification Contracts (@warrant/contracts)", () => {
   const validIntent: ConfirmedIntent = {
     name: "Standard Book Purchase Mandate",
     currency: "USD",

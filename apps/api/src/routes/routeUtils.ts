@@ -51,6 +51,9 @@ export function isDbConnectionError(err: unknown): boolean {
 import type { FastifyReply } from "fastify";
 import type { AuthUser, UserRole } from "@warrant/contracts";
 import { verifySessionToken } from "../services/authService.js";
+import { env } from "../config/env.js";
+import { db } from "../db/index.js";
+import { ensureDefaultUser } from "../db/repositories/policyRepository.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -135,4 +138,184 @@ export function requireRoles(allowedRoles: UserRole[]) {
     }
   };
 }
+
+export interface ResolveIdentityOptions {
+  requiredRoles?: UserRole[];
+  allowDefaultFallbackInDev?: boolean;
+}
+
+/**
+ * Authoritatively resolves user identity and enforces production trust boundary.
+ *
+ * In production:
+ * - Unauthenticated requests strictly fail-closed with HTTP 401 UNAUTHENTICATED.
+ * - Missing or invalid credentials NEVER silently fall back to a default user.
+ * - Authenticated callers must hold one of the required roles (if specified), or receive HTTP 403.
+ *
+ * In non-production (development & test):
+ * - If user credentials are provided, validates role and binds to real user ID.
+ * - If no credentials and allowDefaultFallbackInDev is true, safely returns default owner for local test harness.
+ */
+export async function resolveAuthorizedUserOrReject(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  options: ResolveIdentityOptions = {}
+): Promise<{ user: AuthUser | null; ownerId: string } | null> {
+  const requestId = extractRequestId(request);
+  reply.header("x-request-id", requestId);
+
+  const user = await authenticateRequest(request);
+
+  if (user) {
+    if (options.requiredRoles && !options.requiredRoles.includes(user.role)) {
+      reply.status(403).send({
+        error: {
+          code: "FORBIDDEN",
+          message: `User role ${user.role} is not authorized for this action. Requires one of: ${options.requiredRoles.join(", ")}.`,
+        },
+        requestId,
+      });
+      return null;
+    }
+    return { user, ownerId: user.id };
+  }
+
+  // Strict Production & Staging Trust Boundary:
+  // In production or staging (or when default fallback is disabled), ANY unauthenticated call fails closed with 401
+  const isStrictEnv = env.NODE_ENV === "production" || (env.NODE_ENV as string) === "staging";
+  if (isStrictEnv || !options.allowDefaultFallbackInDev) {
+    reply.status(401).send({
+      error: {
+        code: "UNAUTHENTICATED",
+        message: "Authentication required to access this endpoint.",
+      },
+      requestId,
+    });
+    return null;
+  }
+
+  // Explicit, documented test/development fallback ONLY when NOT in production
+  try {
+    const defaultOwnerId = await ensureDefaultUser(db);
+    return { user: null, ownerId: defaultOwnerId };
+  } catch (err: unknown) {
+    if (isDbConnectionError(err)) {
+      reply.status(503).send({
+        error: {
+          code: "DATABASE_UNAVAILABLE",
+          message: "Persistence store is currently unavailable in standby mode.",
+        },
+        requestId,
+      });
+      return null;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Global registry of active rate limiter stores so tests can reset them cleanly.
+ */
+const rateLimitStores = new Set<Map<string, number[]>>();
+
+/**
+ * Resets all active rate limiter windows. Useful for tests.
+ */
+export function resetRateLimits(): void {
+  for (const store of rateLimitStores) {
+    store.clear();
+  }
+}
+
+/**
+ * Default key generator based on user ID (if authenticated), token, or validated client IP.
+ * Relies on Fastify's validated `request.ip` (governed by trustProxy configuration),
+ * preventing direct untrusted clients from spoofing raw X-Forwarded-For headers.
+ */
+function defaultRateLimitKeyGenerator(request: FastifyRequest): string {
+  if (request.user?.id) {
+    return `user:${request.user.id}`;
+  }
+  const token = extractToken(request);
+  if (token) {
+    return `token:${token}`;
+  }
+  const clientIp = request.ip || (request.socket as any)?.remoteAddress || "127.0.0.1";
+  return `ip:${clientIp}`;
+}
+
+export interface RateLimiterOptions {
+  max: number;
+  windowMs: number;
+  keyGenerator?: (req: FastifyRequest) => string;
+}
+
+/**
+ * Creates a lightweight, zero-dependency in-memory sliding window rate limiter hook for Fastify.
+ */
+export function createRateLimiter(options: {
+  max: number;
+  windowMs: number;
+  keyGenerator?: (req: FastifyRequest) => string;
+}): (request: FastifyRequest, reply: FastifyReply) => Promise<void> {
+  const store = new Map<string, number[]>();
+  rateLimitStores.add(store);
+
+  const keyGen = options.keyGenerator ?? defaultRateLimitKeyGenerator;
+
+  return async function rateLimiterHook(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const now = Date.now();
+    const key = keyGen(request);
+    const windowStart = now - options.windowMs;
+
+    const timestamps = store.get(key) || [];
+    const validTimestamps = timestamps.filter((t) => t > windowStart);
+
+    // Periodic sweep if store grows very large
+    if (store.size > 10000) {
+      for (const [k, ts] of store.entries()) {
+        const active = ts.filter((t) => t > windowStart);
+        if (active.length === 0) store.delete(k);
+        else store.set(k, active);
+      }
+    }
+
+    // If limit reached, calculate reset and reject with HTTP 429
+    if (validTimestamps.length >= options.max) {
+      store.set(key, validTimestamps);
+      const oldestTimestamp = validTimestamps[0] ?? now;
+      const resetMs = Math.max(0, oldestTimestamp + options.windowMs - now);
+      const resetSeconds = Math.max(1, Math.ceil(resetMs / 1000));
+      const requestId = extractRequestId(request);
+
+      reply.header("x-request-id", requestId);
+      reply.header("x-ratelimit-limit", options.max);
+      reply.header("x-ratelimit-remaining", 0);
+      reply.header("x-ratelimit-reset", resetSeconds);
+      reply.header("retry-after", resetSeconds);
+
+      return reply.status(429).send({
+        error: {
+          code: "RATE_LIMIT_EXCEEDED",
+          message: "Too many requests. Please try again later.",
+        },
+        requestId,
+      });
+    }
+
+    // Record this request
+    validTimestamps.push(now);
+    store.set(key, validTimestamps);
+
+    const remaining = Math.max(0, options.max - validTimestamps.length);
+    const oldestTimestamp = validTimestamps[0] ?? now;
+    const resetMs = Math.max(0, oldestTimestamp + options.windowMs - now);
+    const resetSeconds = Math.max(1, Math.ceil(resetMs / 1000));
+
+    reply.header("x-ratelimit-limit", options.max);
+    reply.header("x-ratelimit-remaining", remaining);
+    reply.header("x-ratelimit-reset", resetSeconds);
+  };
+}
+
 

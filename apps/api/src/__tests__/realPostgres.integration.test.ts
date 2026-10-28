@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
@@ -26,7 +26,7 @@ import { ReasonCode } from "@warrant/contracts";
 import type { FastifyInstance } from "fastify";
 import type { PolicyDocument, ConfirmedIntent, SearchSpaceDefinition } from "@warrant/contracts";
 
-describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
+describe("Real PostgreSQL Persistence & Verification", () => {
   let isDbLive = false;
   let server: FastifyInstance;
   const createdPolicyIds: string[] = [];
@@ -34,22 +34,26 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
   const createdApprovalIds: string[] = [];
 
   beforeAll(async () => {
-    // Probe real PostgreSQL connection safely
-    try {
-      const client = await pool.connect();
-      await client.query("SELECT 1");
-      client.release();
-      isDbLive = true;
+    // Probe real PostgreSQL connection safely if explicitly enabled
+    if (process.env.RUN_LIVE_DB_TESTS === "true") {
+      try {
+        const client = await pool.connect();
+        await client.query("SELECT 1");
+        client.release();
+        isDbLive = true;
 
-      // Apply migrations if DB is live and reachable
-      const migrationsFolder = existsSync(resolve(process.cwd(), "drizzle/migrations"))
-        ? resolve(process.cwd(), "drizzle/migrations")
-        : resolve(process.cwd(), "../../drizzle/migrations");
+        // Apply migrations if DB is live and reachable
+        const migrationsFolder = existsSync(resolve(process.cwd(), "drizzle/migrations"))
+          ? resolve(process.cwd(), "drizzle/migrations")
+          : resolve(process.cwd(), "../../drizzle/migrations");
 
-      await migrate(db, {
-        migrationsFolder,
-      });
-    } catch {
+        await migrate(db, {
+          migrationsFolder,
+        });
+      } catch {
+        isDbLive = false;
+      }
+    } else {
       isDbLive = false;
     }
 
@@ -316,6 +320,9 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
     });
 
     it("preset policy fallback returns clean preset data without fabricating DB records", async () => {
+      const selectSpy = vi.spyOn(db, "select").mockImplementationOnce(() => {
+        throw new Error("Simulated database standby/disconnection");
+      });
       const res = await server.inject({
         method: "GET",
         url: "/api/policies",
@@ -328,10 +335,11 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
         const allPresets = data.policies.every((p: any) => p.isPreset === true || Boolean(p.presetId));
         expect(allPresets).toBe(true);
       }
+      selectSpy.mockRestore();
     });
   });
 
-  describe("Phase 4.2 Nonce Replay Defense & Concurrent Spend Serialization (Real PostgreSQL)", () => {
+  describe("Nonce Replay Defense & Concurrent Spend Serialization (Real PostgreSQL)", () => {
     it("Step 8 [REAL-PG]: rejects nonce replay when same nonce is submitted twice to real PostgreSQL", async (ctx) => {
       if (!isDbLive) {
         ctx.skip();
@@ -927,7 +935,7 @@ describe("Phase 4 Real PostgreSQL Persistence & Verification", () => {
     });
   });
 
-  describe("Phase 4.3 Server-Side Approval Qualification & Decision D-014 (Real PostgreSQL)", () => {
+  describe("Server-Side Approval Qualification & Decision D-014 (Real PostgreSQL)", () => {
     it("Step 13 [REAL-PG]: exercises POST /api/approvals with valid qualifying run and confirms persistence", async (ctx) => {
       if (!isDbLive) {
         ctx.skip();

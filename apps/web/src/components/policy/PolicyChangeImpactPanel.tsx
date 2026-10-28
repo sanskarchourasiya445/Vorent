@@ -10,7 +10,9 @@ import {
   Layers,
   ExternalLink,
   Info,
+  RefreshCw,
 } from "lucide-react";
+import { SkeletonCard } from "../ui/Skeleton";
 import {
   fetchPolicySummaries,
   fetchPolicyVersionDetail,
@@ -375,8 +377,12 @@ export function PolicyChangeImpactPanel({
 
           {/* Details Loading or Error */}
           {loadingDetails && (
-            <div className="p-6 text-center text-xs text-muted border border-border rounded-md bg-surface animate-pulse font-mono">
-              Calculating policy rule diff and re-verification triggers...
+            <div className="space-y-4">
+              <div className="p-3.5 text-center text-xs text-muted border border-border rounded-md bg-surface font-mono flex items-center justify-center space-x-2.5">
+                <RefreshCw className="w-4 h-4 animate-spin text-accent" />
+                <span>Calculating policy rule diff and re-verification triggers...</span>
+              </div>
+              <SkeletonCard lines={4} showHeader={true} />
             </div>
           )}
 

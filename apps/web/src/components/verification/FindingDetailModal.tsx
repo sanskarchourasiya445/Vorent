@@ -78,7 +78,7 @@ export function FindingDetailModal({
   const severity = finding.severity || "HIGH";
   const isHighOrCritical = severity === "CRITICAL" || severity === "HIGH";
 
-  // Adapt evaluation result directly using the Phase 1 pure adapter
+  // Adapt evaluation result directly using the evaluation result adapter
   const cardProps = adaptEvaluationResultToDecisionCardProps(finding.actualResult, {
     policyVersionId,
     policyHash,
@@ -174,7 +174,7 @@ export function FindingDetailModal({
   return (
     <div
       data-lenis-prevent
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/40 backdrop-blur-xs overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs overflow-y-auto"
       role="dialog"
       aria-modal="true"
       aria-labelledby="finding-modal-title"
@@ -201,13 +201,11 @@ export function FindingDetailModal({
                 </span>
                 <span
                   className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-mono font-bold uppercase border ${
-                    severity === "CRITICAL"
-                      ? "bg-deny/10 text-deny border-deny/30"
-                      : severity === "HIGH"
-                        ? "bg-deny/10 text-deny border-deny/30"
-                        : severity === "MEDIUM"
-                          ? "bg-review/10 text-review border-review/30"
-                          : "bg-surface-inset text-muted border-border"
+                    severity === "CRITICAL" || severity === "HIGH"
+                      ? "bg-deny-bg text-deny border-deny-border"
+                      : severity === "MEDIUM"
+                        ? "bg-review-bg text-review border-review-border"
+                        : "bg-surface-inset text-muted border-border"
                   }`}
                 >
                   {severity} SEVERITY
@@ -221,9 +219,9 @@ export function FindingDetailModal({
                   <span
                     className={`font-mono text-[10px] px-1.5 py-0.2 rounded font-semibold border ${
                       resolutionStatus === "RESOLVED"
-                        ? "bg-allow/10 text-allow border-allow/30"
+                        ? "bg-allow-bg text-allow border-allow-border"
                         : resolutionStatus === "ACCEPTED_RISK"
-                          ? "bg-review/10 text-review border-review/30"
+                          ? "bg-review-bg text-review border-review-border"
                           : "bg-surface-inset text-muted border-border"
                     }`}
                   >
@@ -253,8 +251,8 @@ export function FindingDetailModal({
           <div
             className={`p-4 rounded-lg text-xs space-y-2 border ${
               isCounterexample
-                ? "bg-deny/10 border-deny/30 text-ink"
-                : "bg-review/10 border-review/30 text-ink"
+                ? "bg-deny-bg border-deny-border text-ink"
+                : "bg-review-bg border-review-border text-ink"
             }`}
           >
             <div className="flex items-center justify-between">
@@ -278,7 +276,7 @@ export function FindingDetailModal({
 
           {/* Active Gate Fail-Closed Decision D-014 Protection */}
           {isHighOrCritical && finding.resolutionStatus !== "RESOLVED" && (
-            <div className="p-3.5 rounded-lg bg-deny/10 border border-deny/30 space-y-1.5">
+            <div className="p-3.5 rounded-lg bg-deny-bg border border-deny-border space-y-1.5">
               <div className="flex items-center justify-between font-bold">
                 <span className="flex items-center gap-1.5 text-xs text-deny">
                   <ShieldAlert className="w-4 h-4 text-deny shrink-0" aria-hidden="true" />
@@ -288,7 +286,7 @@ export function FindingDetailModal({
                   BLOCKED
                 </span>
               </div>
-              <p className="text-[11px] leading-relaxed text-ink-muted">
+              <p className="text-[11px] leading-relaxed text-muted dark:text-muted">
                 Decision D-014 mandates that the active checkout gate fails closed (DENY) for any checkout proposal while unresolved CRITICAL or HIGH verification findings exist. This transaction cannot proceed to payment until the policy is repaired.
               </p>
             </div>
@@ -321,9 +319,9 @@ export function FindingDetailModal({
               <ShoppingCart className="w-3.5 h-3.5 text-accent" aria-hidden="true" />
               <span>Reproducible Witness Cart ({finding.candidateCart.items.length} items)</span>
             </h4>
-            <div className="rounded border border-border overflow-hidden text-xs">
+            <div className="rounded border border-border overflow-hidden text-xs bg-surface-inset dark:bg-surface-inset">
               <table className="w-full text-left border-collapse">
-                <thead className="bg-surface-inset border-b border-border text-[11px] text-muted uppercase tracking-wider">
+                <thead className="bg-surface-inset dark:bg-surface-inset border-b border-border text-[11px] text-muted uppercase tracking-wider">
                   <tr>
                     <th className="p-2.5">SKU / Title</th>
                     <th className="p-2.5">Category</th>
@@ -332,7 +330,7 @@ export function FindingDetailModal({
                     <th className="p-2.5 text-right">Total</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody className="divide-y divide-border bg-surface dark:bg-surface">
                   {finding.candidateCart.items.map((item, idx) => {
                     const unitPrice = (item.unitPriceMinor / 100).toFixed(2);
                     const lineTotal = ((item.unitPriceMinor * item.quantity) / 100).toFixed(2);
@@ -412,7 +410,7 @@ export function FindingDetailModal({
 
             {/* Current Governance Status Banner */}
             {resolutionStatus === "RESOLVED" && (
-              <div className="p-3.5 rounded border border-emerald-300 dark:border-allow/40 bg-emerald-50 dark:bg-allow/10 text-emerald-950 dark:text-allow text-xs space-y-1 font-mono">
+              <div className="p-3.5 rounded border border-emerald-300 dark:border-allow-border bg-emerald-50 dark:bg-allow-bg text-emerald-950 dark:text-ink text-xs space-y-1 font-mono">
                 <div className="flex items-center space-x-1.5 font-semibold text-emerald-900 dark:text-allow">
                   <Check className="w-4 h-4 text-emerald-700 dark:text-allow shrink-0" aria-hidden="true" />
                   <span>Status: Resolved</span>
@@ -430,7 +428,7 @@ export function FindingDetailModal({
               </div>
             )}
             {resolutionStatus === "ACCEPTED_RISK" && (
-              <div className="p-3.5 rounded border border-amber-300 dark:border-review/40 bg-amber-50 dark:bg-review/10 text-amber-950 dark:text-review text-xs space-y-1 font-mono">
+              <div className="p-3.5 rounded border border-amber-300 dark:border-review-border bg-amber-50 dark:bg-review-bg text-amber-950 dark:text-ink text-xs space-y-1 font-mono">
                 <div className="flex items-center space-x-1.5 font-semibold text-amber-900 dark:text-review">
                   <AlertTriangle className="w-4 h-4 text-amber-700 dark:text-review shrink-0" aria-hidden="true" />
                   <span>Status: Risk Accepted</span>
@@ -445,7 +443,7 @@ export function FindingDetailModal({
 
             {/* Resolve Form */}
             {triageAction === "RESOLVE" && (
-              <div className="p-4 rounded border border-border bg-surface-inset space-y-3 text-xs">
+              <div className="p-4 rounded border border-border bg-surface-inset dark:bg-surface-inset space-y-3 text-xs">
                 <div className="font-semibold text-ink font-mono">
                   Resolve Finding with Verified Policy Version
                 </div>
@@ -459,7 +457,7 @@ export function FindingDetailModal({
                     value={resolvedByVersionId}
                     onChange={(e) => setResolvedByVersionId(e.target.value)}
                     placeholder="e.g. 18674b70-b535-465d-a99f-fee8d9de5bf0"
-                    className="w-full px-3 py-1.5 rounded border border-border bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
+                    className="w-full px-3 py-1.5 rounded border border-border bg-surface dark:bg-surface text-ink font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
                   />
                 </div>
                 <div>
@@ -472,7 +470,7 @@ export function FindingDetailModal({
                     value={resolutionNote}
                     onChange={(e) => setResolutionNote(e.target.value)}
                     placeholder="Document how the new policy version eliminates this vulnerability..."
-                    className="w-full p-2.5 rounded border border-border bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
+                    className="w-full p-2.5 rounded border border-border bg-surface dark:bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
                   />
                 </div>
                 <button
@@ -493,18 +491,18 @@ export function FindingDetailModal({
 
             {/* Accept Risk Form */}
             {triageAction === "ACCEPT_RISK" && (
-              <div className="p-4 rounded border border-border bg-surface-inset space-y-3 text-xs">
+              <div className="p-4 rounded border border-border bg-surface-inset dark:bg-surface-inset space-y-3 text-xs">
                 <div className="font-semibold text-ink font-mono">
                   Accept Operational Risk (Medium &amp; Low Severity Only)
                 </div>
 
                 {isHighOrCritical ? (
-                  <div className="p-3 rounded border border-red-300 dark:border-deny/40 bg-red-50 dark:bg-deny/10 text-red-950 dark:text-deny space-y-1">
+                  <div className="p-3 rounded border border-red-300 dark:border-deny-border bg-red-50 dark:bg-deny-bg text-red-950 dark:text-ink space-y-1">
                     <div className="font-bold flex items-center space-x-1.5 text-red-900 dark:text-deny font-mono">
                       <AlertCircle className="w-4 h-4 text-deny" aria-hidden="true" />
                       <span>Decision D-014 Strict Guardrail</span>
                     </div>
-                    <p className="text-[11px] leading-relaxed">
+                    <p className="text-[11px] leading-relaxed text-red-900 dark:text-ink/90">
                       This finding is classified as <strong>{severity}</strong> severity. Under Decision D-014, Critical and High findings cannot be accepted as risk. A verified repairing policy version is strictly required.
                     </p>
                   </div>
@@ -520,7 +518,7 @@ export function FindingDetailModal({
                         value={riskRationale}
                         onChange={(e) => setRiskRationale(e.target.value)}
                         placeholder="Explain why this finding is an acceptable business risk..."
-                        className="w-full p-2.5 rounded border border-border bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
+                        className="w-full p-2.5 rounded border border-border bg-surface dark:bg-surface text-ink text-xs focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
                       />
                     </div>
                     <button
@@ -543,12 +541,12 @@ export function FindingDetailModal({
 
             {/* Triage feedback alerts */}
             {triageError && (
-              <div className="p-3 rounded border border-red-300 dark:border-deny/40 bg-red-50 dark:bg-deny/10 text-red-950 dark:text-deny text-xs font-mono">
+              <div className="p-3 rounded border border-red-300 dark:border-deny-border bg-red-50 dark:bg-deny-bg text-red-950 dark:text-deny text-xs font-mono">
                 {triageError}
               </div>
             )}
             {triageSuccess && (
-              <div className="p-3 rounded border border-emerald-300 dark:border-allow/40 bg-emerald-50 dark:bg-allow/10 text-emerald-950 dark:text-allow text-xs flex items-center space-x-2 font-mono">
+              <div className="p-3 rounded border border-emerald-300 dark:border-allow-border bg-emerald-50 dark:bg-allow-bg text-emerald-950 dark:text-allow text-xs flex items-center space-x-2 font-mono">
                 <Check className="w-4 h-4 text-emerald-700 dark:text-allow shrink-0" aria-hidden="true" />
                 <span>{triageSuccess}</span>
               </div>

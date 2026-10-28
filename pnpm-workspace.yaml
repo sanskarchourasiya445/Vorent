@@ -1,3 +1,6 @@
+# VORENT Monorepo Configuration
+# Primary package management is driven by npm workspaces (see root package.json).
+# This configuration is maintained for pnpm and tooling ecosystem compatibility.
 packages:
   - apps/*
   - packages/*

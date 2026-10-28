@@ -3,43 +3,43 @@
 @tailwind utilities;
 
 /* ==========================================================================
-   WARRANT STUDIO — DUAL-THEME TOKENS ENGINE
-   Theme 1 (Dark): Midnight Navy + Emerald
-   Theme 2 (Light): Forest Green + Warm Ivory
+   VORENT — DUAL-THEME TOKENS ENGINE
+   Theme 1 (Dark): Obsidian Black + Charcoal + Restrained Electric Blue
+   Theme 2 (Light): Platinum White + Obsidian Sidebar + Electric Blue Accent
    ========================================================================== */
 
-/* DARK MODE (Default & .dark & [data-theme="dark"]) — Midnight Navy + Emerald */
+/* DARK MODE (Default & .dark & [data-theme="dark"]) — Obsidian + Charcoal + Electric Blue */
 :root,
 html.dark,
 :root[data-theme="dark"] {
   /* Specification Semantic Tokens */
-  --bg-primary: #0B1220;
-  --bg-secondary: #101B2D;
-  --bg-card: #14263D;
-  --bg-elevated: #1E293B;
-  --brand-primary: #10B981;
-  --brand-secondary: #059669;
+  --bg-primary: #080B11;
+  --bg-secondary: #0F172A;
+  --bg-card: #111726;
+  --bg-elevated: #161F30;
+  --brand-primary: #0EA5E9;
+  --brand-secondary: #0284C7;
   --text-primary: #F8FAFC;
   --text-secondary: #94A3B8;
-  --border-default: #334155;
-  --soft-accent-surface: #0E2E25;
+  --border-default: #1E293B;
+  --soft-accent-surface: #0C253B;
   --success: #22C55E;
   --error: #F87171;
   --warning: #FBBF24;
 
   /* App Surface & Canvas Mappings */
-  --color-canvas: #0B1220;
-  --color-canvas-subtle: #101B2D;
-  --color-sidebar: #0B1220;
-  --color-sidebar-raised: #14263D;
-  --color-surface: #14263D;
-  --color-surface-soft: #16263D;
-  --color-surface-subtle: #101B2D;
-  --color-surface-raised: #1E293B;
-  --color-surface-inset: #0E1A2B;
-  --color-surface-muted: #101E31;
-  --color-card: #14263D;
-  --color-chrome: #0B1220;
+  --color-canvas: #080B11;
+  --color-canvas-subtle: #0B0F17;
+  --color-sidebar: #070A0F;
+  --color-sidebar-raised: #0F172A;
+  --color-surface: #111726;
+  --color-surface-soft: #161F30;
+  --color-surface-subtle: #0B0F17;
+  --color-surface-raised: #1A2338;
+  --color-surface-inset: #0A0E17;
+  --color-surface-muted: #0F172A;
+  --color-card: #111726;
+  --color-chrome: #080B11;
 
   /* Typography */
   --color-ink: #F8FAFC;
@@ -50,26 +50,26 @@ html.dark,
   --color-white-warm: #F8FAFC;
 
   /* Borders & Dividers */
-  --color-border: #334155;
-  --color-border-subtle: #1E293B;
-  --color-border-light: #334155;
-  --color-border-strong: #475569;
+  --color-border: #1E293B;
+  --color-border-subtle: #141C2E;
+  --color-border-light: #283548;
+  --color-border-strong: #334155;
 
-  /* Accents & Brand */
-  --color-primary: #10B981;
-  --color-primary-hover: #059669;
-  --color-primary-active: #047857;
-  --color-primary-soft: #0E2E25;
-  --color-accent: #10B981;
-  --color-accent-hover: #059669;
-  --color-accent-active: #047857;
-  --color-accent-subtle: #0E2E25;
-  --color-focus-ring: #10B981;
+  /* Accents & Brand: Restrained Electric Blue */
+  --color-primary: #0EA5E9;
+  --color-primary-hover: #0284C7;
+  --color-primary-active: #0369A1;
+  --color-primary-soft: #0C253B;
+  --color-accent: #0EA5E9;
+  --color-accent-hover: #0284C7;
+  --color-accent-active: #0369A1;
+  --color-accent-subtle: #0C253B;
+  --color-focus-ring: #0EA5E9;
 
   /* Accent Metallics */
-  --color-brass: #D4C596;
-  --color-earth: #D4C596;
-  --color-earth-soft: #2A2417;
+  --color-brass: #E2E8F0;
+  --color-earth: #CBD5E1;
+  --color-earth-soft: #1E293B;
 
   /* Operational Status & Decision Semantics */
   --color-allow: #22C55E;
@@ -92,8 +92,8 @@ html.dark,
   --color-warning: #FBBF24;
   --color-warning-soft: #2E2007;
 
-  --color-info: #38BDF8;
-  --color-info-soft: #0C283E;
+  --color-info: #0EA5E9;
+  --color-info-soft: #0C253B;
   --color-disabled: #475569;
 
   /* Sandbox Environment Badge */
@@ -102,98 +102,167 @@ html.dark,
   --color-sandbox-border: #78350F;
 }
 
-/* LIGHT MODE (.light & [data-theme="light"]) — Forest Green + Warm Ivory */
+/* LIGHT MODE (.light & [data-theme="light"]) — Clean Platinum + Obsidian Sidebar + Electric Blue Accent */
 html.light,
 :root[data-theme="light"] {
   /* Specification Semantic Tokens */
-  --bg-primary: #F7F5EF;
-  --bg-secondary: #F0EFE7;
+  --bg-primary: #F8FAFC;
+  --bg-secondary: #F1F5F9;
   --bg-card: #FFFFFF;
   --bg-elevated: #FFFFFF;
-  --brand-primary: #12372A;
-  --brand-secondary: #1D6B4F;
-  --text-primary: #24352D;
-  --text-secondary: #69776D;
-  --border-default: #DFE4DC;
-  --soft-green-surface: #E5EEE7;
-  --champagne-accent: #D6B56D;
-  --success: #18794E;
-  --error: #B94343;
-  --warning: #946200;
+  --brand-primary: #0284C7;
+  --brand-secondary: #0369A1;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --border-default: #E2E8F0;
+  --soft-green-surface: #E0F2FE;
+  --champagne-accent: #CBD5E1;
+  --success: #16A34A;
+  --error: #DC2626;
+  --warning: #D97706;
 
   /* App Surface & Canvas Mappings */
-  --color-canvas: #F7F5EF;
-  --color-canvas-subtle: #F0EFE7;
-  --color-sidebar: #F0EFE7;
-  --color-sidebar-raised: #FFFFFF;
+  --color-canvas: #F8FAFC;
+  --color-canvas-subtle: #F1F5F9;
+  --color-sidebar: #070A0F;
+  --color-sidebar-raised: #0F172A;
   --color-surface: #FFFFFF;
-  --color-surface-soft: #E5EEE7;
-  --color-surface-subtle: #F7F5EF;
+  --color-surface-soft: #F1F5F9;
+  --color-surface-subtle: #F8FAFC;
   --color-surface-raised: #FFFFFF;
-  --color-surface-inset: #EAE8DF;
-  --color-surface-muted: #F0EFE7;
+  --color-surface-inset: #F1F5F9;
+  --color-surface-muted: #E2E8F0;
   --color-card: #FFFFFF;
-  --color-chrome: #F0EFE7;
+  --color-chrome: #F1F5F9;
 
   /* Typography */
-  --color-ink: #24352D;
-  --color-ink-muted: #69776D;
-  --color-ink-secondary: #69776D;
-  --color-muted: #69776D;
-  --color-ink-subtle: #8A978E;
-  --color-white-warm: #24352D;
+  --color-ink: #0F172A;
+  --color-ink-muted: #64748B;
+  --color-ink-secondary: #64748B;
+  --color-muted: #64748B;
+  --color-ink-subtle: #94A3B8;
+  --color-white-warm: #0F172A;
 
   /* Borders & Dividers */
-  --color-border: #DFE4DC;
-  --color-border-subtle: #ECEFEA;
-  --color-border-light: #DFE4DC;
-  --color-border-strong: #B8C4B4;
+  --color-border: #E2E8F0;
+  --color-border-subtle: #F1F5F9;
+  --color-border-light: #E2E8F0;
+  --color-border-strong: #CBD5E1;
 
-  /* Accents & Brand */
-  --color-primary: #12372A;
-  --color-primary-hover: #1D6B4F;
-  --color-primary-active: #0D261D;
-  --color-primary-soft: #E5EEE7;
-  --color-accent: #12372A;
-  --color-accent-hover: #1D6B4F;
-  --color-accent-active: #0D261D;
-  --color-accent-subtle: #E5EEE7;
-  --color-focus-ring: #1D6B4F;
+  /* Accents & Brand: Restrained Electric Blue */
+  --color-primary: #0284C7;
+  --color-primary-hover: #0369A1;
+  --color-primary-active: #075985;
+  --color-primary-soft: #E0F2FE;
+  --color-accent: #0284C7;
+  --color-accent-hover: #0369A1;
+  --color-accent-active: #075985;
+  --color-accent-subtle: #E0F2FE;
+  --color-focus-ring: #0284C7;
 
-  /* Champagne Accent */
-  --color-brass: #D6B56D;
-  --color-earth: #D6B56D;
-  --color-earth-soft: #FAF4E6;
+  /* Champagne / Platinum Accent */
+  --color-brass: #94A3B8;
+  --color-earth: #94A3B8;
+  --color-earth-soft: #F1F5F9;
 
   /* Operational Status & Decision Semantics */
-  --color-allow: #18794E;
-  --color-allow-bg: #E8F5EE;
-  --color-allow-border: #A3D9BD;
-  --color-success: #18794E;
-  --color-success-soft: #E8F5EE;
+  --color-allow: #16A34A;
+  --color-allow-bg: #DCFCE7;
+  --color-allow-border: #86EFAC;
+  --color-success: #16A34A;
+  --color-success-soft: #DCFCE7;
 
-  --color-deny: #B94343;
-  --color-deny-bg: #FDECEC;
-  --color-deny-border: #F5B8B8;
-  --color-danger: #B94343;
-  --color-danger-soft: #FDECEC;
-  --color-red-soft: #FDECEC;
-  --color-red-ink: #B94343;
+  --color-deny: #DC2626;
+  --color-deny-bg: #FEE2E2;
+  --color-deny-border: #FCA5A5;
+  --color-danger: #DC2626;
+  --color-danger-soft: #FEE2E2;
+  --color-red-soft: #FEE2E2;
+  --color-red-ink: #DC2626;
 
-  --color-review: #946200;
-  --color-review-bg: #FEF7E6;
-  --color-review-border: #F0D28E;
-  --color-warning: #946200;
-  --color-warning-soft: #FEF7E6;
+  --color-review: #D97706;
+  --color-review-bg: #FEF3C7;
+  --color-review-border: #FCD34D;
+  --color-warning: #D97706;
+  --color-warning-soft: #FEF3C7;
 
   --color-info: #0284C7;
   --color-info-soft: #E0F2FE;
-  --color-disabled: #A1ACA5;
+  --color-disabled: #94A3B8;
 
   /* Sandbox Environment Badge */
   --color-sandbox-bg: #FEF3C7;
   --color-sandbox-text: #92400E;
   --color-sandbox-border: #F59E0B;
+}
+
+/* ==========================================================================
+   LIGHT THEME SIDEBAR SPECIFICATION — OBSIDIAN CHARCOAL
+   - Sidebar background: #070A0F (Deep Obsidian Charcoal)
+   - Selected navigation item: #111726
+   - Subtle borders/dividers: #1E293B
+   - Muted text/icons: #94A3B8
+   - Primary text and icons: Platinum White (#F8FAFC) with clear contrast
+   - Preserves active-state electric blue indicators (#0EA5E9)
+   ========================================================================== */
+html.light aside[aria-label="Application Navigation"],
+:root[data-theme="light"] aside[aria-label="Application Navigation"],
+html.light #mobile-nav-drawer,
+:root[data-theme="light"] #mobile-nav-drawer,
+html.light .warrant-sidebar,
+:root[data-theme="light"] .warrant-sidebar {
+  --color-sidebar: #070A0F;
+  --color-sidebar-raised: #0F172A;
+  --color-surface: #070A0F;
+  --color-surface-raised: #111726;
+  --color-surface-subtle: #0B0F17;
+  --color-surface-inset: #05070B;
+  --color-ink: #F8FAFC;
+  --color-ink-muted: #94A3B8;
+  --color-ink-subtle: #64748B;
+  --color-muted: #94A3B8;
+  --color-border: #1E293B;
+  --color-border-subtle: #141C2E;
+  --color-border-strong: #283548;
+  --color-accent: #0EA5E9;
+  --color-allow: #22C55E;
+  background-color: #070A0F;
+  color: #F8FAFC;
+  border-right-color: #1E293B;
+}
+
+html.light aside[aria-label="Application Navigation"] .bg-surface-raised,
+:root[data-theme="light"] aside[aria-label="Application Navigation"] .bg-surface-raised,
+html.light #mobile-nav-drawer .bg-surface-raised,
+:root[data-theme="light"] #mobile-nav-drawer .bg-surface-raised {
+  background-color: #111726;
+  color: #F8FAFC;
+}
+
+html.light aside[aria-label="Application Navigation"] .bg-accent\/15,
+:root[data-theme="light"] aside[aria-label="Application Navigation"] .bg-accent\/15,
+html.light #mobile-nav-drawer .bg-accent\/15,
+:root[data-theme="light"] #mobile-nav-drawer .bg-accent\/15 {
+  background-color: rgba(14, 165, 233, 0.18);
+  border-color: rgba(14, 165, 233, 0.35);
+  color: #38BDF8;
+}
+
+html.light aside[aria-label="Application Navigation"] select,
+:root[data-theme="light"] aside[aria-label="Application Navigation"] select,
+html.light #mobile-nav-drawer select,
+:root[data-theme="light"] #mobile-nav-drawer select {
+  background-color: #111726;
+  color: #F8FAFC;
+  border-color: #1E293B;
+}
+
+html.light aside[aria-label="Application Navigation"] option,
+:root[data-theme="light"] aside[aria-label="Application Navigation"] option,
+html.light #mobile-nav-drawer option,
+:root[data-theme="light"] #mobile-nav-drawer option {
+  background-color: #0F172A;
+  color: #F8FAFC;
 }
 
 body {
@@ -303,4 +372,26 @@ html.lenis, html.lenis body {
 }
 .motion-drawer {
   transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease-out;
+}
+
+/* ==========================================================================
+   PREMIUM SKELETON LOADING UI (Midnight Navy Shimmer & Motion Reduction)
+   ========================================================================== */
+@keyframes skeleton-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-skeleton-shimmer {
+  animation: skeleton-shimmer 2.2s infinite ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-skeleton-shimmer {
+    animation: none !important;
+  }
 }

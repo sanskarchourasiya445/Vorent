@@ -167,7 +167,7 @@ export function EvaluationReportPanel({ onNavigateWorkstation }: EvaluationRepor
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h1 className="text-xl sm:text-2xl font-sans font-semibold tracking-tight text-ink">
+                <h1 className="text-xl sm:text-2xl font-serif font-semibold tracking-tight text-ink">
                   Evaluation Report &amp; Invariant Evidence Hub
                 </h1>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-primary-soft text-primary font-bold uppercase tracking-wider border border-primary/20">

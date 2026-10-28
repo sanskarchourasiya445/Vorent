@@ -8,9 +8,12 @@ import {
 } from "@warrant/contracts";
 import { db } from "../db/index.js";
 import { approvals } from "../db/schema.js";
-import * as policyRepo from "../db/repositories/policyRepository.js";
 import * as checkoutRepo from "../db/repositories/checkoutProposalRepository.js";
-import { extractRequestId, isDbConnectionError, authenticateRequest } from "./routeUtils.js";
+import {
+  extractRequestId,
+  isDbConnectionError,
+  resolveAuthorizedUserOrReject,
+} from "./routeUtils.js";
 
 export const checkoutRoutes: FastifyPluginAsync = async (fastify) => {
   // 1. POST /nonces - Issue single-use checkout nonce
@@ -31,8 +34,11 @@ export const checkoutRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const user = await authenticateRequest(request);
-      const ownerId = user?.id || (await policyRepo.ensureDefaultUser(db));
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+      const { ownerId } = authResult;
       const { approvalId, policyVersionId, policyHash, ttlSeconds } = parseResult.data;
 
       // Verify approval exists and is valid before issuing nonce
@@ -141,8 +147,11 @@ export const checkoutRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const user = await authenticateRequest(request);
-      const ownerId = user?.id || (await policyRepo.ensureDefaultUser(db));
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+      const { ownerId } = authResult;
       const result = await checkoutRepo.submitCheckoutProposal(db, {
         ownerId,
         approvalId: parseResult.data.approvalId,
@@ -270,8 +279,13 @@ export const checkoutRoutes: FastifyPluginAsync = async (fastify) => {
       const requestId = extractRequestId(request);
       reply.header("x-request-id", requestId);
 
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+      const { ownerId } = authResult;
+
       try {
-        const ownerId = await policyRepo.ensureDefaultUser(db);
         const { approvalId, state, limit } = request.query;
 
         const result = await checkoutRepo.listSpendReservations(db, {

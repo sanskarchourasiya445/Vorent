@@ -22,6 +22,8 @@ function loadServerEnv(): ServerEnv {
     RECONCILIATION_ALERT_AFTER_SECONDS: process.env.RECONCILIATION_ALERT_AFTER_SECONDS ?? 900,
     SEARCH_MAX_CANDIDATES: process.env.SEARCH_MAX_CANDIDATES ?? 100,
     SEARCH_TIMEOUT_MS: process.env.SEARCH_TIMEOUT_MS ?? 10000,
+    RESEND_API_KEY: process.env.RESEND_API_KEY,
+    EMAIL_FROM: process.env.EMAIL_FROM ?? "VORENT <notifications@warrant.studio>",
     LOG_LEVEL: process.env.LOG_LEVEL ?? "info",
     CORS_ALLOWED_ORIGINS: process.env.CORS_ALLOWED_ORIGINS ?? "http://localhost:5173",
   });

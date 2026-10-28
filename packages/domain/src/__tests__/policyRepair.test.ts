@@ -3,7 +3,7 @@ import { computePolicyDiff } from "../repair/policyDiff.js";
 import { proposePolicyRepair } from "../repair/policyRepairer.js";
 import { type PolicyDocument, type VerificationFinding } from "@warrant/contracts";
 
-describe("Phase 2 Policy Diff & Automated Repair", () => {
+describe("Policy Diff & Automated Repair", () => {
   const samplePolicyV1: PolicyDocument = {
     schemaVersion: "1.0",
     currency: "USD",

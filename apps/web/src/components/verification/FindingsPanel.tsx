@@ -18,6 +18,7 @@ import { RepairProposalModal } from "../policy/RepairProposalModal";
 import { HashBadge } from "../ui/HashBadge";
 import { StatusBadge } from "../ui/StatusBadge";
 import { EmptyState } from "../ui/EmptyState";
+import { SkeletonFindingsList } from "../ui/Skeleton";
 
 export function FindingsPanel() {
   const [findings, setFindings] = useState<FindingRecord[]>([]);
@@ -215,9 +216,12 @@ export function FindingsPanel() {
 
       {/* Loading State */}
       {isLoading ? (
-        <div className="p-12 text-center text-xs text-muted space-y-2">
-          <RefreshCw className="w-6 h-6 animate-spin mx-auto text-accent" aria-hidden="true" />
-          <div>Retrieving findings from persistence store...</div>
+        <div className="space-y-4">
+          <div className="p-3 rounded-lg border border-border bg-surface-inset text-center text-xs text-muted flex items-center justify-center space-x-2.5">
+            <RefreshCw className="w-4 h-4 animate-spin text-accent" aria-hidden="true" />
+            <span>Retrieving findings from persistence store...</span>
+          </div>
+          <SkeletonFindingsList count={3} />
         </div>
       ) : error ? (
         <div className="p-4 rounded-lg border border-review/40 bg-review/10 text-ink text-xs space-y-2">

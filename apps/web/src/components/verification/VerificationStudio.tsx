@@ -11,7 +11,7 @@ import {
   executeVerificationRun,
 } from "../../api/verificationService";
 import { fetchSavedVerificationReport } from "../../api/persistenceService";
-import { fetchPolicySummaries } from "../../api/policyService";
+import { fetchPolicySummaries, fetchPolicyVersionRecord } from "../../api/policyService";
 import { VerificationConfigForm } from "./VerificationConfigForm";
 import { VerificationCoverageCard } from "./VerificationCoverageCard";
 import { FindingsList } from "./FindingsList";
@@ -27,7 +27,7 @@ import {
   ArrowRight,
   CheckCircle2,
   AlertTriangle,
-  Sparkles,
+  FileCode,
 } from "lucide-react";
 import type { PolicyVersionRecord } from "@warrant/contracts";
 
@@ -80,30 +80,57 @@ export function VerificationStudio({
         if (persisted.state.state === "READY" && persisted.state.data) {
           for (const s of persisted.state.data) {
             if (!combined.some((p) => p.id === s.id || p.id === s.currentVersionId)) {
-              combined.push({
-                id: s.currentVersionId || s.id,
-                version: `v${s.currentVersionNumber}`,
-                name: s.name,
-                hash: s.policyHash || "hash_unavailable",
-                description: s.sourceMandate || s.name,
-                limitsSummary: `Policy ID: ${s.id}`,
-                policyDocument: {
-                  schemaVersion: "1.0",
-                  currency: "USD",
-                  allowedCategories: ["Hardware", "Reference Books"],
-                  prohibitedCategories: ["Weapons / Lasers", "Gift Cards"],
-                  requireEvidence: true,
-                },
-                intent: {
+              let record: PolicyVersionRecord | null = null;
+              try {
+                record = await fetchPolicyVersionRecord(s.currentVersionId || s.id);
+              } catch {
+                // non-fatal
+              }
+
+              if (record && record.policyDocument) {
+                const doc = record.policyDocument;
+                const limitsText = `Max Item: $${((doc.maxItemPriceMinor ?? 0) / 100).toFixed(2)} | Max Cart: $${((doc.maxCartTotalMinor ?? 0) / 100).toFixed(2)}`;
+                combined.push({
+                  id: record.id,
+                  version: `v${record.versionNumber}`,
+                  name: record.name,
+                  hash: record.policyHash,
+                  description: record.sourceMandateSnapshot || s.sourceMandate || record.name,
+                  limitsSummary: limitsText,
+                  policyDocument: record.policyDocument,
+                  intent: record.intentSpec,
+                  defaultCategories: record.policyDocument.allowedCategories || ["Hardware", "Reference Books"],
+                  defaultPricePointsMinor: [
+                    Math.floor((record.policyDocument.maxItemPriceMinor ?? 10000) * 0.5),
+                    record.policyDocument.maxItemPriceMinor ?? 10000,
+                  ],
+                });
+              } else {
+                combined.push({
+                  id: s.currentVersionId || s.id,
+                  version: `v${s.currentVersionNumber ?? 1}`,
                   name: s.name,
-                  currency: "USD",
-                  allowedCategories: ["Hardware", "Reference Books"],
-                  prohibitedCategories: ["Weapons / Lasers", "Gift Cards"],
-                  requireEvidence: true,
-                },
-                defaultCategories: ["Hardware", "Reference Books"],
-                defaultPricePointsMinor: [15000, 25000],
-              });
+                  hash: s.policyHash || "hash_unavailable",
+                  description: s.sourceMandate || s.name,
+                  limitsSummary: `Policy ID: ${s.id}`,
+                  policyDocument: {
+                    schemaVersion: "1.0",
+                    currency: "USD",
+                    allowedCategories: ["Hardware", "Reference Books"],
+                    prohibitedCategories: ["Weapons / Lasers", "Gift Cards"],
+                    requireEvidence: true,
+                  },
+                  intent: {
+                    name: s.name,
+                    currency: "USD",
+                    allowedCategories: ["Hardware", "Reference Books"],
+                    prohibitedCategories: ["Weapons / Lasers", "Gift Cards"],
+                    requireEvidence: true,
+                  },
+                  defaultCategories: ["Hardware", "Reference Books"],
+                  defaultPricePointsMinor: [15000, 25000],
+                });
+              }
             }
           }
         }
@@ -220,7 +247,7 @@ export function VerificationStudio({
               <ShieldCheck className="w-4 h-4 text-primary" aria-hidden="true" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-sans font-semibold tracking-tight text-ink">
+              <h1 className="text-xl sm:text-2xl font-serif font-semibold tracking-tight text-ink">
                 Verification Studio
               </h1>
               <p className="text-xs text-muted mt-0.5 font-sans leading-relaxed">
@@ -238,12 +265,12 @@ export function VerificationStudio({
               onClick={onNavigateToMandate}
               className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-sans font-medium border border-border bg-surface hover:bg-surface-subtle text-ink transition-colors shadow-2xs focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
             >
-              <Sparkles className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
+              <FileCode className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
               <span>Mandate Compiler</span>
             </button>
           )}
           <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-sans font-medium bg-surface text-ink border border-border shadow-2xs">
-            Phase 2: Verify &amp; Inspect
+            Verification Studio &amp; Policy Auditor
           </span>
         </div>
       </div>
@@ -338,9 +365,10 @@ export function VerificationStudio({
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                {/* Left Configuration Rail (Desktop: 5-cols balanced, Sticky) */}
-                <div className="w-full lg:col-span-5 lg:sticky lg:top-4 space-y-4">
+              {/* Full-Width Vertically Stacked Verification Studio Dashboard */}
+              <div className="w-full space-y-6">
+                {/* Section 1: Verification Run Configuration (Full Content Width) */}
+                <div className="w-full">
                   <VerificationConfigForm
                     policies={policies}
                     onStartRun={(cfg, useDemo) => void handleStartRun(cfg, useDemo)}
@@ -349,10 +377,10 @@ export function VerificationStudio({
                   />
                 </div>
 
-                {/* Right Verdict & Coverage Workspace (Desktop: 7-cols balanced, Fluid) */}
-                <div className="w-full lg:col-span-7 space-y-6">
-                  {/* Verification Status & Search Coverage */}
+                {/* Section 2: Verification Run Status (Full Content Width) */}
+                <div className="w-full space-y-4">
                   <VerificationCoverageCard
+                    mode="status"
                     status={status}
                     coverage={runResult?.coverage}
                     counterexampleCount={runResult?.counterexampleCount ?? 0}
@@ -391,7 +419,7 @@ export function VerificationStudio({
                         <button
                           type="button"
                           onClick={onNavigateToApproval}
-                          className="inline-flex items-center justify-center space-x-1.5 px-4 py-2 rounded-md text-xs font-mono font-semibold bg-allow text-white hover:bg-allow/90 transition-colors shadow-2xs shrink-0 self-start sm:self-auto focus:outline-none focus:ring-2 focus:ring-allow/30"
+                          className="inline-flex items-center justify-center space-x-1.5 px-4 py-2 rounded-md text-xs font-mono font-semibold bg-allow text-white hover:bg-allow/90 transition-colors shadow-2xs shrink-0 self-start sm:self-auto focus:outline-none focus:ring-2 focus:ring-allow/30 cursor-pointer"
                         >
                           <span>Proceed to Approval Checkpoint</span>
                           <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
@@ -427,7 +455,7 @@ export function VerificationStudio({
                           setRepairFinding(runResult.findings[0] || null);
                           setIsRepairOpen(true);
                         }}
-                        className="inline-flex items-center justify-center space-x-1.5 px-4 py-2 rounded-md text-xs font-mono font-semibold bg-deny text-white hover:bg-deny/90 transition-colors shadow-2xs shrink-0 self-start sm:self-auto focus:outline-none focus:ring-2 focus:ring-deny/30"
+                        className="inline-flex items-center justify-center space-x-1.5 px-4 py-2 rounded-md text-xs font-mono font-semibold bg-deny text-white hover:bg-deny/90 transition-colors shadow-2xs shrink-0 self-start sm:self-auto focus:outline-none focus:ring-2 focus:ring-deny/30 cursor-pointer"
                       >
                         <span>Inspect Policy Repair Proposal</span>
                         <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
@@ -435,19 +463,39 @@ export function VerificationStudio({
                     </div>
                   )}
                 </div>
-              </div>
 
-              {/* Full-Width Findings Workspace — prevents multi-line text wrapping on witness carts */}
-              {runResult && status !== "RUNNING" && (
-                <div className="w-full mt-6">
-                  <FindingsList
-                    findings={runResult.findings}
-                    totalEvaluated={runResult.coverage.totalCandidatesEvaluated}
-                    onSelectFinding={(f) => setSelectedFinding(f)}
-                    selectedFindingId={selectedFinding?.id}
-                  />
-                </div>
-              )}
+                {/* Section 3: Verification Findings (Full Content Width) */}
+                {runResult && status !== "RUNNING" && (
+                  <div className="w-full">
+                    <FindingsList
+                      findings={runResult.findings}
+                      totalEvaluated={runResult.coverage.totalCandidatesEvaluated}
+                      onSelectFinding={(f) => setSelectedFinding(f)}
+                      selectedFindingId={selectedFinding?.id}
+                    />
+                  </div>
+                )}
+
+                {/* Section 4: Candidate Results and Warnings (Full Content Width) */}
+                {runResult?.coverage && status !== "IDLE" && (
+                  <div className="w-full">
+                    <VerificationCoverageCard
+                      mode="metrics"
+                      status={status}
+                      coverage={runResult.coverage}
+                      counterexampleCount={runResult.counterexampleCount ?? 0}
+                      unresolvedCount={runResult.unresolvedCount ?? 0}
+                      isLiveApi={runResult.isLiveApi}
+                      isDemoFixture={runResult.isDemoFixture}
+                      isSavedRun={runResult.isSavedRun}
+                      stopReason={runResult.stopReason}
+                      summary={runResult.summary}
+                      runId={runResult.runId}
+                      errorMessage={errorMessage ?? runResult.errorMessage}
+                    />
+                  </div>
+                )}
+              </div>
 
               {/* Finding Detail Modal / Drawer */}
               <FindingDetailModal

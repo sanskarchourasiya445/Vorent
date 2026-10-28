@@ -36,6 +36,7 @@ import {
   type CreateTestSandboxOrderRequest,
 } from "@warrant/contracts";
 import { z } from "zod";
+import { getAuthHeaders } from "./client";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -51,6 +52,14 @@ export class PaymentOrderError extends Error {
   }
 }
 
+const safeAuthHeaders = () => {
+  try {
+    return typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+  } catch {
+    return {};
+  }
+};
+
 /**
  * Helper to execute backend payment order HTTP calls with consistent error mapping
  * and ambiguous outcome detection.
@@ -63,11 +72,13 @@ async function executePaymentOrderRequest<T>(
 ): Promise<T> {
   let response: Response;
   try {
+    const hasBody = options.body !== undefined && options.body !== null;
     response = await fetch(url, {
       ...options,
       headers: {
-        "Content-Type": "application/json",
+        ...(hasBody ? { "Content-Type": "application/json" } : {}),
         Accept: "application/json",
+        ...safeAuthHeaders(),
         ...(options.headers || {}),
       },
     });
@@ -78,6 +89,18 @@ async function executePaymentOrderRequest<T>(
       "NETWORK_ERROR",
       0,
       true,
+    );
+  }
+
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("warrant_session_expired"));
+    }
+    throw new PaymentOrderError(
+      "Authentication session has expired or is invalid. Please sign in again.",
+      "UNAUTHORIZED",
+      401,
+      false,
     );
   }
 
@@ -365,6 +388,7 @@ export async function listPaymentOrders(): Promise<ListPaymentOrdersResult> {
       method: "GET",
       headers: {
         Accept: "application/json",
+        ...safeAuthHeaders(),
       },
     });
 
@@ -448,6 +472,7 @@ export async function getReconciliationAlerts(): Promise<ReconciliationAlertsRes
       method: "GET",
       headers: {
         Accept: "application/json",
+        ...safeAuthHeaders(),
       },
     });
 
@@ -521,6 +546,7 @@ export async function listSpendReservations(): Promise<SpendReservationsResult> 
       method: "GET",
       headers: {
         Accept: "application/json",
+        ...safeAuthHeaders(),
       },
     });
 

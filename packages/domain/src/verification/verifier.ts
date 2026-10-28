@@ -12,7 +12,7 @@ import { generateCandidates } from "../search/candidateGenerator.js";
 import { computeFindingFingerprint } from "./fingerprint.js";
 
 /**
- * Warrant Phase 2 Bounded Verification Engine
+ * Warrant Bounded Verification Engine
  *
  * Deterministically explores a declared finite domain of candidate carts to discover
  * reproducible counterexamples where policy rules diverge from confirmed intent or invariants.

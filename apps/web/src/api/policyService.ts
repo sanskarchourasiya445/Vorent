@@ -18,6 +18,15 @@ import {
 import type { PersistenceLoadState } from "../types/persistence";
 import { AVAILABLE_POLICIES } from "./verificationService";
 import type { PolicyComparisonInput } from "../utils/policyDiff";
+import { getAuthHeaders } from "./client";
+
+const safeAuthHeaders = () => {
+  try {
+    return typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+  } catch {
+    return {};
+  }
+};
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -257,6 +266,7 @@ export async function compileIntent(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...safeAuthHeaders(),
     },
     body: JSON.stringify(request),
   });
@@ -292,6 +302,7 @@ export async function compileIntentLLM(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...safeAuthHeaders(),
     },
     body: JSON.stringify(request),
   });
@@ -327,6 +338,7 @@ export async function computeDiff(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...safeAuthHeaders(),
     },
     body: JSON.stringify(request),
   });
@@ -396,6 +408,7 @@ export async function proposeRepair(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...safeAuthHeaders(),
     },
     body: JSON.stringify(request),
   });
@@ -431,6 +444,7 @@ export async function createPolicy(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...safeAuthHeaders(),
     },
     body: JSON.stringify(request),
   });
@@ -466,6 +480,7 @@ export async function createPolicyVersion(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...safeAuthHeaders(),
     },
     body: JSON.stringify(request),
   });
@@ -484,4 +499,113 @@ export async function createPolicyVersion(
   }
 
   return (await res.json()) as PolicyVersionRecord;
+}
+
+/**
+ * Renames an existing policy.
+ * Calls PATCH /api/policies/:id.
+ */
+export async function renamePolicy(
+  policyId: string,
+  name: string,
+): Promise<PolicySummary> {
+  const url = `${API_BASE}/api/policies/${encodeURIComponent(policyId)}`;
+
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({ name }),
+  });
+
+  if (!res.ok) {
+    let message = `Failed to rename policy (HTTP ${res.status})`;
+    try {
+      const errJson = await res.json();
+      if (errJson && typeof errJson === "object") {
+        message = errJson.error?.message || errJson.message || message;
+      }
+    } catch {
+      // fallback
+    }
+    throw new Error(message);
+  }
+
+  return (await res.json()) as PolicySummary;
+}
+
+/**
+ * Archives an existing policy.
+ * Calls DELETE /api/policies/:id.
+ */
+export async function archivePolicy(
+  policyId: string,
+): Promise<{ success: boolean; policyId: string }> {
+  const url = `${API_BASE}/api/policies/${encodeURIComponent(policyId)}`;
+
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!res.ok) {
+    let message = `Failed to archive policy (HTTP ${res.status})`;
+    try {
+      const errJson = await res.json();
+      if (errJson && typeof errJson === "object") {
+        message = errJson.error?.message || errJson.message || message;
+      }
+    } catch {
+      // fallback
+    }
+    throw new Error(message);
+  }
+
+  return (await res.json()) as { success: boolean; policyId: string };
+}
+
+/**
+ * Fetches the full PolicyVersionRecord directly.
+ */
+export async function fetchPolicyVersionRecord(
+  id: string,
+): Promise<PolicyVersionRecord | null> {
+  const url = `${API_BASE}/api/policies/${encodeURIComponent(id)}`;
+
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+
+    if (res.ok) {
+      return (await res.json()) as PolicyVersionRecord;
+    }
+  } catch {
+    // fallback
+  }
+
+  const preset = AVAILABLE_POLICIES.find((p) => p.id === id);
+  if (preset) {
+    return {
+      id: preset.id,
+      policyId: preset.id,
+      name: preset.name,
+      versionNumber: 1,
+      sourceMandateSnapshot: preset.description,
+      intentSpec: preset.intent,
+      policyDocument: preset.policyDocument,
+      policySchemaVersion: "1.0",
+      canonicalizationVersion: "1.0.0",
+      policyHash: preset.hash,
+      confirmationState: "CONFIRMED",
+      createdAt: new Date().toISOString(),
+      isPreset: true,
+      presetId: preset.id,
+    };
+  }
+
+  return null;
 }

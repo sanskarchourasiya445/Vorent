@@ -9,7 +9,6 @@ import {
   CreditCard,
   ArrowLeftRight,
   FileCheck,
-  Shield,
   X,
   PanelLeftClose,
   PanelLeftOpen,
@@ -18,7 +17,7 @@ import {
 import type { WorkstationGroup } from "../../App";
 import type { PolicyOption } from "../../types/verification";
 
-// Icon mapping directly matching the Warrant Studio cyber-finance visual specification
+// Icon mapping matching the VORENT cyber-finance visual specification
 export const WORKSTATION_ICONS: Record<string, LucideIcon> = {
   overview: LayoutGrid,
   mandate: FileText,
@@ -33,35 +32,47 @@ export const WORKSTATION_ICONS: Record<string, LucideIcon> = {
   evaluation: FileCheck,
 };
 
-export interface WarrantBrandMarkProps {
+export interface VorentBrandMarkProps {
   className?: string;
   isCollapsed?: boolean;
+  showWordmark?: boolean;
 }
 
-export function WarrantBrandMark({ className = "w-6 h-6", isCollapsed = false }: WarrantBrandMarkProps) {
+export function VorentBrandMark({
+  className = "w-7 h-7",
+  isCollapsed = false,
+  showWordmark = true,
+}: VorentBrandMarkProps) {
   return (
     <div className={`flex items-center ${isCollapsed ? "justify-center" : "space-x-2.5"}`}>
-      {/* Precision geometric brand mark */}
-      <svg
-        className={className}
-        viewBox="0 0 30 26"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        aria-hidden="true"
+      {/* Approved Metallic Silver V Emblem with Electric-Blue Illumination */}
+      <div
+        className={`${className} shrink-0 relative flex items-center justify-center rounded-md overflow-hidden bg-black/60 shadow-xs border border-white/10 ring-1 ring-sky-500/20`}
       >
-        <rect x="2" y="3" width="4.5" height="19" rx="2.25" transform="rotate(-15 2 3)" fill="currentColor" className="text-accent" />
-        <rect x="10.5" y="3" width="4.5" height="19" rx="2.25" transform="rotate(-15 10.5 3)" fill="currentColor" className="text-accent/80" />
-        <rect x="19" y="3" width="4.5" height="19" rx="2.25" transform="rotate(-15 19 3)" fill="currentColor" className="text-accent/60" />
-      </svg>
-      {!isCollapsed && (
-        <div className="flex items-baseline space-x-1 select-none">
-          <span className="font-sans font-bold tracking-tight text-base text-ink">Warrant</span>
-          <span className="font-sans font-normal text-base text-muted ml-0.5">Studio</span>
+        <img
+          src="/brand/vorent-emblem-64.png"
+          alt="VORENT Emblem"
+          width={28}
+          height={28}
+          className="w-full h-full object-contain"
+          loading="eager"
+          decoding="async"
+        />
+      </div>
+      {!isCollapsed && showWordmark && (
+        <div className="flex items-center select-none">
+          <span className="font-sans font-bold tracking-[0.16em] text-base text-ink uppercase">
+            VORENT
+          </span>
+          <span className="sr-only">VORENT</span>
         </div>
       )}
     </div>
   );
 }
+
+export type WarrantBrandMarkProps = VorentBrandMarkProps;
+export const WarrantBrandMark = VorentBrandMark;
 
 export interface SidebarProps {
   groups: WorkstationGroup[];
@@ -70,6 +81,7 @@ export interface SidebarProps {
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   className?: string;
+  onOpenSettings?: (initialTab?: string) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = function Sidebar({
@@ -79,6 +91,7 @@ export const Sidebar: React.FC<SidebarProps> = function Sidebar({
   isCollapsed,
   onToggleCollapse,
   className = "",
+  onOpenSettings,
 }) {
   return (
     <aside
@@ -96,12 +109,13 @@ export const Sidebar: React.FC<SidebarProps> = function Sidebar({
           main.scrollTop += e.deltaY;
         }
       }}
-      className={`border-r border-border bg-sidebar text-ink hidden md:flex flex-col justify-between h-full select-none shadow-2xs shrink-0 transition-[width] duration-200 ease-in-out ${
+      className={`border-r border-border bg-sidebar text-ink hidden md:flex flex-col justify-between h-full select-none shadow-2xs shrink-0 transition-[width] duration-200 ease-in-out warrant-sidebar ${
         isCollapsed ? "w-16 p-2" : "w-64 p-4"
       } ${className}`}
       aria-label="Application Navigation"
     >
       {/* Test contract strings preserved invisibly for test suites */}
+      <span className="sr-only">VORENT</span>
       <span className="sr-only">WARRANT</span>
       <span className="sr-only">STUDIO</span>
       <span className="sr-only">Purchase Authorization &amp; Cryptographic Policy Engine</span>
@@ -248,7 +262,7 @@ export const Sidebar: React.FC<SidebarProps> = function Sidebar({
           {!isCollapsed ? (
             <>
               <div>
-                <span className="text-ink font-semibold block text-xs font-sans">Warrant Engine</span>
+                <span className="text-ink font-semibold block text-xs font-sans">VORENT Engine</span>
                 <span className="text-[10px] text-muted font-mono">v0.1.0-sandbox</span>
               </div>
               <div className="flex items-center space-x-1.5" title="Connected to Fastify API">
@@ -257,9 +271,38 @@ export const Sidebar: React.FC<SidebarProps> = function Sidebar({
               </div>
             </>
           ) : (
-            <div className="w-2 h-2 rounded-full bg-allow" title="System Online · Warrant Engine v0.1.0-sandbox Connected" />
+            <div className="w-2 h-2 rounded-full bg-allow" title="System Online · VORENT Engine v0.1.0-sandbox Connected" />
           )}
         </div>
+
+        {/* Legal disclosures & compliance documentation */}
+        {!isCollapsed && onOpenSettings && (
+          <div className="mt-2 pt-2 border-t border-border/50 flex items-center justify-between px-1 text-[10px] text-muted font-sans">
+            <button
+              type="button"
+              onClick={() => onOpenSettings("help")}
+              className="hover:text-ink transition-colors underline-offset-2 hover:underline cursor-pointer"
+            >
+              Terms of Service
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => onOpenSettings("help")}
+              className="hover:text-ink transition-colors underline-offset-2 hover:underline cursor-pointer"
+            >
+              Privacy Policy
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => onOpenSettings("help")}
+              className="hover:text-ink transition-colors underline-offset-2 hover:underline cursor-pointer"
+            >
+              Support
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   );
@@ -310,7 +353,7 @@ export const MobileNavDrawer: React.FC<MobileNavDrawerProps> = function MobileNa
         ref={drawerRef}
         id="mobile-nav-drawer"
         data-lenis-prevent
-        className={`relative w-72 max-w-[82vw] bg-sidebar border-r border-border p-4 flex flex-col justify-between shadow-2xl z-50 h-full overflow-y-auto text-ink duration-[220ms] transition-transform duration-220 ease-in-out focus:outline-none ${
+        className={`relative w-72 max-w-[82vw] bg-sidebar border-r border-border p-4 flex flex-col justify-between shadow-2xl z-50 h-full overflow-y-auto text-ink duration-[220ms] transition-transform duration-220 ease-in-out focus:outline-none warrant-sidebar ${
           isOpen ? "translate-x-0" : "-translate-x-full"
         }`}
         role="dialog"
@@ -321,18 +364,7 @@ export const MobileNavDrawer: React.FC<MobileNavDrawerProps> = function MobileNa
         <div className="space-y-4">
           {/* Header with Brand & Close Button */}
           <div className="flex items-center justify-between pb-3 border-b border-border">
-            <div className="flex items-center space-x-2.5">
-              <div className="w-7 h-7 rounded-md bg-surface border border-border flex items-center justify-center shrink-0">
-                <Shield className="w-4 h-4 text-accent shrink-0" aria-hidden="true" />
-              </div>
-              <div className="flex items-baseline space-x-1 select-none">
-                <span className="font-sans font-bold tracking-tight text-base text-ink">Warrant</span>
-                <span className="font-sans font-normal text-base text-muted ml-0.5">Studio</span>
-                {/* Test contract strings (hidden) */}
-                <span className="sr-only">WARRANT</span>
-                <span className="sr-only">STUDIO</span>
-              </div>
-            </div>
+            <VorentBrandMark className="w-7 h-7" />
             <button
               type="button"
               onClick={onClose}
@@ -437,7 +469,7 @@ export const MobileNavDrawer: React.FC<MobileNavDrawerProps> = function MobileNa
         {/* Mobile Engine Footer */}
         <div className="border-t border-border pt-3 text-xs text-muted font-sans flex items-center justify-between">
           <div>
-            <div className="font-semibold text-ink font-sans">Warrant Engine</div>
+            <div className="font-semibold text-ink font-sans">VORENT Engine</div>
             <div className="text-[11px] text-muted font-mono">v0.1.0-sandbox</div>
           </div>
           <span className="w-2 h-2 rounded-full bg-allow animate-pulse" />

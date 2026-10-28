@@ -58,6 +58,18 @@ describe("HashBadge Component", () => {
     expect(html).not.toContain("<button");
   });
 
+  it("truncates with prefix only when suffixLength is 0 without duplicating hash", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(HashBadge, {
+        hash: sampleHash,
+        prefixLength: 8,
+        suffixLength: 0,
+      })
+    );
+    expect(html).toContain("e3b0c442...");
+    expect(html).not.toContain("e3b0c442...e3b0c442");
+  });
+
   it("returns null when hash is empty", () => {
     const html = renderToStaticMarkup(
       React.createElement(HashBadge, { hash: "" })

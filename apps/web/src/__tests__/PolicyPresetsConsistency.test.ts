@@ -6,7 +6,7 @@ import {
 } from "../api/verificationService";
 import { CANONICAL_POLICY_PRESETS, POLICY_PRESET_LIST } from "@warrant/test-fixtures";
 
-describe("Frontend Policy Presets Consistency Suite (LEAN-001)", () => {
+describe("Frontend Policy Presets Consistency Suite", () => {
   it("AVAILABLE_POLICIES references canonical presets from @warrant/test-fixtures", () => {
     expect(AVAILABLE_POLICIES).toHaveLength(3);
     expect(AVAILABLE_POLICIES).toEqual(POLICY_PRESET_LIST);

@@ -8,6 +8,7 @@ import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { StatusBadge } from "../ui/StatusBadge";
 import { HashBadge } from "../ui/HashBadge";
 import { EmptyState } from "../ui/EmptyState";
+import { SkeletonApprovalList } from "../ui/Skeleton";
 import {
   FileCheck,
   RefreshCw,
@@ -152,7 +153,7 @@ export function ApprovalPanel() {
               <FileCheck className="w-4 h-4 text-primary" aria-hidden="true" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-sans font-semibold tracking-tight text-ink">
+              <h1 className="text-xl sm:text-2xl font-serif font-semibold tracking-tight text-ink">
                 Approval Checkpoints
               </h1>
               <p className="text-xs text-muted mt-0.5 font-sans leading-relaxed">
@@ -245,9 +246,12 @@ export function ApprovalPanel() {
 
       {/* Loading State */}
       {loadState.state === "LOADING" && (
-        <div className="p-12 text-center border border-border rounded bg-surface space-y-2">
-          <RefreshCw className="w-6 h-6 animate-spin text-accent mx-auto" />
-          <p className="text-xs text-muted font-mono">Retrieving approval checkpoints from ledger...</p>
+        <div className="space-y-4">
+          <div className="p-3 rounded-lg border border-border bg-surface text-center text-xs text-muted font-mono flex items-center justify-center space-x-2.5">
+            <RefreshCw className="w-4 h-4 animate-spin text-accent" />
+            <p>Retrieving approval checkpoints from ledger...</p>
+          </div>
+          <SkeletonApprovalList count={2} />
         </div>
       )}
 
@@ -264,17 +268,20 @@ export function ApprovalPanel() {
             return (
               <div
                 key={approval.id}
-                className="p-5 rounded border border-border bg-surface space-y-3.5 shadow-2xs hover:border-accent/40 transition-colors"
+                className="flex flex-col justify-between h-full p-5 rounded border border-border bg-surface shadow-2xs hover:border-accent/40 transition-colors min-w-0"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-1">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-bold text-sm text-ink">
+                <div className="flex items-start justify-between gap-3 min-w-0">
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      <span
+                        className="font-bold text-sm text-ink truncate min-w-0 max-w-full"
+                        title={approval.policyName || approval.policyVersionId}
+                      >
                         {approval.policyName || approval.policyVersionId}
                       </span>
                       <StatusBadge status={approval.status} size="sm" />
                     </div>
-                    <div className="font-mono text-[11px] text-muted flex items-center space-x-1.5">
+                    <div className="font-mono text-[11px] text-muted flex flex-wrap items-center gap-1.5 min-w-0">
                       <span>Hash:</span>
                       <HashBadge hash={approval.policyHash} prefixLength={8} suffixLength={4} showCopy={false} />
                     </div>
@@ -284,14 +291,14 @@ export function ApprovalPanel() {
                     <button
                       type="button"
                       onClick={() => setConfirmingRevokeApproval(approval)}
-                      className="px-2.5 py-1 rounded text-[11px] font-mono font-semibold text-deny bg-deny/10 hover:bg-deny/20 border border-deny/30 transition-colors focus:outline-none focus:ring-2 focus:ring-deny/30 cursor-pointer"
+                      className="px-2.5 py-1 rounded text-[11px] font-mono font-semibold text-deny bg-deny/10 hover:bg-deny/20 border border-deny/30 transition-colors focus:outline-none focus:ring-2 focus:ring-deny/30 cursor-pointer shrink-0"
                     >
                       Revoke
                     </button>
                   )}
                 </div>
 
-                <div className="p-3 rounded bg-surface-inset border border-border space-y-2.5">
+                <div className="my-3.5 p-3 rounded bg-surface-inset border border-border space-y-2.5 flex-1 min-w-0">
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-muted font-medium">Spend Consumed:</span>
                     <span className="font-mono font-bold text-ink tabular-nums">
@@ -316,14 +323,17 @@ export function ApprovalPanel() {
                   </div>
                 </div>
 
-                <div className="text-[11px] text-muted flex flex-wrap items-center gap-x-4 pt-1 border-t border-border">
-                  <span className="flex items-center space-x-1">
-                    <Calendar className="w-3 h-3 text-muted" />
+                <div className="text-[11px] text-muted flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-2.5 border-t border-border mt-auto min-w-0">
+                  <span className="flex items-center space-x-1 shrink-0">
+                    <Calendar className="w-3 h-3 text-muted shrink-0" />
                     <span>Created: {new Date(approval.createdAt).toLocaleDateString()}</span>
                   </span>
-                  <span>Expires: {new Date(approval.expiresAt).toLocaleString()}</span>
+                  <span className="shrink-0">Expires: {new Date(approval.expiresAt).toLocaleDateString()}</span>
                   {approval.qualifyingTestRunId && (
-                    <span className="font-mono">Qualifying Run: {approval.qualifyingTestRunId}</span>
+                    <span className="font-mono flex items-center gap-1 min-w-0">
+                      <span className="text-muted shrink-0">Run:</span>
+                      <HashBadge hash={approval.qualifyingTestRunId} prefixLength={8} suffixLength={4} showCopy={false} />
+                    </span>
                   )}
                 </div>
               </div>

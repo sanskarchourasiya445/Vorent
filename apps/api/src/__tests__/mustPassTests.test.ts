@@ -28,7 +28,7 @@ import { ReasonCode, UserRole, type PolicyDocument } from "@warrant/contracts";
 import type { FastifyInstance } from "fastify";
 
 /**
- * The 8 Canonical Hackathon Invariants (PROJECT_PLAN.md Section 12).
+ * The 8 Canonical Security Invariants.
  *
  * Invariant 1: Post-Approval Amount Tampering -> Blocked
  * Invariant 2: Post-Approval SKU / Category Swap -> Blocked

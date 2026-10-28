@@ -13,6 +13,7 @@ import {
   AlertCircle,
   FileText,
 } from "lucide-react";
+import { Skeleton } from "../ui/Skeleton";
 
 interface SavedRunsBrowserProps {
   onLoadReport: (runId: string) => Promise<void>;
@@ -83,9 +84,28 @@ export function SavedRunsBrowser({ onLoadReport, isLoadingReport = false }: Save
 
       {/* State Rendering */}
       {loadState.state === "LOADING" && (
-        <div className="py-12 text-center space-y-3" role="status">
-          <RefreshCw className="w-6 h-6 animate-spin text-accent mx-auto" aria-hidden="true" />
-          <p className="text-xs text-muted">Loading persisted verification runs from database...</p>
+        <div className="space-y-3" role="status" aria-label="Loading saved runs...">
+          <div className="p-3 rounded-lg border border-border bg-surface text-center space-y-1.5">
+            <RefreshCw className="w-4 h-4 animate-spin text-accent mx-auto" aria-hidden="true" />
+            <p className="text-xs text-muted">Loading persisted verification runs from database...</p>
+          </div>
+          <div className="space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="p-3.5 rounded-lg border border-border bg-surface flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <Skeleton variant="circular" className="w-6 h-6" />
+                  <div className="space-y-1">
+                    <Skeleton variant="text" className="w-36 h-3.5" />
+                    <Skeleton variant="text" className="w-24 h-2.5" />
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Skeleton variant="badge" className="w-16 h-5" />
+                  <Skeleton variant="button" className="w-12 h-6" />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

@@ -31,6 +31,7 @@ import { fetchSavedVerificationRuns } from "../../api/persistenceService";
 import { fetchFindings } from "../../api/findingsService";
 import { HashBadge } from "../ui/HashBadge";
 import { StatusBadge } from "../ui/StatusBadge";
+import { SkeletonDashboard } from "../ui/Skeleton";
 import type { ApprovalRecord } from "../../types/approval";
 import type {
   PaymentOrderRecord,
@@ -447,7 +448,7 @@ export function GovernanceDashboardPanel({
         </div>
 
         <div>
-          <h1 className="text-xl sm:text-2xl font-sans font-semibold tracking-tight text-ink">
+          <h1 className="text-xl sm:text-2xl font-serif font-semibold tracking-tight text-ink">
             Governance Dashboard<span className="sr-only"> &amp; Operational Dashboard — System Dashboard</span>
           </h1>
           <p className="text-xs text-muted font-normal mt-1 font-sans leading-relaxed max-w-4xl">
@@ -457,19 +458,22 @@ export function GovernanceDashboardPanel({
         </div>
       </div>
 
-      {/* Loading Indicator */}
-      {loading && !refreshing && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="p-3.5 rounded-lg border border-border bg-surface text-ink text-xs flex items-center space-x-2.5 shadow-2xs font-sans"
-        >
-          <RefreshCw className="w-4 h-4 animate-spin text-accent shrink-0" />
-          <span>Loading Warrant governance metrics and operational states...</span>
+      {/* Loading Indicator & Premium Skeleton Dashboard */}
+      {loading && !refreshing ? (
+        <div className="space-y-6">
+          <div
+            role="status"
+            aria-live="polite"
+            className="p-3.5 rounded-lg border border-border bg-surface text-ink text-xs flex items-center space-x-2.5 shadow-2xs font-sans"
+          >
+            <RefreshCw className="w-4 h-4 animate-spin text-accent shrink-0" />
+            <span>Loading VORENT governance metrics and operational states...</span>
+          </div>
+          <SkeletonDashboard />
         </div>
-      )}
-
-      {/* Global Error Banner */}
+      ) : (
+        <>
+          {/* Global Error Banner */}
       {error && (
         <div
           role="alert"
@@ -513,7 +517,7 @@ export function GovernanceDashboardPanel({
       {criticalFindings.length > 0 && (
         <div
           role="alert"
-          className="px-4 py-3 sm:px-5 sm:py-3.5 rounded-lg border-l-4 border-l-deny border-y border-r border-deny/30 bg-deny/5 text-ink relative shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3.5"
+          className="px-4 py-3 sm:px-5 sm:py-3.5 rounded-lg border border-deny/40 bg-deny/5 text-ink relative shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3.5"
         >
           <div className="flex items-start space-x-3 min-w-0">
             <div className="w-7 h-7 rounded-md bg-deny/15 text-deny flex items-center justify-center font-bold text-xs shrink-0 border border-deny/30 mt-0.5">
@@ -571,7 +575,7 @@ export function GovernanceDashboardPanel({
       {totalReconciliationItems > 0 && (
         <div
           role="alert"
-          className="px-4 py-3 sm:px-5 sm:py-3.5 rounded-lg border-l-4 border-l-review border-y border-r border-review/30 bg-review/5 text-ink relative shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3.5"
+          className="px-4 py-3 sm:px-5 sm:py-3.5 rounded-lg border border-review/40 bg-review/5 text-ink relative shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3.5"
         >
           <div className="flex items-start space-x-3 min-w-0">
             <div className="w-7 h-7 rounded-md bg-review/15 text-review flex items-center justify-center font-bold text-xs shrink-0 border border-review/30 mt-0.5">
@@ -1266,6 +1270,8 @@ export function GovernanceDashboardPanel({
           Fail-Closed Invariants Enforced
         </span>
       </div>
+        </>
+      )}
     </div>
   );
 }

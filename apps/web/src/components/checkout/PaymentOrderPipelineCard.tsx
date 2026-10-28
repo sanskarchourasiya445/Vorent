@@ -234,7 +234,7 @@ export function PaymentOrderPipelineCard({
             </span>
           )}
           <span className="text-[11px] font-mono text-muted">
-            Phase 1 Lifecycle Active
+            Order Lifecycle Active
           </span>
           {paypalCreated && onRefreshOrderDetails && (
             <button
@@ -270,8 +270,8 @@ export function PaymentOrderPipelineCard({
             icon = <Lock className="w-4 h-4 text-muted/60 shrink-0" aria-hidden="true" />;
           } else if (stage.status === "IN_PROGRESS") {
             badgeColor = "bg-accent/10 border-accent/30 text-accent";
-            icon = <Clock className="w-4 h-4 text-accent animate-spin shrink-0" aria-hidden="true" />;
-          } else if (stage.status === "FUTURE_PHASE") {
+            icon = <RefreshCw className="w-4 h-4 text-accent animate-spin shrink-0" aria-hidden="true" />;
+          } else if (stage.status === "STANDBY") {
             badgeColor = "bg-surface-inset border-border text-muted";
             icon = <Clock className="w-4 h-4 text-muted/60 shrink-0" aria-hidden="true" />;
           }

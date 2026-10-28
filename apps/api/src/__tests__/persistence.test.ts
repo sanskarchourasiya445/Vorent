@@ -172,7 +172,7 @@ function createInMemoryDb() {
   return db;
 }
 
-describe("Phase 4: Database Persistence & Policy Version History", () => {
+describe("Database Persistence & Policy Version History", () => {
   let server: FastifyInstance;
   let isDbLive = false;
 
@@ -225,7 +225,7 @@ describe("Phase 4: Database Persistence & Policy Version History", () => {
 
   // 1. Schema & Migration Correctness
   describe("1. Migration and Schema Invariants", () => {
-    it("migration SQL file exists and contains all required Phase 4 tables and constraints", () => {
+    it("migration SQL file exists and contains all required tables and constraints", () => {
       const migrationPath = getMigrationsPath("0000_chemical_deathbird.sql");
       expect(existsSync(migrationPath)).toBe(true);
 

@@ -5,13 +5,17 @@ import {
   PayPalSyncResponseSchema,
   CreateTestSandboxOrderRequestSchema,
   CreateTestSandboxOrderResponseSchema,
+  UserRole,
   type PayPalTransaction,
 } from "@warrant/contracts";
 import { db } from "../db/index.js";
-import * as policyRepo from "../db/repositories/policyRepository.js";
 import * as paymentOrderRepo from "../db/repositories/paymentOrderRepository.js";
 import { PayPalService, defaultPayPalService } from "../services/paypalService.js";
-import { extractRequestId, isDbConnectionError } from "./routeUtils.js";
+import {
+  extractRequestId,
+  isDbConnectionError,
+  resolveAuthorizedUserOrReject,
+} from "./routeUtils.js";
 
 export interface PayPalRoutesOptions {
   paypalService?: PayPalService;
@@ -45,33 +49,31 @@ export const paypalRoutes: FastifyPluginAsync<PayPalRoutesOptions> = async (
   });
 
   // 2. GET /transactions - Retrieves transaction history
-  fastify.get(
+  fastify.get<{
+    Querystring: {
+      startDate?: string;
+      endDate?: string;
+      page?: string;
+      pageSize?: string;
+    };
+  }>(
     "/transactions",
-    async (
-      request: FastifyRequest<{
-        Querystring: {
-          startDate?: string;
-          endDate?: string;
-          page?: string;
-          pageSize?: string;
-        };
-      }>,
-      reply: FastifyReply
-    ) => {
+    async (request, reply) => {
       const requestId = extractRequestId(request);
       reply.header("x-request-id", requestId);
+
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        requiredRoles: [UserRole.APPROVER, UserRole.FINANCE_AUDITOR, UserRole.ADMINISTRATOR],
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+      const { ownerId } = authResult;
 
       const query = request.query || {};
       const page = query.page ? parseInt(query.page, 10) : 1;
       const pageSize = query.pageSize ? parseInt(query.pageSize, 10) : 20;
 
       try {
-        let ownerId: string | undefined;
-        try {
-          ownerId = await policyRepo.ensureDefaultUser(db);
-        } catch {
-          // Non-blocking in DB standby mode
-        }
 
         // Attempt retrieval from PayPal Transaction Search API
         let searchResult = await paypalService.listTransactions({
@@ -148,95 +150,106 @@ export const paypalRoutes: FastifyPluginAsync<PayPalRoutesOptions> = async (
   );
 
   // 3. POST /sync - Force synchronization of PayPal orders & transactions
-  fastify.post("/sync", async (request: FastifyRequest, reply: FastifyReply) => {
-    const requestId = extractRequestId(request);
-    reply.header("x-request-id", requestId);
+  fastify.post(
+    "/sync",
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const requestId = extractRequestId(request);
+      reply.header("x-request-id", requestId);
 
-    try {
-      let ownerId: string | undefined;
+      const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+        requiredRoles: [UserRole.FINANCE_AUDITOR, UserRole.ADMINISTRATOR],
+        allowDefaultFallbackInDev: true,
+      });
+      if (!authResult) return;
+      const { ownerId } = authResult;
+
       try {
-        ownerId = await policyRepo.ensureDefaultUser(db);
-      } catch {
-        // standby mode
-      }
+        // Check transactions from PayPal API
+        const searchResult = await paypalService.listTransactions();
+        let syncedCount = 0;
+        let updatedCount = 0;
+        let source = searchResult.source;
 
-      // Check transactions from PayPal API
-      const searchResult = await paypalService.listTransactions();
-      let syncedCount = 0;
-      let updatedCount = 0;
-      let source = searchResult.source;
+        if (searchResult.transactions.length > 0) {
+          const syncRes = await paymentOrderRepo.syncPayPalTransactions(
+            db,
+            searchResult.transactions,
+            ownerId
+          );
+          syncedCount = syncRes.syncedCount;
+          updatedCount = syncRes.updatedCount;
+        } else {
+          // Also probe existing database orders against PayPal Orders v2 API
+          try {
+            const localOrders = await paymentOrderRepo.listPaymentOrders(db, {
+              ownerId,
+              limit: 50,
+            });
 
-      if (searchResult.transactions.length > 0) {
-        const syncRes = await paymentOrderRepo.syncPayPalTransactions(
-          db,
-          searchResult.transactions,
-          ownerId
-        );
-        syncedCount = syncRes.syncedCount;
-        updatedCount = syncRes.updatedCount;
-      } else {
-        // Also probe existing database orders against PayPal Orders v2 API
-        try {
-          const localOrders = await paymentOrderRepo.listPaymentOrders(db, {
-            ownerId,
-            limit: 50,
-          });
-
-          for (const order of localOrders.orders) {
-            if (order.providerOrderId) {
-              try {
-                const remoteOrder = await paypalService.getOrder(order.providerOrderId);
-                if (
-                  remoteOrder.status === "COMPLETED" &&
-                  order.status !== "CAPTURED"
-                ) {
-                  await paymentOrderRepo.reconcilePaymentOrder(
-                    db,
-                    { orderId: order.id, ownerId: order.ownerId },
-                    paypalService
-                  );
-                  updatedCount++;
+            for (const order of localOrders.orders) {
+              if (order.providerOrderId) {
+                try {
+                  const remoteOrder = await paypalService.getOrder(order.providerOrderId);
+                  if (
+                    remoteOrder.status === "COMPLETED" &&
+                    order.status !== "CAPTURED"
+                  ) {
+                    await paymentOrderRepo.reconcilePaymentOrder(
+                      db,
+                      { orderId: order.id, ownerId: order.ownerId },
+                      paypalService
+                    );
+                    updatedCount++;
+                  }
+                  syncedCount++;
+                } catch {
+                  // Individual order probe non-blocking
                 }
-                syncedCount++;
-              } catch {
-                // Individual order probe non-blocking
               }
             }
+            source = "DATABASE_SYNCHRONIZED_ORDERS";
+          } catch {
+            // standby non-blocking
           }
-          source = "DATABASE_SYNCHRONIZED_ORDERS";
-        } catch {
-          // standby non-blocking
         }
+
+        const responsePayload = {
+          success: true,
+          syncedCount,
+          updatedCount,
+          source,
+          message: searchResult.permissionRequired
+            ? `Synchronized ${syncedCount} orders with PayPal Sandbox. Note: Enable 'Transaction Search' in PayPal Developer Dashboard for full reporting history.`
+            : `Successfully synchronized ${syncedCount} transactions with PayPal Sandbox.`,
+        };
+
+        const validated = PayPalSyncResponseSchema.parse(responsePayload);
+        return reply.status(200).send(validated);
+      } catch (err: unknown) {
+        request.log.error({ err, requestId }, "Failed to synchronize PayPal transactions");
+        return reply.status(500).send({
+          error: {
+            code: "SYNC_FAILED",
+            message: "Failed to synchronize with PayPal Sandbox.",
+          },
+          requestId,
+        });
       }
-
-      const responsePayload = {
-        success: true,
-        syncedCount,
-        updatedCount,
-        source,
-        message: searchResult.permissionRequired
-          ? `Synchronized ${syncedCount} orders with PayPal Sandbox. Note: Enable 'Transaction Search' in PayPal Developer Dashboard for full reporting history.`
-          : `Successfully synchronized ${syncedCount} transactions with PayPal Sandbox.`,
-      };
-
-      const validated = PayPalSyncResponseSchema.parse(responsePayload);
-      return reply.status(200).send(validated);
-    } catch (err: unknown) {
-      request.log.error({ err, requestId }, "Failed to synchronize PayPal transactions");
-      return reply.status(500).send({
-        error: {
-          code: "SYNC_FAILED",
-          message: "Failed to synchronize with PayPal Sandbox.",
-        },
-        requestId,
-      });
     }
-  });
+  );
 
   // 4. POST /test-order - Create a test sandbox order for verification
-  fastify.post("/test-order", async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.post(
+    "/test-order",
+    async (request: FastifyRequest, reply: FastifyReply) => {
     const requestId = extractRequestId(request);
     reply.header("x-request-id", requestId);
+
+    const authResult = await resolveAuthorizedUserOrReject(request, reply, {
+      requiredRoles: [UserRole.APPROVER, UserRole.ADMINISTRATOR],
+      allowDefaultFallbackInDev: true,
+    });
+    if (!authResult) return;
 
     const parseResult = CreateTestSandboxOrderRequestSchema.safeParse(request.body || {});
     if (!parseResult.success) {

@@ -1,8 +1,13 @@
 import React, { useState, useRef, useEffect } from "react";
-import { User, LogOut, ChevronDown, ShieldCheck, Sparkles, UserCheck } from "lucide-react";
+import { User, LogOut, ChevronDown, ShieldCheck, Users, UserCheck, Settings } from "lucide-react";
 import { useAuth } from "../../providers/AuthContext";
 
-export const UserNavIndicator: React.FC = () => {
+export interface UserNavIndicatorProps {
+  onOpenSettings?: (initialTab?: string) => void;
+  onLogout?: () => void;
+}
+
+export const UserNavIndicator: React.FC<UserNavIndicatorProps> = ({ onOpenSettings, onLogout }) => {
   const { user, isAuthenticated, logout, openAuthModal, switchPersona } = useAuth();
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -34,18 +39,18 @@ export const UserNavIndicator: React.FC = () => {
     );
   }
 
-  // Format role label & color tokens
+  // Format role label & color tokens (WCAG AA compliant in light & dark modes)
   const getRoleBadgeStyle = (role: string) => {
     switch (role) {
       case "ADMINISTRATOR":
-        return "bg-purple-500/10 text-purple-400 border-purple-500/30";
+        return "bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/30";
       case "APPROVER":
-        return "bg-amber-500/10 text-amber-400 border-amber-500/30";
+        return "bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/30";
       case "FINANCE_AUDITOR":
-        return "bg-blue-500/10 text-blue-400 border-blue-500/30";
+        return "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30";
       case "REQUESTER":
       default:
-        return "bg-accent/10 text-accent border-accent/30";
+        return "bg-accent/10 text-emerald-800 dark:text-accent border-accent/30";
     }
   };
 
@@ -55,35 +60,36 @@ export const UserNavIndicator: React.FC = () => {
         type="button"
         data-testid="user-nav-button"
         onClick={() => setDropdownOpen(!dropdownOpen)}
-        className="flex items-center gap-2 p-1.5 pl-2 rounded-lg bg-surface border border-border hover:border-accent/40 transition-colors text-xs text-ink cursor-pointer group"
+        className="flex items-center gap-1.5 sm:gap-2 p-1.5 pl-2 rounded-lg bg-surface border border-border hover:border-accent/40 transition-colors text-xs text-ink cursor-pointer group shrink-0"
         aria-expanded={dropdownOpen}
         aria-haspopup="true"
+        aria-label="User account and persona menu"
       >
-        <div className="flex items-center gap-1.5">
-          <div className="w-5 h-5 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-bold">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="w-5 h-5 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-bold shrink-0">
             {(user.name || user.email).charAt(0).toUpperCase()}
           </div>
-          <span className="font-medium text-ink hidden sm:inline max-w-[120px] truncate">
+          <span className="font-medium text-ink hidden md:inline max-w-[100px] truncate">
             {user.name || user.email.split("@")[0]}
           </span>
         </div>
 
         <span
-          className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded-md border font-semibold ${getRoleBadgeStyle(
+          className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded-md border font-semibold hidden sm:inline-block shrink-0 ${getRoleBadgeStyle(
             user.role
           )}`}
         >
           {user.role.replace("_", " ")}
         </span>
 
-        <ChevronDown className="w-3.5 h-3.5 text-ink-muted group-hover:text-ink transition-transform" />
+        <ChevronDown className="w-3.5 h-3.5 text-ink-muted group-hover:text-ink transition-transform shrink-0" />
       </button>
 
       {dropdownOpen && (
         <div className="absolute right-0 mt-2 w-64 rounded-xl bg-surface-raised border border-border shadow-2xl p-3 z-[100] text-xs text-ink animate-in fade-in slide-in-from-top-2 duration-150">
           {/* User profile summary */}
           <div className="pb-3 border-b border-border/60">
-            <div className="font-semibold text-ink truncate">{user.name || "Warrant User"}</div>
+            <div className="font-semibold text-ink truncate">{user.name || "VORENT User"}</div>
             <div className="text-[11px] text-ink-muted font-mono truncate">{user.email}</div>
             <div className="mt-2 flex items-center gap-1 text-[10px] text-ink-muted">
               <ShieldCheck className="w-3.5 h-3.5 text-accent" />
@@ -95,7 +101,7 @@ export const UserNavIndicator: React.FC = () => {
           <div className="py-2.5 border-b border-border/60">
             <div className="flex items-center justify-between mb-1.5 px-1">
               <span className="text-[10px] font-semibold uppercase text-ink-muted tracking-wider flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-accent" /> Switch Persona
+                <Users className="w-3 h-3 text-accent" /> Switch Persona
               </span>
               <span className="text-[9px] text-ink-muted">Evaluation</span>
             </div>
@@ -137,6 +143,24 @@ export const UserNavIndicator: React.FC = () => {
             </div>
           </div>
 
+          {/* Settings Shortcut */}
+          {onOpenSettings && (
+            <div className="py-2 border-b border-border/60">
+              <button
+                type="button"
+                data-testid="open-account-settings-btn"
+                onClick={() => {
+                  setDropdownOpen(false);
+                  onOpenSettings("profile");
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-ink-muted hover:text-ink hover:bg-surface transition-colors cursor-pointer text-xs"
+              >
+                <Settings className="w-3.5 h-3.5 text-accent" />
+                <span>Account &amp; Settings</span>
+              </button>
+            </div>
+          )}
+
           {/* Actions */}
           <div className="pt-2 flex items-center justify-between gap-2">
             <button
@@ -154,6 +178,7 @@ export const UserNavIndicator: React.FC = () => {
               onClick={async () => {
                 setDropdownOpen(false);
                 await logout();
+                onLogout?.();
               }}
               className="inline-flex items-center gap-1 text-[11px] text-red-400 hover:text-red-300 transition-colors cursor-pointer"
             >

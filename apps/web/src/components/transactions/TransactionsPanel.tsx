@@ -36,6 +36,7 @@ import type {
 } from "@warrant/contracts";
 import { HashBadge } from "../ui/HashBadge";
 import { StatusBadge } from "../ui/StatusBadge";
+import { Skeleton, SkeletonCodeBlock } from "../ui/Skeleton";
 
 interface TransactionsPanelProps {
   initialOrderId?: string;
@@ -214,7 +215,7 @@ export function TransactionsPanel({ initialOrderId }: TransactionsPanelProps) {
       const res = await createPayPalTestOrder({
         amountMinor: 2500,
         currency: "USD",
-        itemDescription: "Warrant Studio Sandbox Verification Order",
+        itemDescription: "VORENT Sandbox Verification Order",
       });
       setCreatedTestOrder(res);
       setSuccessMessage(`PayPal test order created: ${res.id} ($25.00 USD).`);
@@ -394,7 +395,7 @@ export function TransactionsPanel({ initialOrderId }: TransactionsPanelProps) {
               <CreditCard className="w-4 h-4 text-primary" aria-hidden="true" />
             </div>
             <div>
-              <h1 className="text-xl sm:text-2xl font-sans font-semibold tracking-tight text-ink">
+              <h1 className="text-xl sm:text-2xl font-serif font-semibold tracking-tight text-ink">
                 Transactions &amp; Payment Lifecycle
               </h1>
               <p className="text-xs text-muted mt-0.5 font-sans leading-relaxed">
@@ -415,11 +416,6 @@ export function TransactionsPanel({ initialOrderId }: TransactionsPanelProps) {
               <span>{alertsData.totalAlerts} Exceptions Pending</span>
             </button>
           )}
-
-          <span className="inline-flex items-center space-x-1.5 h-8 px-2.5 rounded-md text-[10px] font-mono font-bold bg-sandbox-bg text-sandbox-text border border-sandbox-border select-none">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
-            <span className="tracking-wide">SANDBOX MODE</span>
-          </span>
 
           <button
             type="button"
@@ -535,6 +531,28 @@ export function TransactionsPanel({ initialOrderId }: TransactionsPanelProps) {
           </button>
         </div>
       </div>
+
+      {/* Loading Skeleton */}
+      {loading && !order && (
+        <div className="space-y-4" role="status" aria-label="Loading order details...">
+          <div className="p-3 rounded-lg border border-border bg-surface-inset text-xs text-muted font-mono flex items-center justify-center space-x-2">
+            <RefreshCw className="w-4 h-4 animate-spin text-accent" />
+            <span>Fetching payment order from PostgreSQL ledger...</span>
+          </div>
+          <div className="rounded-xl border border-border bg-surface p-5 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-border/50">
+              <Skeleton variant="text" className="w-48 h-5" />
+              <Skeleton variant="badge" className="w-24 h-5" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Skeleton variant="rectangular" className="h-16 rounded-lg" />
+              <Skeleton variant="rectangular" className="h-16 rounded-lg" />
+              <Skeleton variant="rectangular" className="h-16 rounded-lg" />
+            </div>
+            <SkeletonCodeBlock lines={4} />
+          </div>
+        </div>
+      )}
 
       {/* Alert Banners */}
       {isUnknown && (

@@ -143,12 +143,21 @@ export async function submitCheckoutProposal(
   const evidenceSnapshot =
     input.evidenceVariation === "MISSING"
       ? {
+          evidenceComplete: false,
+          quotesVerified: false,
+          evidenceFresh: false,
+          snapshotTimestamp: new Date().toISOString(),
           timestamp: new Date().toISOString(),
           merchantConfidence: 0.1,
           itemCategorizations: {},
         }
       : input.evidenceVariation === "STALE"
         ? {
+            evidenceComplete: true,
+            quotesVerified: true,
+            evidenceFresh: false,
+            stale: true,
+            snapshotTimestamp: new Date(Date.now() - 14 * 86400000).toISOString(),
             timestamp: new Date(Date.now() - 14 * 86400000).toISOString(),
             merchantConfidence: 0.9,
             itemCategorizations: Object.fromEntries(
@@ -156,6 +165,11 @@ export async function submitCheckoutProposal(
             ),
           }
         : {
+            evidenceComplete: true,
+            quotesVerified: true,
+            evidenceFresh: true,
+            stale: false,
+            snapshotTimestamp: new Date().toISOString(),
             timestamp: new Date().toISOString(),
             merchantConfidence: 1.0,
             itemCategorizations: Object.fromEntries(

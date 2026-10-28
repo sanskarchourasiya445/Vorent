@@ -442,6 +442,26 @@ describe("Checkout HTTP Routes (Nonces & Proposals)", () => {
       expect(json.error.code).toBe("NONCE_REPLAYED");
     });
 
+    it("returns 400 Bad Request when cart contains an unknown SKU (PAY-001)", async () => {
+      vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce(validOwnerId);
+      vi.spyOn(checkoutRepo, "submitCheckoutProposal").mockRejectedValueOnce(
+        new checkoutRepo.CheckoutError(
+          "UNKNOWN_CATALOG_SKU",
+          "Item with SKU 'fake-sku' is not present in the authoritative product catalog."
+        )
+      );
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/checkout/proposals",
+        payload: validProposalPayload,
+      });
+
+      expect(response.statusCode).toBe(400);
+      const json = response.json();
+      expect(json.error.code).toBe("UNKNOWN_CATALOG_SKU");
+    });
+
     it("returns 400 Bad Request when nonce has expired (NONCE_EXPIRED)", async () => {
       vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce(validOwnerId);
       vi.spyOn(checkoutRepo, "submitCheckoutProposal").mockRejectedValueOnce(
@@ -498,6 +518,25 @@ describe("Checkout HTTP Routes (Nonces & Proposals)", () => {
 
       expect(response.statusCode).toBe(400);
       expect(response.json().error.code).toBe("POLICY_HASH_MISMATCH");
+    });
+
+    it("returns 400 Bad Request when proposal references a revoked approval (REVOKED_APPROVAL)", async () => {
+      vi.spyOn(policyRepo, "ensureDefaultUser").mockResolvedValueOnce(validOwnerId);
+      vi.spyOn(checkoutRepo, "submitCheckoutProposal").mockRejectedValueOnce(
+        new checkoutRepo.CheckoutError(
+          "REVOKED_APPROVAL",
+          "The specified approval checkpoint has been revoked and cannot authorize checkout."
+        )
+      );
+
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/checkout/proposals",
+        payload: validProposalPayload,
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("REVOKED_APPROVAL");
     });
 
     it("evaluates proposal with stale evidence to REVIEW with zero spend reservation (201 Created)", async () => {

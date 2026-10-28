@@ -290,7 +290,7 @@ describe("Governance Dashboard & Checkout Enforcement Integration", () => {
         }),
       );
 
-      expect(html).toContain("Loading Warrant governance metrics and operational states...");
+      expect(html).toContain("Loading VORENT governance metrics and operational states...");
     });
 
     it("renders empty states when no approvals, policies, or runs exist", () => {

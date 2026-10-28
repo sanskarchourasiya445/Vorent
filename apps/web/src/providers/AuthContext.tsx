@@ -23,10 +23,32 @@ export interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [token, setToken] = useState<string | null>(authService.getToken());
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+export interface AuthProviderProps {
+  children?: React.ReactNode;
+  initialUser?: AuthUser | null;
+  initialToken?: string | null;
+  initialIsLoading?: boolean;
+}
+
+export const AuthProvider: React.FC<AuthProviderProps> = ({
+  children,
+  initialUser,
+  initialToken,
+  initialIsLoading,
+}) => {
+  const [user, setUser] = useState<AuthUser | null>(() => {
+    if (initialUser !== undefined) return initialUser;
+    return null;
+  });
+  const [token, setToken] = useState<string | null>(() => {
+    if (initialToken !== undefined) return initialToken;
+    return authService.getToken();
+  });
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    if (initialIsLoading !== undefined) return initialIsLoading;
+    if (initialUser !== undefined) return false;
+    return true;
+  });
   const [error, setError] = useState<string | null>(null);
   const [personas, setPersonas] = useState<PersonaInfo[]>([]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
@@ -34,6 +56,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Fetch current user if token exists and load personas
   const initAuth = useCallback(async () => {
+    // If an initialUser was explicitly provided (e.g. in tests or SSR), skip automatic remote fetch
+    if (initialUser !== undefined && initialUser !== null) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     try {
       // 1. Load starter personas
@@ -65,28 +93,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      // 3. Fallback to default persona (Admin or Requester) for seamless interactive experience
-      // if no explicit token is yet stored
-      try {
-        const loginRes = await authService.login({
-          email: "admin@warrant.studio",
-          password: "AdminPass123!",
-        });
-        if (loginRes?.user && loginRes?.token) {
-          setUser(loginRes.user);
-          setToken(loginRes.token);
-        }
-      } catch {
-        // Standby offline mode
-      }
+      // 3. Unauthenticated state: visitor has no active session
+      setUser(null);
+      setToken(null);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [initialUser]);
 
   useEffect(() => {
     void initAuth();
   }, [initAuth]);
+
+  // Listen for global 401 session expiration events
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      setUser(null);
+      setToken(null);
+      setAuthModalTab("login");
+      setIsAuthModalOpen(true);
+      setError("Your session has expired or requires re-authentication. Please sign in.");
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("warrant_session_expired", handleSessionExpired);
+      return () => window.removeEventListener("warrant_session_expired", handleSessionExpired);
+    }
+  }, []);
 
   const login = async (email: string, password: string) => {
     setError(null);
@@ -175,10 +208,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
+const defaultAuthContext: AuthContextType = {
+  user: null,
+  token: null,
+  isAuthenticated: false,
+  isLoading: false,
+  error: null,
+  personas: [],
+  isAuthModalOpen: false,
+  authModalTab: "login",
+  login: async () => {},
+  register: async () => {},
+  logout: async () => {},
+  switchPersona: async () => {},
+  openAuthModal: () => {},
+  closeAuthModal: () => {},
+  clearError: () => {},
+};
+
 export function useAuth(): AuthContextType {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-  return context;
+  return context ?? defaultAuthContext;
 }

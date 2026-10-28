@@ -3,6 +3,15 @@ import type {
   CreateApprovalInput,
   ApprovalListState,
 } from "../types/approval";
+import { getAuthHeaders } from "./client";
+
+const safeAuthHeaders = () => {
+  try {
+    return typeof getAuthHeaders === "function" ? getAuthHeaders() : {};
+  } catch {
+    return {};
+  }
+};
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -21,7 +30,7 @@ export async function fetchApprovals(): Promise<ApprovalListState> {
     for (const url of candidateUrls) {
       const res = await fetch(url, {
         method: "GET",
-        headers: { Accept: "application/json" },
+        headers: { Accept: "application/json", ...safeAuthHeaders() },
       });
       if (res.status !== 404) {
         response = res;
@@ -33,7 +42,7 @@ export async function fetchApprovals(): Promise<ApprovalListState> {
       return {
         state: "UNAVAILABLE",
         message:
-          "Approval route /api/approvals is not yet mounted on the backend. Approval checkpoint management is planned for Phase 5.",
+          "Approval route /api/approvals is not yet mounted on the backend.",
       };
     }
 
@@ -128,6 +137,7 @@ export async function createApproval(input: CreateApprovalInput): Promise<Approv
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
+      ...safeAuthHeaders(),
     },
     body: JSON.stringify({
       policyVersionId: input.policyVersionId,
@@ -192,7 +202,10 @@ export async function revokeApproval(approvalId: string): Promise<void> {
   const url = `${API_BASE}/api/approvals/${encodeURIComponent(approvalId)}/revoke`;
   const response = await fetch(url, {
     method: "POST",
-    headers: { Accept: "application/json" },
+    headers: {
+      Accept: "application/json",
+      ...safeAuthHeaders(),
+    },
   });
 
   if (response.status === 404) {

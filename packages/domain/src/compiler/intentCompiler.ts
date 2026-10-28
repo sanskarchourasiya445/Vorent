@@ -8,7 +8,7 @@ import {
 } from "@warrant/contracts";
 
 /**
- * Warrant Phase 2 Intent Compiler
+ * Warrant Intent Compiler
  *
  * Deterministic natural-language purchase mandate compiler.
  * Converts unstructured buyer intent into a strictly validated, explicit PolicyDocument

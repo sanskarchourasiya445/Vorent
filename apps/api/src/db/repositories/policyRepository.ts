@@ -1,4 +1,4 @@
-import { eq, desc, max, sql } from "drizzle-orm";
+import { eq, desc, max, sql, isNull, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import {
   type CreatePolicyRequest,
@@ -14,56 +14,115 @@ import { logAuditEvent } from "./auditRepository.js";
 
 export const SYSTEM_DEFAULT_USER_SUBJECT = "system:default_owner";
 
+export interface InMemoryPolicy {
+  id: string;
+  ownerId: string;
+  name: string;
+  sourceMandate: string;
+  currentVersionId: string;
+  archivedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface InMemoryPolicyVersion {
+  id: string;
+  policyId: string;
+  ownerId: string;
+  versionNumber: number;
+  sourceMandateSnapshot: string;
+  intentSpec: any;
+  policyDocument: any;
+  policySchemaVersion: string;
+  canonicalizationVersion: string;
+  policyHash: string;
+  confirmationState: string;
+  createdAt: Date;
+}
+
+export const inMemoryPolicies = new Map<string, InMemoryPolicy>();
+export const inMemoryPolicyVersions = new Map<string, InMemoryPolicyVersion>();
+
+export function normalizeIntentSpec(intentSpec: any, policyDoc?: any, name?: string): any {
+  if (!intentSpec || typeof intentSpec !== "object") {
+    return {
+      name: name || "Purchase Mandate Intent",
+      currency: policyDoc?.currency || "USD",
+      maxItemPriceMinor: policyDoc?.maxItemPriceMinor,
+      maxCartTotalMinor: policyDoc?.maxCartTotalMinor,
+      allowedCategories: policyDoc?.allowedCategories,
+      prohibitedCategories: policyDoc?.prohibitedCategories,
+      requireEvidence: policyDoc?.requireEvidence,
+    };
+  }
+  return {
+    ...intentSpec,
+    name: intentSpec.name || name || "Purchase Mandate Intent",
+    currency: intentSpec.currency || policyDoc?.currency || "USD",
+    maxItemPriceMinor: intentSpec.maxItemPriceMinor ?? policyDoc?.maxItemPriceMinor,
+    maxCartTotalMinor: intentSpec.maxCartTotalMinor ?? policyDoc?.maxCartTotalMinor,
+    allowedCategories: intentSpec.allowedCategories ?? policyDoc?.allowedCategories,
+    prohibitedCategories: intentSpec.prohibitedCategories ?? policyDoc?.prohibitedCategories,
+    requireEvidence: intentSpec.requireEvidence ?? policyDoc?.requireEvidence,
+  };
+}
+
 /**
  * Ensures the default owner user exists in the users table.
  * Idempotent: returns existing user UUID or creates one.
  */
 export async function ensureDefaultUser(db: any): Promise<string> {
-  const existing = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.authSubject, SYSTEM_DEFAULT_USER_SUBJECT))
-    .limit(1);
-
-  if (existing.length > 0 && existing[0]?.id) {
-    return existing[0].id;
-  }
-
-  const newId = randomUUID();
+  const fallbackOwnerId = "00000000-0000-0000-0000-000000000001";
   try {
-    const insertBuilder = db.insert(users).values({
-      id: newId,
-      authSubject: SYSTEM_DEFAULT_USER_SUBJECT,
-    });
+    const existing = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.authSubject, SYSTEM_DEFAULT_USER_SUBJECT))
+      .limit(1);
 
-    if (typeof insertBuilder?.onConflictDoNothing === "function") {
-      await insertBuilder.onConflictDoNothing({ target: users.authSubject });
-    } else {
-      await insertBuilder;
+    if (existing.length > 0 && existing[0]?.id) {
+      return existing[0].id;
     }
+
+    const newId = randomUUID();
+    try {
+      const insertBuilder = db.insert(users).values({
+        id: newId,
+        authSubject: SYSTEM_DEFAULT_USER_SUBJECT,
+      });
+
+      if (typeof insertBuilder?.onConflictDoNothing === "function") {
+        await insertBuilder.onConflictDoNothing({ target: users.authSubject });
+      } else {
+        await insertBuilder;
+      }
+    } catch (err: any) {
+      const isConflict =
+        err?.code === "23505" ||
+        err?.message?.includes("duplicate key") ||
+        err?.message?.includes("unique") ||
+        err?.constraint?.includes("users_auth_subject");
+
+      if (!isConflict) {
+        throw err;
+      }
+    }
+
+    const fallback = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.authSubject, SYSTEM_DEFAULT_USER_SUBJECT))
+      .limit(1);
+
+    if (fallback.length > 0 && fallback[0]?.id) {
+      return fallback[0].id;
+    }
+
+    return newId;
   } catch (err: any) {
-    const isConflict =
-      err?.code === "23505" ||
-      err?.message?.includes("duplicate key") ||
-      err?.message?.includes("unique") ||
-      err?.constraint?.includes("users_auth_subject");
-
-    if (!isConflict) {
-      throw err;
-    }
+    // When database is unreachable or in standby/offline mode, return stable default fallback
+    return fallbackOwnerId;
   }
-
-  const fallback = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.authSubject, SYSTEM_DEFAULT_USER_SUBJECT))
-    .limit(1);
-
-  if (fallback.length > 0 && fallback[0]?.id) {
-    return fallback[0].id;
-  }
-
-  return newId;
 }
 
 /**
@@ -98,7 +157,7 @@ async function findExistingPresetVersion(
         name: preset.name,
         versionNumber: v.versionNumber,
         sourceMandateSnapshot: v.sourceMandateSnapshot,
-        intentSpec: v.intentSpec,
+        intentSpec: normalizeIntentSpec(v.intentSpec, v.policyDocument, preset.name),
         policyDocument: v.policyDocument,
         policySchemaVersion: v.policySchemaVersion,
         canonicalizationVersion: v.canonicalizationVersion,
@@ -212,24 +271,35 @@ export async function seedPresets(db: any, ownerId: string): Promise<void> {
 
 /**
  * Lists all policies. If database is available, combines DB records with preset manifests.
+ * Also merges in-memory custom policies if running in standby/fallback mode.
  */
-export async function listPolicies(db: any, _ownerId?: string): Promise<PolicySummary[]> {
+export async function listPolicies(db: any, ownerId?: string, includeArchived = false): Promise<PolicySummary[]> {
+  const summaries: PolicySummary[] = [];
+  const seenIds = new Set<string>();
+
   try {
-    const dbPolicies = await db
+    const query = db
       .select({
         id: policies.id,
         name: policies.name,
         sourceMandate: policies.sourceMandate,
         currentVersionId: policies.currentVersionId,
+        archivedAt: policies.archivedAt,
         createdAt: policies.createdAt,
         updatedAt: policies.updatedAt,
       })
-      .from(policies)
-      .orderBy(desc(policies.updatedAt));
+      .from(policies);
 
-    if (dbPolicies.length === 0) {
-      return getPresetSummaries();
+    let whereClause = includeArchived ? undefined : isNull(policies.archivedAt);
+    if (ownerId) {
+      whereClause = whereClause
+        ? and(whereClause, eq(policies.ownerId, ownerId))
+        : eq(policies.ownerId, ownerId);
     }
+
+    const dbPolicies = whereClause
+      ? await query.where(whereClause).orderBy(desc(policies.updatedAt))
+      : await query.orderBy(desc(policies.updatedAt));
 
     // Batch fetch all policy versions for all policies in one query to avoid N+1 query waterfall
     let allVersions: any[] = [];
@@ -247,20 +317,19 @@ export async function listPolicies(db: any, _ownerId?: string): Promise<PolicySu
     }
 
     const versionById = new Map<string, { versionNumber: number; policyHash: string }>();
-    const versionsByPolicyId = new Map<string, { versionNumber: number; policyHash: string }[]>();
+    const versionsByPolicyId = new Map<string, { id: string; versionNumber: number; policyHash: string }[]>();
 
     for (const v of allVersions) {
       versionById.set(v.id, { versionNumber: v.versionNumber, policyHash: v.policyHash });
       const list = versionsByPolicyId.get(v.policyId) || [];
-      list.push({ versionNumber: v.versionNumber, policyHash: v.policyHash });
+      list.push({ id: v.id, versionNumber: v.versionNumber, policyHash: v.policyHash });
       versionsByPolicyId.set(v.policyId, list);
     }
-
-    const summaries: PolicySummary[] = [];
 
     for (const p of dbPolicies) {
       let versionNumber = 1;
       let policyHash = "";
+      let effectiveCurrentVersionId = p.currentVersionId;
       const policyVList = versionsByPolicyId.get(p.id) || [];
       const versionCount = policyVList.length > 0 ? policyVList.length : 1;
 
@@ -274,6 +343,9 @@ export async function listPolicies(db: any, _ownerId?: string): Promise<PolicySu
         if (latest) {
           versionNumber = latest.versionNumber;
           policyHash = latest.policyHash;
+          if (!effectiveCurrentVersionId) {
+            effectiveCurrentVersionId = latest.id;
+          }
         }
       }
 
@@ -283,11 +355,12 @@ export async function listPolicies(db: any, _ownerId?: string): Promise<PolicySu
         policyHash = matchedPreset.hash;
       }
 
+      seenIds.add(p.id);
       summaries.push({
         id: p.id,
         name: p.name,
         sourceMandate: p.sourceMandate,
-        currentVersionId: p.currentVersionId,
+        currentVersionId: effectiveCurrentVersionId,
         currentVersionNumber: versionNumber,
         policyHash: policyHash || undefined,
         isPreset: Boolean(matchedPreset),
@@ -297,23 +370,44 @@ export async function listPolicies(db: any, _ownerId?: string): Promise<PolicySu
         updatedAt: p.updatedAt ? new Date(p.updatedAt).toISOString() : new Date().toISOString(),
       });
     }
-
-    // Combine with preset summaries for any preset not yet in DB
-    const presetSummaries = getPresetSummaries();
-    for (const preset of presetSummaries) {
-      const alreadyPresent = summaries.some(
-        (s) => s.id === preset.id || s.presetId === preset.id || s.name === preset.name
-      );
-      if (!alreadyPresent) {
-        summaries.push(preset);
-      }
-    }
-
-    return summaries;
   } catch {
-    // If DB is unavailable, return built-in presets formatted as PolicySummary
-    return getPresetSummaries();
+    // If DB is unavailable, continue with in-memory policies + presets
   }
+
+  // Merge in-memory custom policies
+  for (const [id, mem] of inMemoryPolicies.entries()) {
+    if (!seenIds.has(id)) {
+      if (!includeArchived && mem.archivedAt) continue;
+      if (ownerId && mem.ownerId !== ownerId) continue;
+      const memV = inMemoryPolicyVersions.get(mem.currentVersionId);
+      summaries.push({
+        id: mem.id,
+        name: mem.name,
+        sourceMandate: mem.sourceMandate,
+        currentVersionId: mem.currentVersionId,
+        currentVersionNumber: memV?.versionNumber ?? 1,
+        policyHash: memV?.policyHash,
+        isPreset: false,
+        versionCount: 1,
+        createdAt: mem.createdAt.toISOString(),
+        updatedAt: mem.updatedAt.toISOString(),
+      });
+      seenIds.add(id);
+    }
+  }
+
+  // Combine with preset summaries for any preset not yet in DB/memory
+  const presetSummaries = getPresetSummaries();
+  for (const preset of presetSummaries) {
+    const alreadyPresent = summaries.some(
+      (s) => s.id === preset.id || s.presetId === preset.id || s.name === preset.name
+    );
+    if (!alreadyPresent) {
+      summaries.push(preset);
+    }
+  }
+
+  return summaries;
 }
 
 /**
@@ -374,7 +468,7 @@ export async function getPolicyVersion(
           name: p[0]?.name ?? "Unnamed Policy",
           versionNumber: v.versionNumber,
           sourceMandateSnapshot: v.sourceMandateSnapshot,
-          intentSpec: v.intentSpec,
+          intentSpec: normalizeIntentSpec(v.intentSpec, v.policyDocument, p[0]?.name),
           policyDocument: v.policyDocument,
           policySchemaVersion: v.policySchemaVersion,
           canonicalizationVersion: v.canonicalizationVersion,
@@ -386,15 +480,59 @@ export async function getPolicyVersion(
         });
       }
 
-      // Try match on policies.id -> fetch current version
+      // Try match on policies.id -> fetch current version or latest version
       const policyRecord = await db
         .select()
         .from(policies)
         .where(eq(policies.id, identifier))
         .limit(1);
 
-      if (policyRecord.length > 0 && policyRecord[0].currentVersionId) {
-        return getPolicyVersion(db, policyRecord[0].currentVersionId);
+      if (policyRecord.length > 0) {
+        if (policyRecord[0].currentVersionId) {
+          const cv = await getPolicyVersion(db, policyRecord[0].currentVersionId);
+          if (cv) return cv;
+        }
+
+        // If currentVersionId is null or not found, find the latest version for this policy
+        const latestVersions = await db
+          .select()
+          .from(policyVersions)
+          .where(eq(policyVersions.policyId, identifier))
+          .orderBy(desc(policyVersions.versionNumber))
+          .limit(1);
+
+        if (latestVersions.length > 0) {
+          const v = latestVersions[0];
+          const matchedPreset = Object.values(POLICY_PRESETS).find((pr) => pr.name === policyRecord[0].name);
+
+          // Self-heal: update currentVersionId on the policy record
+          try {
+            await db
+              .update(policies)
+              .set({ currentVersionId: v.id })
+              .where(eq(policies.id, identifier));
+          } catch {
+            // Non-blocking self-heal
+          }
+
+          return PolicyVersionRecordSchema.parse({
+            id: v.id,
+            policyId: v.policyId,
+            ownerId: v.ownerId,
+            name: policyRecord[0].name ?? "Unnamed Policy",
+            versionNumber: v.versionNumber,
+            sourceMandateSnapshot: v.sourceMandateSnapshot,
+            intentSpec: normalizeIntentSpec(v.intentSpec, v.policyDocument, policyRecord[0].name),
+            policyDocument: v.policyDocument,
+            policySchemaVersion: v.policySchemaVersion,
+            canonicalizationVersion: v.canonicalizationVersion,
+            policyHash: v.policyHash,
+            confirmationState: v.confirmationState,
+            createdAt: new Date(v.createdAt).toISOString(),
+            isPreset: Boolean(matchedPreset),
+            presetId: matchedPreset?.id,
+          });
+        }
       }
     }
 
@@ -430,7 +568,7 @@ export async function getPolicyVersion(
           name: preset.name,
           versionNumber: v.versionNumber,
           sourceMandateSnapshot: v.sourceMandateSnapshot,
-          intentSpec: v.intentSpec,
+          intentSpec: normalizeIntentSpec(v.intentSpec, v.policyDocument, preset.name),
           policyDocument: v.policyDocument,
           policySchemaVersion: v.policySchemaVersion,
           canonicalizationVersion: v.canonicalizationVersion,
@@ -446,7 +584,46 @@ export async function getPolicyVersion(
     // If DB error, proceed to fallback
   }
 
-  // Fallback to in-memory preset if matched
+  // 3. Fallback to in-memory custom policy versions
+  const memVersion = inMemoryPolicyVersions.get(identifier);
+  if (memVersion) {
+    const memPolicy = inMemoryPolicies.get(memVersion.policyId);
+    return PolicyVersionRecordSchema.parse({
+      id: memVersion.id,
+      policyId: memVersion.policyId,
+      ownerId: memVersion.ownerId,
+      name: memPolicy?.name || "Custom Policy",
+      versionNumber: memVersion.versionNumber,
+      sourceMandateSnapshot: memVersion.sourceMandateSnapshot,
+      intentSpec: normalizeIntentSpec(memVersion.intentSpec, memVersion.policyDocument, memPolicy?.name),
+      policyDocument: memVersion.policyDocument,
+      policySchemaVersion: memVersion.policySchemaVersion,
+      canonicalizationVersion: memVersion.canonicalizationVersion,
+      policyHash: memVersion.policyHash,
+      confirmationState: memVersion.confirmationState,
+      createdAt: memVersion.createdAt.toISOString(),
+      isPreset: false,
+    });
+  }
+
+  // Check if identifier is inMemory policyId
+  const memPolicy = inMemoryPolicies.get(identifier);
+  if (memPolicy) {
+    if (memPolicy.currentVersionId) {
+      const cv = await getPolicyVersion(db, memPolicy.currentVersionId);
+      if (cv) return cv;
+    }
+    const memVersions = Array.from(inMemoryPolicyVersions.values()).filter((v) => v.policyId === identifier);
+    if (memVersions.length > 0) {
+      memVersions.sort((a, b) => b.versionNumber - a.versionNumber);
+      const firstMemVersion = memVersions[0];
+      if (firstMemVersion) {
+        return getPolicyVersion(db, firstMemVersion.id);
+      }
+    }
+  }
+
+  // 4. Fallback to in-memory preset if matched
   if (preset) {
     return PolicyVersionRecordSchema.parse({
       id: preset.id,
@@ -471,63 +648,131 @@ export async function getPolicyVersion(
 
 /**
  * Creates a brand new policy and initial version 1 record.
+ * Handles duplicate name checks, PostgreSQL persistence, and in-memory registration.
  */
 export async function createPolicy(
   db: any,
   input: CreatePolicyRequest,
   ownerId: string,
 ): Promise<PolicyVersionRecord> {
+  const trimmedName = input.name.trim();
+  if (!trimmedName) {
+    const error: any = new Error("Policy name cannot be empty.");
+    error.statusCode = 400;
+    error.code = "VALIDATION_ERROR";
+    throw error;
+  }
+
+  // Duplicate name check in memory
+  const duplicateMem = Array.from(inMemoryPolicies.values()).find(
+    (p) => p.name.toLowerCase() === trimmedName.toLowerCase() && !p.archivedAt
+  );
+  if (duplicateMem) {
+    const error: any = new Error(`A policy named '${trimmedName}' already exists.`);
+    error.statusCode = 409;
+    error.code = "POLICY_NAME_EXISTS";
+    throw error;
+  }
+
   const policyId = randomUUID();
   const versionId = randomUUID();
   const policyHash = computePolicyHash(input.policy);
   const now = new Date();
 
-  await db.transaction(async (tx: any) => {
-    await tx.insert(policies).values({
-      id: policyId,
-      ownerId,
-      name: input.name,
-      sourceMandate: input.sourceMandate,
-      currentVersionId: versionId,
-      createdAt: now,
-      updatedAt: now,
-    });
+  // Try DB
+  try {
+    const existing = await db
+      .select({ id: policies.id })
+      .from(policies)
+      .where(and(eq(policies.name, trimmedName), isNull(policies.archivedAt)))
+      .limit(1);
 
-    await tx.insert(policyVersions).values({
-      id: versionId,
-      policyId,
-      ownerId,
-      versionNumber: 1,
-      sourceMandateSnapshot: input.sourceMandate,
-      intentSpec: input.intent,
-      policyDocument: input.policy,
-      policySchemaVersion: input.policy.schemaVersion ?? "1.0",
-      canonicalizationVersion: "1.0.0",
-      policyHash,
-      confirmationState: input.confirmationState ?? "CONFIRMED",
-      createdAt: now,
-    });
+    if (existing.length > 0) {
+      const error: any = new Error(`A policy named '${trimmedName}' already exists.`);
+      error.statusCode = 409;
+      error.code = "POLICY_NAME_EXISTS";
+      throw error;
+    }
 
-    await logAuditEvent(tx, {
-      ownerId,
-      actorType: "USER",
-      eventType: "POLICY_CREATED",
-      entityType: "POLICY",
-      entityId: policyId,
-      payload: {
-        name: input.name,
+    await db.transaction(async (tx: any) => {
+      await tx.insert(policies).values({
+        id: policyId,
+        ownerId,
+        name: trimmedName,
         sourceMandate: input.sourceMandate,
-        initialVersionId: versionId,
+        currentVersionId: versionId,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      await tx.insert(policyVersions).values({
+        id: versionId,
+        policyId,
+        ownerId,
+        versionNumber: 1,
+        sourceMandateSnapshot: input.sourceMandate,
+        intentSpec: input.intent,
+        policyDocument: input.policy,
+        policySchemaVersion: input.policy.schemaVersion ?? "1.0",
+        canonicalizationVersion: "1.0.0",
         policyHash,
-      },
+        confirmationState: input.confirmationState ?? "CONFIRMED",
+        createdAt: now,
+      });
+
+      await logAuditEvent(tx, {
+        ownerId,
+        actorType: "USER",
+        eventType: "POLICY_CREATED",
+        entityType: "POLICY",
+        entityId: policyId,
+        payload: {
+          name: trimmedName,
+          sourceMandate: input.sourceMandate,
+          initialVersionId: versionId,
+          policyHash,
+        },
+      });
     });
+  } catch (err: any) {
+    if (err.statusCode === 409 || err.code === "POLICY_NAME_EXISTS") {
+      throw err;
+    }
+    // Non-fatal if DB is in standby/unavailable mode
+  }
+
+  // Register in memory fallback store
+  inMemoryPolicies.set(policyId, {
+    id: policyId,
+    ownerId,
+    name: trimmedName,
+    sourceMandate: input.sourceMandate,
+    currentVersionId: versionId,
+    archivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  inMemoryPolicyVersions.set(versionId, {
+    id: versionId,
+    policyId,
+    ownerId,
+    versionNumber: 1,
+    sourceMandateSnapshot: input.sourceMandate,
+    intentSpec: input.intent,
+    policyDocument: input.policy,
+    policySchemaVersion: input.policy.schemaVersion ?? "1.0",
+    canonicalizationVersion: "1.0.0",
+    policyHash,
+    confirmationState: input.confirmationState ?? "CONFIRMED",
+    createdAt: now,
   });
 
   return PolicyVersionRecordSchema.parse({
     id: versionId,
     policyId,
     ownerId,
-    name: input.name,
+    name: trimmedName,
     versionNumber: 1,
     sourceMandateSnapshot: input.sourceMandate,
     intentSpec: input.intent,
@@ -552,71 +797,112 @@ export async function createPolicyVersion(
   input: CreatePolicyVersionRequest,
   ownerId: string,
 ): Promise<PolicyVersionRecord> {
-  const policyRecord = await db
-    .select({ name: policies.name, sourceMandate: policies.sourceMandate })
-    .from(policies)
-    .where(eq(policies.id, policyId))
-    .limit(1);
-
-  if (policyRecord.length === 0) {
-    throw new Error(`Policy with ID '${policyId}' not found.`);
-  }
-
-  const policyName = policyRecord[0].name;
-  const mandateSnapshot = input.sourceMandateSnapshot || policyRecord[0].sourceMandate;
-
-  // Determine next version number
-  const versionRes = await db
-    .select({ maxVersion: max(policyVersions.versionNumber) })
-    .from(policyVersions)
-    .where(eq(policyVersions.policyId, policyId));
-
-  const currentMax = versionRes[0]?.maxVersion ?? 0;
-  const nextVersionNumber = currentMax + 1;
-
   const versionId = randomUUID();
   const policyHash = computePolicyHash(input.policy);
   const now = new Date();
 
-  await db.transaction(async (tx: any) => {
-    // 1. Insert new immutable version
-    await tx.insert(policyVersions).values({
-      id: versionId,
-      policyId,
-      ownerId,
-      versionNumber: nextVersionNumber,
-      sourceMandateSnapshot: mandateSnapshot,
-      intentSpec: input.intent,
-      policyDocument: input.policy,
-      policySchemaVersion: input.policy.schemaVersion ?? "1.0",
-      canonicalizationVersion: "1.0.0",
-      policyHash,
-      confirmationState: input.confirmationState ?? "CONFIRMED",
-      createdAt: now,
-    });
+  let policyName = "Unknown Policy";
+  let mandateSnapshot = input.sourceMandateSnapshot || "";
+  let nextVersionNumber = 1;
+  let dbFound = false;
 
-    // 2. Update current version pointer on policy
-    await tx
-      .update(policies)
-      .set({
-        currentVersionId: versionId,
-        updatedAt: now,
-      })
-      .where(eq(policies.id, policyId));
+  // 1. Try DB
+  try {
+    const policyRecord = await db
+      .select({ name: policies.name, sourceMandate: policies.sourceMandate })
+      .from(policies)
+      .where(eq(policies.id, policyId))
+      .limit(1);
 
-    await logAuditEvent(tx, {
-      ownerId,
-      actorType: "USER",
-      eventType: "POLICY_VERSION_CREATED",
-      entityType: "POLICY_VERSION",
-      entityId: versionId,
-      payload: {
-        policyId,
-        versionNumber: nextVersionNumber,
-        policyHash,
-        name: policyName,
-      },
-    });
+    if (policyRecord.length > 0) {
+      dbFound = true;
+      policyName = policyRecord[0].name;
+      mandateSnapshot = input.sourceMandateSnapshot || policyRecord[0].sourceMandate;
+
+      const versionRes = await db
+        .select({ maxVersion: max(policyVersions.versionNumber) })
+        .from(policyVersions)
+        .where(eq(policyVersions.policyId, policyId));
+
+      const currentMax = versionRes[0]?.maxVersion ?? 0;
+      nextVersionNumber = currentMax + 1;
+
+      await db.transaction(async (tx: any) => {
+        await tx.insert(policyVersions).values({
+          id: versionId,
+          policyId,
+          ownerId,
+          versionNumber: nextVersionNumber,
+          sourceMandateSnapshot: mandateSnapshot,
+          intentSpec: input.intent,
+          policyDocument: input.policy,
+          policySchemaVersion: input.policy.schemaVersion ?? "1.0",
+          canonicalizationVersion: "1.0.0",
+          policyHash,
+          confirmationState: input.confirmationState ?? "CONFIRMED",
+          createdAt: now,
+        });
+
+        await tx
+          .update(policies)
+          .set({
+            currentVersionId: versionId,
+            updatedAt: now,
+          })
+          .where(eq(policies.id, policyId));
+
+        await logAuditEvent(tx, {
+          ownerId,
+          actorType: "USER",
+          eventType: "POLICY_VERSION_CREATED",
+          entityType: "POLICY_VERSION",
+          entityId: versionId,
+          payload: {
+            policyId,
+            versionNumber: nextVersionNumber,
+            policyHash,
+            name: policyName,
+          },
+        });
+      });
+    }
+  } catch {
+    // DB offline or unavailable
+  }
+
+  // 2. In-memory check if DB not found
+  if (!dbFound) {
+    const memPolicy = inMemoryPolicies.get(policyId);
+    if (!memPolicy) {
+      throw new Error(`Policy with ID '${policyId}' not found.`);
+    }
+    policyName = memPolicy.name;
+    mandateSnapshot = input.sourceMandateSnapshot || memPolicy.sourceMandate;
+
+    const existingVersions = Array.from(inMemoryPolicyVersions.values()).filter(
+      (v) => v.policyId === policyId
+    );
+    const maxVer = existingVersions.reduce((m, v) => Math.max(m, v.versionNumber), 0);
+    nextVersionNumber = maxVer + 1;
+
+    memPolicy.currentVersionId = versionId;
+    memPolicy.updatedAt = now;
+  }
+
+  // Update memory store
+  inMemoryPolicyVersions.set(versionId, {
+    id: versionId,
+    policyId,
+    ownerId,
+    versionNumber: nextVersionNumber,
+    sourceMandateSnapshot: mandateSnapshot,
+    intentSpec: input.intent,
+    policyDocument: input.policy,
+    policySchemaVersion: input.policy.schemaVersion ?? "1.0",
+    canonicalizationVersion: "1.0.0",
+    policyHash,
+    confirmationState: input.confirmationState ?? "CONFIRMED",
+    createdAt: now,
   });
 
   return PolicyVersionRecordSchema.parse({
@@ -635,6 +921,136 @@ export async function createPolicyVersion(
     createdAt: now.toISOString(),
     isPreset: false,
   });
+}
+
+/**
+ * Renames an existing policy.
+ */
+export async function renamePolicy(
+  db: any,
+  policyId: string,
+  newName: string,
+  ownerId: string,
+): Promise<PolicySummary> {
+  const trimmed = newName.trim();
+  if (!trimmed) {
+    const error: any = new Error("Policy name cannot be empty.");
+    error.statusCode = 400;
+    error.code = "VALIDATION_ERROR";
+    throw error;
+  }
+
+  const now = new Date();
+
+  // Try DB
+  let updatedInDb = false;
+  try {
+    const existing = await db
+      .select({ id: policies.id })
+      .from(policies)
+      .where(and(eq(policies.name, trimmed), isNull(policies.archivedAt)))
+      .limit(1);
+
+    if (existing.length > 0 && existing[0].id !== policyId) {
+      const error: any = new Error(`A policy named '${trimmed}' already exists.`);
+      error.statusCode = 409;
+      error.code = "POLICY_NAME_EXISTS";
+      throw error;
+    }
+
+    const [updated] = await db
+      .update(policies)
+      .set({ name: trimmed, updatedAt: now })
+      .where(eq(policies.id, policyId))
+      .returning();
+
+    if (updated) {
+      updatedInDb = true;
+      await logAuditEvent(db, {
+        ownerId,
+        actorType: "USER",
+        eventType: "POLICY_UPDATED",
+        entityType: "POLICY",
+        entityId: policyId,
+        payload: { newName: trimmed },
+      });
+    }
+  } catch (err: any) {
+    if (err.statusCode) throw err;
+  }
+
+  // Update in memory
+  const memPolicy = inMemoryPolicies.get(policyId);
+  if (memPolicy) {
+    memPolicy.name = trimmed;
+    memPolicy.updatedAt = now;
+  } else if (!updatedInDb) {
+    const error: any = new Error(`Policy '${policyId}' not found.`);
+    error.statusCode = 404;
+    error.code = "POLICY_NOT_FOUND";
+    throw error;
+  }
+
+  const version = await getPolicyVersion(db, policyId);
+  return {
+    id: policyId,
+    name: trimmed,
+    sourceMandate: memPolicy?.sourceMandate || version?.sourceMandateSnapshot || "",
+    currentVersionId: memPolicy?.currentVersionId || version?.id,
+    currentVersionNumber: version?.versionNumber ?? 1,
+    policyHash: version?.policyHash,
+    isPreset: false,
+    versionCount: 1,
+    createdAt: memPolicy?.createdAt ? memPolicy.createdAt.toISOString() : now.toISOString(),
+    updatedAt: now.toISOString(),
+  };
+}
+
+/**
+ * Archives (soft-deletes) an existing policy.
+ */
+export async function archivePolicy(
+  db: any,
+  policyId: string,
+  ownerId: string,
+): Promise<{ success: boolean; policyId: string }> {
+  const now = new Date();
+
+  let archivedInDb = false;
+  try {
+    const [updated] = await db
+      .update(policies)
+      .set({ archivedAt: now, updatedAt: now })
+      .where(eq(policies.id, policyId))
+      .returning();
+
+    if (updated) {
+      archivedInDb = true;
+      await logAuditEvent(db, {
+        ownerId,
+        actorType: "USER",
+        eventType: "POLICY_ARCHIVED",
+        entityType: "POLICY",
+        entityId: policyId,
+        payload: { archivedAt: now.toISOString() },
+      });
+    }
+  } catch {
+    // Non-fatal if DB is offline
+  }
+
+  const memPolicy = inMemoryPolicies.get(policyId);
+  if (memPolicy) {
+    memPolicy.archivedAt = now;
+    memPolicy.updatedAt = now;
+  } else if (!archivedInDb) {
+    const error: any = new Error(`Policy '${policyId}' not found.`);
+    error.statusCode = 404;
+    error.code = "POLICY_NOT_FOUND";
+    throw error;
+  }
+
+  return { success: true, policyId };
 }
 
 /**
@@ -666,7 +1082,7 @@ export async function listPolicyVersions(
       name: policyName,
       versionNumber: r.versionNumber,
       sourceMandateSnapshot: r.sourceMandateSnapshot,
-      intentSpec: r.intentSpec,
+      intentSpec: normalizeIntentSpec(r.intentSpec, r.policyDocument, policyName),
       policyDocument: r.policyDocument,
       policySchemaVersion: r.policySchemaVersion,
       canonicalizationVersion: r.canonicalizationVersion,

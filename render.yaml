@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: warrant-api
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/live
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        value: Warrant Studio <notifications@warrant.studio>
+      - key: LOG_LEVEL
+        value: info
+      - key: CHECKOUT_NONCE_TTL_SECONDS
+        value: "300"
+      - key: BUYER_APPROVAL_RESERVATION_TTL_SECONDS
+        value: "900"
+      - key: RECONCILIATION_ALERT_AFTER_SECONDS
+        value: "900"
+      - key: SEARCH_MAX_CANDIDATES
+        value: "100"
+      - key: SEARCH_TIMEOUT_MS
+        value: "10000"

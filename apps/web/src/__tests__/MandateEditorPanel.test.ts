@@ -49,7 +49,7 @@ describe("MandateEditorPanel", () => {
   it("renders workstation header and adversarial prompt shield", () => {
     const html = renderToStaticMarkup(React.createElement(MandateEditorPanel));
     expect(html).toContain("Purchase Mandate Compiler");
-    expect(html).toContain("Phase 1: Intent → Policy");
+    expect(html).toContain("Intent → Policy Rule Engine");
     expect(html).toContain("Adversarial Prompt Shield Active");
     expect(html).toContain("Neutralizes jailbreak attempts");
   });

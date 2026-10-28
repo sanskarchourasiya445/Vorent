@@ -7,7 +7,7 @@ import {
 import { computePolicyHash } from "../verification/policyHash.js";
 
 /**
- * Warrant Phase 2 Policy Semantic Diffing
+ * Warrant Policy Semantic Diffing
  *
  * Compares two PolicyDocument instances and produces a structured, human-readable diff
  * identifying all field-level additions, removals, and modifications.

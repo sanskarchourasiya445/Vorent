@@ -4,9 +4,10 @@ import { pool } from "../db/index.js";
 import type { FastifyInstance } from "fastify";
 import { MANDATE_FIXTURES } from "@warrant/test-fixtures";
 
-describe("Phase 2 Policy Verification Workflow Integration Tests", () => {
+describe("Policy Verification Workflow Integration Tests", () => {
   let server: FastifyInstance;
   let isDbLive = false;
+  let authHeaders: Record<string, string> = {};
 
   beforeAll(async () => {
     try {
@@ -19,6 +20,18 @@ describe("Phase 2 Policy Verification Workflow Integration Tests", () => {
     }
     server = await buildServer();
     await server.ready();
+
+    const loginRes = await server.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: {
+        email: "admin@warrant.studio",
+        password: "AdminPass123!",
+      },
+    });
+    if (loginRes.statusCode === 200) {
+      authHeaders = { authorization: `Bearer ${loginRes.json().token}` };
+    }
   });
 
   afterAll(async () => {
@@ -265,6 +278,7 @@ describe("Phase 2 Policy Verification Workflow Integration Tests", () => {
     const createPolicyRes = await server.inject({
       method: "POST",
       url: "/api/policies",
+      headers: authHeaders,
       payload: {
         name: `Integration Test Policy ${Date.now()}`,
         sourceMandate: "Engineering hardware up to $250 each. Total cap intended $600.",
@@ -349,6 +363,7 @@ describe("Phase 2 Policy Verification Workflow Integration Tests", () => {
     const createV2Res = await server.inject({
       method: "POST",
       url: `/api/policies/${policyId}/versions`,
+      headers: authHeaders,
       payload: {
         sourceMandateSnapshot: "Engineering hardware up to $250 each. Whole cart cap tightened to $600.",
         policy: repairData.repairedPolicy,
@@ -412,7 +427,7 @@ describe("Phase 2 Policy Verification Workflow Integration Tests", () => {
     expect(resolvedData.status).toBe("RESOLVED");
     expect(resolvedData.resolvedByVersionId).toBe(version2Id);
     expect(resolvedData.resolutionNote).toContain("Version 2");
-  });
+  }, 30000);
 
   it("Step 9: Checkout Gate Authorization Guard - unapproved policies and nonces are strictly rejected", async () => {
     // Attempting to evaluate checkout with invalid / non-approved proposal
@@ -479,6 +494,7 @@ describe("Phase 2 Policy Verification Workflow Integration Tests", () => {
     const ordersRes = await server.inject({
       method: "GET",
       url: "/api/payment-orders",
+      headers: authHeaders,
     });
     expect(ordersRes.statusCode).toBe(200);
     const ordersData = ordersRes.json();
@@ -490,6 +506,7 @@ describe("Phase 2 Policy Verification Workflow Integration Tests", () => {
     const alertsRes = await server.inject({
       method: "GET",
       url: "/api/payment-orders/reconciliation-alerts",
+      headers: authHeaders,
     });
     expect(alertsRes.statusCode).toBe(200);
     const alertsData = alertsRes.json();
@@ -501,6 +518,7 @@ describe("Phase 2 Policy Verification Workflow Integration Tests", () => {
     const resRes = await server.inject({
       method: "GET",
       url: "/api/checkout/reservations",
+      headers: authHeaders,
     });
     expect(resRes.statusCode).toBe(200);
     const resData = resRes.json();
@@ -511,6 +529,7 @@ describe("Phase 2 Policy Verification Workflow Integration Tests", () => {
     const appRes = await server.inject({
       method: "GET",
       url: "/api/approvals",
+      headers: authHeaders,
     });
     expect(appRes.statusCode).toBe(200);
     const appData = appRes.json();

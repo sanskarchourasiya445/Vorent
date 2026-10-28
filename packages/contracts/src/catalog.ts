@@ -1,5 +1,5 @@
 /**
- * Authoritative Product Catalog for Warrant Studio.
+ * Authoritative Product Catalog for VORENT.
  *
  * In accordance with the security architecture:
  * The AI shopping agent or client submits purchase proposals with SKU and quantity.
@@ -223,6 +223,13 @@ export const AUTHORITATIVE_CATALOG: Record<string, CatalogItem> = {
     title: "Enterprise Software License",
     category: "software_license",
     unitPriceMinor: 75000,
+    currency: "USD",
+  },
+  "EXPENSIVE-001": {
+    sku: "EXPENSIVE-001",
+    title: "Server Cluster Rack",
+    category: "Peripherals",
+    unitPriceMinor: 500000,
     currency: "USD",
   },
 };

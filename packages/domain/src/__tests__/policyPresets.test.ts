@@ -12,7 +12,7 @@ import {
 import { computePolicyHash } from "../verification/policyHash.js";
 import { evaluatePolicy } from "../evaluator.js";
 
-describe("Policy Preset Consistency Suite (LEAN-001 & LEAN-009)", () => {
+describe("Policy Preset Consistency Suite", () => {
   it("exports all 3 canonical presets in CANONICAL_POLICY_PRESETS and POLICY_PRESET_LIST", () => {
     expect(Object.keys(CANONICAL_POLICY_PRESETS)).toEqual([
       "pol_v1_books_hardware",

@@ -27,7 +27,7 @@ export interface AuthoritativeReportResult {
 /**
  * Fetches the authoritative Evaluation Report directly from Fastify backend (GET /api/evaluation/report).
  * Adheres strictly to shared EvaluationReportResponseSchema contract.
- * LEAN-008: Directly queries the canonical endpoint without sequential trial loops.
+ * Directly queries the canonical endpoint without sequential trial loops.
  */
 export async function fetchAuthoritativeEvaluationReport(): Promise<AuthoritativeReportResult> {
   const url = `${API_BASE}/api/evaluation/report`;

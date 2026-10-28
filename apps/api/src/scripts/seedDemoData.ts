@@ -12,8 +12,10 @@ import {
   paymentOrders,
   auditEvents,
 } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import crypto from "node:crypto";
+import type { PolicyDocument } from "@warrant/contracts";
+import { computePolicyHash } from "@warrant/domain";
 
 const DEMO_OPERATOR_AUTH = "demo_syn_operator";
 
@@ -24,7 +26,7 @@ export async function seedDemoData(): Promise<{
 }> {
   const startTime = Date.now();
   console.log("------------------------------------------------------------");
-  console.log("Warrant Studio — Seeding Canonical Demo Records [IDEMPOTENT]");
+  console.log("VORENT — Seeding Canonical Demo Records [IDEMPOTENT]");
   console.log("------------------------------------------------------------");
 
   // Rule 3: Reset and seed scripts must refuse any non-localhost DATABASE_URL.
@@ -135,15 +137,21 @@ export async function seedDemoData(): Promise<{
     const policyId = demoPolicy.id;
 
     // 3. Policy Version 1: Flawed version with loophole (causes Decision D-014 Warning)
-    const v1Hash = crypto
-      .createHash("sha256")
-      .update("demo_synthetic_v1_flawed_hash")
-      .digest("hex");
+    const version1Document: PolicyDocument = {
+      schemaVersion: "1.0",
+      currency: "USD",
+      maxItemPriceMinor: 50000,
+      maxCartTotalMinor: 75000,
+      allowedCategories: ["software_license", "Reference Books", "Peripherals"],
+      prohibitedCategories: ["Weapons", "Adult", "Gift Cards"],
+      requireEvidence: true,
+    };
+    const v1Hash = computePolicyHash(version1Document);
 
     let [version1] = await db
       .select()
       .from(policyVersions)
-      .where(eq(policyVersions.policyHash, v1Hash));
+      .where(and(eq(policyVersions.policyId, policyId), eq(policyVersions.versionNumber, 1)));
 
     if (!version1) {
       const [inserted] = await db
@@ -154,13 +162,7 @@ export async function seedDemoData(): Promise<{
           versionNumber: 1,
           sourceMandateSnapshot: demoPolicy.sourceMandate,
           intentSpec: {
-            rules: [
-              { id: "R1", type: "MAX_PER_ITEM", limitMinor: 50000 },
-              { id: "R2", type: "MAX_TOTAL", limitMinor: 75000 },
-            ],
-          },
-          policyDocument: {
-            schemaVersion: "1.0",
+            name: "[DEMO-SYNTHETIC] Autonomous Procurement Mandate",
             currency: "USD",
             maxItemPriceMinor: 50000,
             maxCartTotalMinor: 75000,
@@ -168,6 +170,7 @@ export async function seedDemoData(): Promise<{
             prohibitedCategories: ["Weapons", "Adult", "Gift Cards"],
             requireEvidence: true,
           },
+          policyDocument: version1Document,
           policySchemaVersion: "1.0.0",
           canonicalizationVersion: "RFC8785",
           policyHash: v1Hash,
@@ -177,7 +180,15 @@ export async function seedDemoData(): Promise<{
       version1 = inserted!;
       console.log(`[SEED] Created policy version 1 (un-repaired): ${version1.id}`);
     } else {
-      console.log(`[SEED] Found existing policy version 1: ${version1.id}`);
+      if (version1.policyHash !== v1Hash) {
+        await db
+          .update(policyVersions)
+          .set({ policyHash: v1Hash, policyDocument: version1Document })
+          .where(eq(policyVersions.id, version1.id));
+        version1.policyHash = v1Hash;
+        version1.policyDocument = version1Document;
+      }
+      console.log(`[SEED] Synchronized policy version 1: ${version1.id}`);
     }
 
     // 4. Test Run on Version 1: Discovers critical counterexample
@@ -265,15 +276,21 @@ export async function seedDemoData(): Promise<{
     }
 
     // 6. Policy Version 2: Repaired policy version
-    const v2Hash = crypto
-      .createHash("sha256")
-      .update("demo_synthetic_v2_repaired_hash")
-      .digest("hex");
+    const version2Document: PolicyDocument = {
+      schemaVersion: "1.0",
+      currency: "USD",
+      maxItemPriceMinor: 70000,
+      maxCartTotalMinor: 75000,
+      allowedCategories: ["software_license", "Reference Books", "Peripherals"],
+      prohibitedCategories: ["Weapons", "Adult", "Gift Cards"],
+      requireEvidence: true,
+    };
+    const v2Hash = computePolicyHash(version2Document);
 
     let [version2] = await db
       .select()
       .from(policyVersions)
-      .where(eq(policyVersions.policyHash, v2Hash));
+      .where(and(eq(policyVersions.policyId, policyId), eq(policyVersions.versionNumber, 2)));
 
     if (!version2) {
       const [inserted] = await db
@@ -285,13 +302,7 @@ export async function seedDemoData(): Promise<{
           sourceMandateSnapshot:
             "Enforce strict per-item cap of $700.00 and max transaction of $750.00 across approved software vendors.",
           intentSpec: {
-            rules: [
-              { id: "R1", type: "MAX_PER_ITEM", limitMinor: 70000 },
-              { id: "R2", type: "MAX_TOTAL", limitMinor: 75000 },
-            ],
-          },
-          policyDocument: {
-            schemaVersion: "1.0",
+            name: "[DEMO-SYNTHETIC] Autonomous Procurement Mandate (Repaired)",
             currency: "USD",
             maxItemPriceMinor: 70000,
             maxCartTotalMinor: 75000,
@@ -299,6 +310,7 @@ export async function seedDemoData(): Promise<{
             prohibitedCategories: ["Weapons", "Adult", "Gift Cards"],
             requireEvidence: true,
           },
+          policyDocument: version2Document,
           policySchemaVersion: "1.0.0",
           canonicalizationVersion: "RFC8785",
           policyHash: v2Hash,
@@ -307,7 +319,22 @@ export async function seedDemoData(): Promise<{
         .returning();
       version2 = inserted!;
       console.log(`[SEED] Created policy version 2 (repaired): ${version2.id}`);
+    } else {
+      if (version2.policyHash !== v2Hash) {
+        await db
+          .update(policyVersions)
+          .set({ policyHash: v2Hash, policyDocument: version2Document })
+          .where(eq(policyVersions.id, version2.id));
+        version2.policyHash = v2Hash;
+        version2.policyDocument = version2Document;
+      }
+      console.log(`[SEED] Synchronized policy version 2: ${version2.id}`);
     }
+
+    await db
+      .update(policies)
+      .set({ currentVersionId: version2.id })
+      .where(eq(policies.id, policyId));
 
     // 7. Test Run on Version 2: Clean verification run
     let [testRun2] = await db
@@ -369,6 +396,15 @@ export async function seedDemoData(): Promise<{
         .returning();
       approval = inserted!;
       console.log(`[SEED] Created active approval ($1,500.00 cap): ${approval.id}`);
+    } else {
+      if (approval.policyHash !== v2Hash) {
+        await db
+          .update(approvals)
+          .set({ policyHash: v2Hash })
+          .where(eq(approvals.id, approval.id));
+        approval.policyHash = v2Hash;
+      }
+      console.log(`[SEED] Synchronized approval: ${approval.id}`);
     }
 
     // 9. Checkout Nonce
@@ -394,6 +430,12 @@ export async function seedDemoData(): Promise<{
         })
         .returning();
       nonce = inserted!;
+    } else if (nonce.policyHash !== v2Hash) {
+      await db
+        .update(checkoutNonces)
+        .set({ policyHash: v2Hash })
+        .where(eq(checkoutNonces.id, nonce.id));
+      nonce.policyHash = v2Hash;
     }
 
     // 10. Checkout Proposal
@@ -434,6 +476,12 @@ export async function seedDemoData(): Promise<{
         })
         .returning();
       proposal = inserted!;
+    } else if (proposal.policyHash !== v2Hash) {
+      await db
+        .update(checkoutProposals)
+        .set({ policyHash: v2Hash })
+        .where(eq(checkoutProposals.id, proposal.id));
+      proposal.policyHash = v2Hash;
     }
 
     // 11. Spend Reservation: $240.00 locked

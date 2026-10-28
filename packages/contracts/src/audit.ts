@@ -16,6 +16,8 @@ export type ActorType = z.infer<typeof ActorTypeZodSchema>;
  */
 export const AuditEventTypeZodSchema = z.enum([
   "POLICY_CREATED",
+  "POLICY_UPDATED",
+  "POLICY_ARCHIVED",
   "POLICY_VERSION_CREATED",
   "VERIFICATION_RUN_COMPLETED",
   "FINDING_RESOLVED",
@@ -39,6 +41,12 @@ export const AuditEventTypeZodSchema = z.enum([
   "USER_REGISTERED",
   "USER_LOGGED_IN",
   "USER_LOGGED_OUT",
+  "USER_PROFILE_UPDATED",
+  "USER_PREFERENCES_UPDATED",
+  "USER_PASSWORD_CHANGED",
+  "ORGANIZATION_MEMBER_ADDED",
+  "EMAIL_NOTIFICATION_SENT",
+  "EMAIL_NOTIFICATION_FAILED",
 ]);
 export type AuditEventType = z.infer<typeof AuditEventTypeZodSchema>;
 
@@ -57,6 +65,8 @@ export const EntityTypeZodSchema = z.enum([
   "PAYMENT_ORDER",
   "WEBHOOK_EVENT",
   "USER",
+  "ORGANIZATION_MEMBER",
+  "EMAIL_NOTIFICATION",
 ]);
 
 export type EntityType = z.infer<typeof EntityTypeZodSchema>;

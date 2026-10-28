@@ -6,7 +6,7 @@ import { Sidebar, MobileNavDrawer } from "../components/navigation/Sidebar";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-describe("Milestone 2 Shell & Navigation Empirical Stress Tests", () => {
+describe("Shell & Navigation Empirical Stress Tests", () => {
   let mockStorage: Record<string, string> = {};
 
   beforeEach(() => {

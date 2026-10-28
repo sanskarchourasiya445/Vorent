@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { EvidencePacketLoadResult } from "../../types/evaluation";
 import { downloadEvidencePacket } from "../../api/evaluationService";
+import { Skeleton, SkeletonCodeBlock } from "../ui/Skeleton";
 
 interface EvidencePacketCardProps {
   packetResult: EvidencePacketLoadResult;
@@ -104,11 +105,12 @@ export function EvidencePacketCard({
 
   return (
     <div className="border border-border rounded bg-surface shadow-xs overflow-hidden" data-testid="evidence-packet-card">
-      {/* Header */}
-      <div className="p-4 sm:p-5 border-b border-border flex flex-col md:flex-row md:items-center justify-between gap-3 bg-surface">
-        <div>
-          <div className="flex items-center space-x-2">
-            <PackageCheck className="w-5 h-5 text-accent" aria-hidden="true" />
+      {/* Header & Controls */}
+      <div className="p-4 sm:p-5 border-b border-border bg-surface space-y-4">
+        {/* Full-width Title & Description */}
+        <div className="w-full">
+          <div className="flex flex-wrap items-center gap-2">
+            <PackageCheck className="w-5 h-5 text-accent shrink-0" aria-hidden="true" />
             <h2 className="text-base font-semibold text-ink tracking-tight font-sans">
               Cryptographic Evidence Packet &amp; Attestation
             </h2>
@@ -116,15 +118,16 @@ export function EvidencePacketCard({
               v1.0.0
             </span>
           </div>
-          <p className="text-xs text-muted mt-1 leading-relaxed font-sans">
+          <p className="text-xs text-muted mt-1 leading-relaxed font-sans max-w-4xl">
             Tamper-evident, reproducible attestation bundle binding mandate intent, cryptographic policy SHA-256 digest, bounded verification proof, buyer approvals, gate nonces, and PayPal Sandbox reconciliation.
           </p>
         </div>
 
-        <div className="flex flex-col gap-2 shrink-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center space-x-1.5 bg-surface-inset px-2.5 py-1 rounded border border-border text-xs">
-              <span className="text-[11px] font-semibold text-muted uppercase font-mono">Target:</span>
+        {/* Full-width Responsive Control Ribbon */}
+        <div className="pt-3 border-t border-border/60 flex flex-col xl:flex-row xl:items-center justify-between gap-3 min-w-0">
+          <div className="flex flex-wrap items-center gap-2.5 min-w-0 flex-1">
+            <div className="inline-flex flex-wrap items-center gap-1.5 bg-surface-inset px-2.5 py-1.5 rounded border border-border text-xs min-w-0 max-w-full">
+              <span className="text-[11px] font-semibold text-muted uppercase font-mono shrink-0">Target:</span>
               <select
                 value={selectedEntityType}
                 onChange={(e) => {
@@ -138,7 +141,7 @@ export function EvidencePacketCard({
                     setTargetEntityId("ord_sample_id");
                   }
                 }}
-                className="px-2 py-0.5 rounded bg-surface border border-border text-ink text-xs font-mono cursor-pointer"
+                className="px-2 py-1 rounded bg-surface border border-border text-ink text-xs font-mono cursor-pointer min-w-0 max-w-full focus:outline-none focus:ring-1 focus:ring-accent"
                 data-testid="target-entity-type-select"
               >
                 <option value="POLICY_VERSION">Policy Version (/policies/:versionId)</option>
@@ -150,11 +153,51 @@ export function EvidencePacketCard({
                 value={targetEntityId}
                 onChange={(e) => setTargetEntityId(e.target.value)}
                 placeholder="Identifier"
-                className="px-2 py-0.5 rounded bg-surface border border-border text-ink text-xs font-mono w-40 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+                className="px-2 py-1 rounded bg-surface border border-border text-ink text-xs font-mono w-48 min-w-[120px] max-w-full focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 data-testid="target-entity-id-input"
               />
             </div>
 
+            {/* Quick Target Presets */}
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
+              <span className="text-muted text-[10px] uppercase font-semibold shrink-0">Presets:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedEntityType("POLICY_VERSION");
+                  setTargetEntityId("pol_v1_books_hardware");
+                  onRefresh({ entityType: "POLICY_VERSION", entityId: "pol_v1_books_hardware" });
+                }}
+                className="px-1.5 py-0.5 rounded bg-surface-inset hover:bg-surface-raised border border-border text-ink transition-colors cursor-pointer text-[11px]"
+              >
+                pol_v1_books_hardware
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedEntityType("CHECKOUT_PROPOSAL");
+                  setTargetEntityId("prop_sample_id");
+                  onRefresh({ entityType: "CHECKOUT_PROPOSAL", entityId: "prop_sample_id" });
+                }}
+                className="px-1.5 py-0.5 rounded bg-surface-inset hover:bg-surface-raised border border-border text-ink transition-colors cursor-pointer text-[11px]"
+              >
+                prop_sample_id
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedEntityType("PAYMENT_ORDER");
+                  setTargetEntityId("ord_sample_id");
+                  onRefresh({ entityType: "PAYMENT_ORDER", entityId: "ord_sample_id" });
+                }}
+                className="px-1.5 py-0.5 rounded bg-surface-inset hover:bg-surface-raised border border-border text-ink transition-colors cursor-pointer text-[11px]"
+              >
+                ord_sample_id
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => onRefresh({ entityType: selectedEntityType, entityId: targetEntityId.trim() })}
@@ -180,44 +223,6 @@ export function EvidencePacketCard({
             >
               <Download className="w-3.5 h-3.5" aria-hidden="true" />
               <span>{packet ? "Export Evidence Packet (JSON)" : "Export Unavailable"}</span>
-            </button>
-          </div>
-
-          {/* Quick Target Presets */}
-          <div className="flex items-center space-x-1.5 text-[11px] font-mono">
-            <span className="text-muted">Presets:</span>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedEntityType("POLICY_VERSION");
-                setTargetEntityId("pol_v1_books_hardware");
-                onRefresh({ entityType: "POLICY_VERSION", entityId: "pol_v1_books_hardware" });
-              }}
-              className="px-1.5 py-0.5 rounded bg-surface-inset hover:bg-surface-raised border border-border text-ink transition-colors"
-            >
-              pol_v1_books_hardware
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedEntityType("CHECKOUT_PROPOSAL");
-                setTargetEntityId("prop_sample_id");
-                onRefresh({ entityType: "CHECKOUT_PROPOSAL", entityId: "prop_sample_id" });
-              }}
-              className="px-1.5 py-0.5 rounded bg-surface-inset hover:bg-surface-raised border border-border text-ink transition-colors"
-            >
-              prop_sample_id
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedEntityType("PAYMENT_ORDER");
-                setTargetEntityId("ord_sample_id");
-                onRefresh({ entityType: "PAYMENT_ORDER", entityId: "ord_sample_id" });
-              }}
-              className="px-1.5 py-0.5 rounded bg-surface-inset hover:bg-surface-raised border border-border text-ink transition-colors"
-            >
-              ord_sample_id
             </button>
           </div>
         </div>
@@ -278,9 +283,17 @@ export function EvidencePacketCard({
 
       {/* Loading State */}
       {isLoading ? (
-        <div className="p-8 text-center text-muted space-y-2" data-testid="packet-loading">
-          <RefreshCw className="w-6 h-6 animate-spin mx-auto text-accent" aria-hidden="true" />
-          <p className="text-xs font-medium font-mono">Assembling cryptographic evidence packet from backend...</p>
+        <div className="p-4 sm:p-5 space-y-4" data-testid="packet-loading">
+          <div className="p-3 rounded-lg border border-border bg-surface-inset text-center text-muted flex items-center justify-center space-x-2.5">
+            <RefreshCw className="w-4 h-4 animate-spin text-accent" aria-hidden="true" />
+            <p className="text-xs font-medium font-mono">Assembling cryptographic evidence packet from backend...</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Skeleton variant="rectangular" className="h-14 rounded-lg" />
+            <Skeleton variant="rectangular" className="h-14 rounded-lg" />
+            <Skeleton variant="rectangular" className="h-14 rounded-lg" />
+          </div>
+          <SkeletonCodeBlock lines={7} />
         </div>
       ) : !packet ? (
         <div className="p-8 text-center border-t border-border bg-surface-inset" data-testid="packet-empty-state">
@@ -294,30 +307,32 @@ export function EvidencePacketCard({
         /* Verified Evidence Packet Display */
         <div className="p-4 sm:p-5 space-y-5" data-testid="packet-content">
           {/* Top Verification Status Bar */}
-          <div className="p-3.5 rounded bg-surface-inset border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-            <div className="flex items-center space-x-3">
-              <span className={`inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded text-xs font-semibold border ${getStatusBadge(packet.overallStatus).className}`}>
+          <div className="p-3.5 rounded bg-surface-inset border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs min-w-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 min-w-0">
+              <span className={`inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded text-xs font-semibold border shrink-0 ${getStatusBadge(packet.overallStatus).className}`}>
                 {getStatusBadge(packet.overallStatus).icon}
                 <span>{getStatusBadge(packet.overallStatus).label}</span>
               </span>
-              <span className="text-muted font-mono text-[11px]">
+              <span className="text-muted font-mono text-[11px] truncate min-w-0">
                 Packet ID: <strong className="text-ink">{packet.packetId}</strong>
               </span>
             </div>
 
-            <div className="flex items-center space-x-2 text-[11px] text-muted font-mono">
+            <div className="flex items-center space-x-2 text-[11px] text-muted font-mono shrink-0">
               <span>Generated: {new Date(packet.generatedAt).toLocaleString()}</span>
             </div>
           </div>
 
           {/* SHA-256 Digest Box */}
-          <div className="p-3 rounded bg-surface-inset border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-            <div className="flex items-center space-x-2">
-              <Lock className="w-3.5 h-3.5 text-accent shrink-0" aria-hidden="true" />
-              <span className="font-semibold text-ink uppercase tracking-wider text-[11px] font-mono">
-                SHA-256 Packet Digest:
-              </span>
-              <span className="font-mono text-[11px] text-ink break-all select-all font-semibold" data-testid="packet-hash">
+          <div className="p-3 rounded bg-surface-inset border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs min-w-0">
+            <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+              <div className="flex items-center space-x-1.5 shrink-0">
+                <Lock className="w-3.5 h-3.5 text-accent shrink-0" aria-hidden="true" />
+                <span className="font-semibold text-ink uppercase tracking-wider text-[11px] font-mono">
+                  SHA-256 Packet Digest:
+                </span>
+              </div>
+              <span className="font-mono text-[11px] text-ink break-all select-all font-semibold min-w-0" data-testid="packet-hash">
                 {packet.packetHash}
               </span>
             </div>
