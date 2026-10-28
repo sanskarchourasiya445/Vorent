@@ -211,8 +211,12 @@ const AppContent: React.FC<AppProps> = function AppContent({
     if (initialView) return initialView;
     if (typeof window !== "undefined" && window.location) {
       const isTest =
-        typeof process !== "undefined" &&
-        (process.env.VITEST === "true" || process.env.NODE_ENV === "test");
+        import.meta.env.MODE === "test" ||
+        (typeof globalThis !== "undefined" &&
+          Boolean(
+            (globalThis as any).process?.env?.VITEST === "true" ||
+            (globalThis as any).process?.env?.NODE_ENV === "test"
+          ));
 
       const route = parseRoute(window.location);
 
@@ -861,8 +865,12 @@ const AppContent: React.FC<AppProps> = function AppContent({
 
 export const App: React.FC<AppProps> = function App(props = {}) {
   const isTest =
-    typeof process !== "undefined" &&
-    (process.env.VITEST === "true" || process.env.NODE_ENV === "test");
+    import.meta.env.MODE === "test" ||
+    (typeof globalThis !== "undefined" &&
+      Boolean(
+        (globalThis as any).process?.env?.VITEST === "true" ||
+        (globalThis as any).process?.env?.NODE_ENV === "test"
+      ));
 
   const defaultTestUser: AuthUser | null =
     isTest && props.initialUser === undefined && props.initialView !== "landing"

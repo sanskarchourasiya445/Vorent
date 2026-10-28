@@ -162,7 +162,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({
     setError(null);
     // Find persona password if available in non-production
     const targetPersona = personas.find((p) => p.email.toLowerCase() === email.toLowerCase());
-    const pass = plainPassword || targetPersona?.passwordHint || (process.env.NODE_ENV !== "production" ? "AdminPass123!" : undefined);
+    const pass = plainPassword || targetPersona?.passwordHint || (!import.meta.env.PROD ? "AdminPass123!" : undefined);
     if (!pass) {
       throw new Error(`Password required to authenticate as ${email}.`);
     }

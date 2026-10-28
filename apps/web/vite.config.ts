@@ -8,6 +8,12 @@ export default defineConfig({
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
       "lenis": fileURLToPath(new URL("./src/lib/lenis.ts", import.meta.url)),
+      "@warrant/contracts": fileURLToPath(
+        new URL("../../packages/contracts/src/index.ts", import.meta.url)
+      ),
+      "@warrant/test-fixtures": fileURLToPath(
+        new URL("../../packages/test-fixtures/src/index.ts", import.meta.url)
+      ),
     },
   },
   server: {

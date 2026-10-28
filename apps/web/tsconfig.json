@@ -19,8 +19,11 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "lenis": ["./src/lib/lenis.ts"]
+      "lenis": ["./src/lib/lenis.ts"],
+      "@warrant/contracts": ["../../packages/contracts/src/index.ts"],
+      "@warrant/test-fixtures": ["../../packages/test-fixtures/src/index.ts"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/__tests__", "**/*.test.ts", "**/*.test.tsx"]
 }
