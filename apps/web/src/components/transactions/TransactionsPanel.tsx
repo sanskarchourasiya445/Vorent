@@ -36,7 +36,7 @@ import type {
 } from "@warrant/contracts";
 import { HashBadge } from "../ui/HashBadge";
 import { StatusBadge } from "../ui/StatusBadge";
-import { Skeleton, SkeletonCodeBlock } from "../ui/Skeleton";
+import { Skeleton, SkeletonCodeBlock, SkeletonTable } from "../ui/Skeleton";
 
 interface TransactionsPanelProps {
   initialOrderId?: string;
@@ -1033,9 +1033,33 @@ export function TransactionsPanel({ initialOrderId }: TransactionsPanelProps) {
 
             {/* Ledger Rows Table */}
             {recentOrdersState === "LOADING" && recentOrders.length === 0 ? (
-              <div className="py-8 text-center text-xs text-muted font-mono space-y-2">
-                <RefreshCw className="w-5 h-5 animate-spin mx-auto text-accent" />
-                <div>Querying payment orders ledger...</div>
+              <div className="p-4 space-y-3">
+                <div className="flex items-center space-x-2 text-xs text-muted font-mono">
+                  <RefreshCw className="w-4 h-4 animate-spin text-accent" />
+                  <span>Querying payment orders ledger...</span>
+                </div>
+                <SkeletonTable
+                  columns={["Internal Order ID", "PayPal Order ID", "Status", "Amount", "Reservation", "Created", "Action"]}
+                  rows={4}
+                />
+              </div>
+            ) : recentOrdersState === "ERROR" && recentOrders.length === 0 ? (
+              <div className="py-10 text-center text-xs text-deny space-y-3 border border-deny/30 bg-deny/5 rounded-lg m-4">
+                <div className="flex items-center justify-center space-x-2">
+                  <AlertCircle className="w-4 h-4 text-deny" />
+                  <span className="font-semibold">Failed to load payment orders ledger</span>
+                </div>
+                <p className="text-[11px] text-muted max-w-md mx-auto">
+                  Unable to connect to the backend payment orders endpoint or database service.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void loadRecentOrders()}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-primary hover:bg-primary-hover text-white transition-colors cursor-pointer shadow-2xs"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Retry Loading Orders</span>
+                </button>
               </div>
             ) : filteredRecentOrders.length > 0 ? (
               <div className="overflow-x-auto max-h-[520px] overflow-y-auto" data-lenis-prevent>

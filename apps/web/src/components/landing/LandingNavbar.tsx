@@ -44,8 +44,8 @@ export function LandingNavbar({
   };
 
   return (
-    <header className="sticky top-0 z-40 w-full bg-chrome/95 backdrop-blur-md border-b border-border transition-colors duration-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+    <header className="sticky top-0 z-50 w-full bg-chrome/95 backdrop-blur-md border-b border-border shadow-2xs transition-colors duration-200">
+      <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-12 h-14 flex items-center justify-between">
         {/* Brand identity & Sandbox Badge */}
         <div className="flex items-center space-x-3 sm:space-x-4">
           <button
@@ -165,7 +165,7 @@ export function LandingNavbar({
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="lg:hidden border-t border-border bg-chrome px-4 py-4 space-y-3 animate-in slide-in-from-top-2 duration-150">
+        <div className="lg:hidden border-t border-border bg-chrome px-4 py-4 space-y-3 animate-in slide-in-from-top-2 duration-150 max-h-[calc(100vh-3.5rem)] overflow-y-auto">
           <div className="flex items-center justify-between pb-2 border-b border-border/50">
             <span className="text-xs font-mono text-muted uppercase tracking-wider">Navigation</span>
             <StatusBadge status="SANDBOX" variant="SANDBOX" size="sm" showDot={true} />

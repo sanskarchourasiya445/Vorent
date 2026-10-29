@@ -14,8 +14,8 @@ export interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 /**
- * Core primitive Skeleton component matching the VORENT Midnight Navy and Light Ivory design system.
- * Features GPU-accelerated shimmer sweeping and WCAG motion-reduce compliance.
+ * Premium subtle filled slate-gray Skeleton primitive matching VORENT Midnight Navy and Light Ivory design system.
+ * Features subtle non-outlined slate fill, GPU-accelerated shimmer sweeping, and WCAG motion-reduce compliance.
  */
 export function Skeleton({
   variant = "rectangular",
@@ -68,14 +68,14 @@ export function Skeleton({
           return (
             <div
               key={i}
-              className={`relative overflow-hidden bg-surface-inset/80 border border-border/40 rounded h-3.5 ${
+              className={`relative overflow-hidden bg-slate-200 dark:bg-slate-700/60 rounded h-3.5 ${
                 animate ? "motion-safe:animate-pulse motion-reduce:animate-none" : ""
               }`}
               style={{ width: lineWidth }}
             >
               {shimmer && (
                 <div
-                  className="absolute inset-0 -translate-x-full animate-skeleton-shimmer bg-gradient-to-r from-transparent via-white/5 dark:via-accent/15 to-transparent pointer-events-none"
+                  className="absolute inset-0 -translate-x-full animate-skeleton-shimmer bg-gradient-to-r from-transparent via-white/50 dark:via-white/10 to-transparent pointer-events-none"
                   aria-hidden="true"
                 />
               )}
@@ -91,7 +91,7 @@ export function Skeleton({
       role="status"
       aria-label="Loading content..."
       data-testid={testId}
-      className={`relative overflow-hidden bg-surface-inset/80 border border-border/40 ${getVariantClasses()} ${
+      className={`relative overflow-hidden bg-slate-200 dark:bg-slate-700/60 ${getVariantClasses()} ${
         animate ? "motion-safe:animate-pulse motion-reduce:animate-none" : ""
       } ${className}`}
       style={inlineStyles}
@@ -99,7 +99,7 @@ export function Skeleton({
     >
       {shimmer && (
         <div
-          className="absolute inset-0 -translate-x-full animate-skeleton-shimmer bg-gradient-to-r from-transparent via-white/5 dark:via-accent/15 to-transparent pointer-events-none"
+          className="absolute inset-0 -translate-x-full animate-skeleton-shimmer bg-gradient-to-r from-transparent via-white/50 dark:via-white/10 to-transparent pointer-events-none"
           aria-hidden="true"
         />
       )}
@@ -113,30 +113,21 @@ export function Skeleton({
 export function SkeletonMetricCard({ className = "" }: { className?: string }) {
   return (
     <div
-      className={`bg-surface border border-border rounded-lg p-5 shadow-2xs space-y-4 ${className}`}
+      className={`bg-surface border border-border rounded-lg p-5 shadow-2xs space-y-4 flex flex-col justify-between min-h-[120px] ${className}`}
       role="status"
       aria-label="Loading metric..."
       data-testid="skeleton-metric-card"
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2.5">
-          <Skeleton variant="circular" className="w-8 h-8" />
-          <div className="space-y-1">
-            <Skeleton variant="text" className="w-24 h-3.5" />
-            <Skeleton variant="text" className="w-16 h-2.5" />
-          </div>
+          <Skeleton variant="circular" className="w-8 h-8 rounded-full" />
+          <Skeleton variant="text" className="w-24 h-3.5" />
         </div>
-        <Skeleton variant="badge" className="w-12 h-5" />
+        <Skeleton variant="circular" className="w-3.5 h-3.5 opacity-40 rounded-full" />
       </div>
 
-      <div className="space-y-2 pt-1">
-        <Skeleton variant="rectangular" className="w-32 h-7" />
-        <Skeleton variant="text" className="w-48 h-3" />
-      </div>
-
-      <div className="pt-3 border-t border-border/50 flex items-center justify-between">
-        <Skeleton variant="text" className="w-20 h-2.5" />
-        <Skeleton variant="button" className="w-14 h-5 rounded" />
+      <div className="pt-1">
+        <Skeleton variant="rectangular" className="w-20 h-8 rounded" />
       </div>
     </div>
   );
@@ -277,9 +268,9 @@ export function SkeletonCodeBlock({
     >
       <div className="flex items-center justify-between pb-2 border-b border-border/40">
         <div className="flex items-center space-x-2">
-          <span className="w-2 h-2 rounded-full bg-border" />
-          <span className="w-2 h-2 rounded-full bg-border" />
-          <span className="w-2 h-2 rounded-full bg-border" />
+          <span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-700" />
+          <span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-700" />
+          <span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-700" />
           <Skeleton variant="text" className="w-32 h-3 ml-2" />
         </div>
         <Skeleton variant="badge" className="w-14 h-4" />
@@ -393,7 +384,152 @@ export function SkeletonApprovalList({ count = 2 }: { count?: number }) {
 }
 
 /**
- * Full Dashboard Skeleton mirroring the Governance Dashboard layout.
+ * Verification Engine card skeleton matching Governance Dashboard Row 2 Left.
+ */
+export function SkeletonVerificationEngine({ className = "" }: { className?: string }) {
+  return (
+    <div className={`bg-surface border border-border rounded-lg shadow-2xs overflow-hidden flex flex-col justify-between ${className}`}>
+      <div>
+        <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-surface">
+          <div className="flex items-center space-x-2.5">
+            <Skeleton variant="circular" className="w-7 h-7" />
+            <Skeleton variant="text" className="w-36 h-4" />
+          </div>
+          <Skeleton variant="text" className="w-36 h-3" />
+        </div>
+
+        <div className="p-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="p-3.5 rounded-lg border border-border bg-surface-inset space-y-2 flex flex-col justify-between min-h-[92px]">
+              <Skeleton variant="text" className="w-28 h-2.5" />
+              <Skeleton variant="text" className="w-36 h-3.5 font-mono" />
+              <Skeleton variant="text" className="w-24 h-2.5" />
+            </div>
+            <div className="p-3.5 rounded-lg border border-border bg-surface-inset space-y-2 flex flex-col justify-between min-h-[92px]">
+              <Skeleton variant="text" className="w-28 h-2.5" />
+              <Skeleton variant="text" className="w-24 h-3.5" />
+              <Skeleton variant="text" className="w-20 h-2.5" />
+            </div>
+            <div className="p-3.5 rounded-lg border border-border bg-surface-inset space-y-2 flex flex-col justify-between min-h-[92px]">
+              <Skeleton variant="text" className="w-28 h-2.5" />
+              <Skeleton variant="text" className="w-20 h-3.5" />
+              <Skeleton variant="text" className="w-32 h-2.5" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-5 py-3 border-t border-border/80 bg-surface-inset">
+        <Skeleton variant="text" className="w-full max-w-xl h-2.5" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * System Health & Security Status widget skeleton matching Governance Dashboard Row 2 Right.
+ */
+export function SkeletonSystemHealth({ className = "" }: { className?: string }) {
+  return (
+    <div className={`bg-surface border border-border rounded-lg shadow-2xs overflow-hidden flex flex-col justify-between ${className}`}>
+      <div>
+        <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-surface">
+          <div className="flex items-center space-x-2.5">
+            <Skeleton variant="circular" className="w-7 h-7" />
+            <Skeleton variant="text" className="w-40 h-4" />
+          </div>
+          <Skeleton variant="badge" className="w-16 h-5" />
+        </div>
+
+        <div className="divide-y divide-border/60">
+          {["Policy Rules", "Budget Limits", "Purchase Validation", "Replay Protection", "Reason Codes"].map((label, idx) => (
+            <div key={idx} className="px-5 py-2.5 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Skeleton variant="circular" className="w-3.5 h-3.5" />
+                <span className="text-xs text-muted/80">{label}</span>
+              </div>
+              <Skeleton variant="text" className="w-24 h-3" />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="px-5 py-2.5 border-t border-border/80 bg-surface-inset flex justify-end">
+        <Skeleton variant="text" className="w-28 h-3" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Financial Liquidity & Spend Authority Ledger skeleton matching Governance Dashboard Row 4 Left.
+ */
+export function SkeletonFinancialLiquidity({ className = "" }: { className?: string }) {
+  return (
+    <div className={`bg-surface border border-border rounded-lg shadow-2xs overflow-hidden flex flex-col justify-between ${className}`}>
+      <div>
+        <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-surface">
+          <div className="flex items-center space-x-2">
+            <Skeleton variant="circular" className="w-4 h-4" />
+            <Skeleton variant="text" className="w-56 h-3.5" />
+          </div>
+          <Skeleton variant="text" className="w-20 h-3" />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border">
+          {/* Authorized Budget */}
+          <div className="p-5 flex flex-col justify-between space-y-3 min-h-[160px]">
+            <div>
+              <Skeleton variant="text" className="w-24 h-2.5" />
+              <div className="mt-2 space-y-2">
+                <Skeleton variant="rectangular" className="w-28 h-7 rounded" />
+                <Skeleton variant="rectangular" className="w-full h-1.5 rounded-full" />
+                <Skeleton variant="text" className="w-20 h-2.5" />
+              </div>
+            </div>
+            <div className="border-t border-border pt-2">
+              <Skeleton variant="text" className="w-36 h-2.5" />
+            </div>
+          </div>
+
+          {/* Approvals */}
+          <div className="p-5 flex flex-col justify-between space-y-3 min-h-[160px]">
+            <div>
+              <Skeleton variant="text" className="w-16 h-2.5" />
+              <div className="mt-2 space-y-2">
+                <Skeleton variant="rectangular" className="w-14 h-7 rounded" />
+                <Skeleton variant="text" className="w-28 h-2.5" />
+              </div>
+            </div>
+            <div className="border-t border-border pt-2 flex justify-between">
+              <Skeleton variant="text" className="w-14 h-2.5" />
+              <Skeleton variant="text" className="w-14 h-2.5" />
+            </div>
+          </div>
+
+          {/* Payment Orders */}
+          <div className="p-5 flex flex-col justify-between space-y-3 min-h-[160px]">
+            <div>
+              <Skeleton variant="text" className="w-24 h-2.5" />
+              <div className="mt-2 space-y-2">
+                <Skeleton variant="rectangular" className="w-14 h-7 rounded" />
+                <Skeleton variant="text" className="w-32 h-2.5" />
+              </div>
+            </div>
+            <div className="border-t border-border pt-2 flex justify-between">
+              <Skeleton variant="text" className="w-16 h-2.5" />
+              <Skeleton variant="text" className="w-14 h-2.5" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Full Dashboard Skeleton mirroring the Governance Dashboard layout with exact KPI cards,
+ * verification engine, system health, financial liquidity, and transaction tables.
  * Prevents Cumulative Layout Shift (CLS) while remote metrics and ledger states load.
  */
 export function SkeletonDashboard({ className = "" }: { className?: string }) {
@@ -411,55 +547,76 @@ export function SkeletonDashboard({ className = "" }: { className?: string }) {
         <SkeletonMetricCard />
       </div>
 
-      {/* Operational Posture Banner Skeleton */}
-      <div className="p-4 rounded-lg border border-border bg-surface flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <Skeleton variant="circular" className="w-7 h-7" />
-          <div className="space-y-1.5">
-            <Skeleton variant="text" className="w-56 h-3.5" />
-            <Skeleton variant="text" className="w-96 max-w-full h-2.5" />
-          </div>
+      {/* Row 2: Verification Engine (7 cols) & System Health & Policy Status (5 cols) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        <div className="lg:col-span-7">
+          <SkeletonVerificationEngine />
         </div>
-        <Skeleton variant="button" className="w-28 h-7 hidden sm:block" />
+        <div className="lg:col-span-5">
+          <SkeletonSystemHealth />
+        </div>
       </div>
 
-      {/* Row 2: Two-Column Main Operational Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Active Policies & AST (7 cols) */}
-        <div className="lg:col-span-7 space-y-4">
-          <div className="rounded-xl border border-border bg-surface p-5 shadow-2xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-border/50">
-              <div className="flex items-center space-x-2">
-                <Skeleton variant="circular" className="w-5 h-5" />
-                <Skeleton variant="text" className="w-40 h-4" />
-              </div>
-              <Skeleton variant="badge" className="w-20 h-5" />
-            </div>
-            <SkeletonCodeBlock lines={5} />
-            <div className="grid grid-cols-3 gap-3 pt-2">
-              <Skeleton variant="rectangular" className="h-12 rounded-lg" />
-              <Skeleton variant="rectangular" className="h-12 rounded-lg" />
-              <Skeleton variant="rectangular" className="h-12 rounded-lg" />
-            </div>
+      {/* Row 3: Full-Width Recent Activity Table */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center space-x-2">
+            <Skeleton variant="circular" className="w-4 h-4" />
+            <Skeleton variant="text" className="w-32 h-4" />
           </div>
+          <Skeleton variant="text" className="w-20 h-3" />
         </div>
+        <SkeletonTable
+          columns={["Time", "Type", "Details", "Status", "Action"]}
+          rows={3}
+        />
+      </div>
 
-        {/* Right Column: Spend Reservations & Idempotency Locks (5 cols) */}
+      {/* Row 4: Financial Liquidity & Spend Authority Ledger (7 cols) & Policy Versions (5 cols) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        <div className="lg:col-span-7">
+          <SkeletonFinancialLiquidity />
+        </div>
         <div className="lg:col-span-5 space-y-4">
-          <div className="rounded-xl border border-border bg-surface p-5 shadow-2xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-border/50">
+          <div className="rounded-lg border border-border bg-surface p-4 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-border/50">
               <div className="flex items-center space-x-2">
-                <Skeleton variant="circular" className="w-5 h-5" />
-                <Skeleton variant="text" className="w-36 h-4" />
+                <Skeleton variant="circular" className="w-4 h-4" />
+                <Skeleton variant="text" className="w-48 h-3.5" />
               </div>
-              <Skeleton variant="button" className="w-16 h-6" />
+              <Skeleton variant="text" className="w-24 h-3" />
             </div>
-            <div className="space-y-2.5">
-              <Skeleton variant="text" lines={3} />
+            <SkeletonCodeBlock lines={3} />
+            <div className="space-y-2 pt-1">
+              <Skeleton variant="rectangular" className="h-10 rounded-md" />
+              <Skeleton variant="rectangular" className="h-10 rounded-md" />
             </div>
-            <SkeletonTable columns={3} rows={3} showHeader={false} />
           </div>
         </div>
+      </div>
+
+      {/* Row 5: Full-Width Transaction Ledger Table */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center space-x-2">
+            <Skeleton variant="circular" className="w-4 h-4" />
+            <Skeleton variant="text" className="w-44 h-4" />
+          </div>
+          <Skeleton variant="text" className="w-24 h-3" />
+        </div>
+        <SkeletonTable
+          columns={["Date & Time", "Type", "PayPal Order ID / Details", "Amount", "Status", "Action"]}
+          rows={3}
+        />
+      </div>
+
+      {/* Operational Footer Status Strip Skeleton */}
+      <div className="px-4 py-2.5 rounded-lg bg-surface border border-border flex items-center justify-between shadow-2xs">
+        <div className="flex items-center space-x-2">
+          <Skeleton variant="circular" className="w-3.5 h-3.5" />
+          <Skeleton variant="text" className="w-72 sm:w-96 max-w-full h-3" />
+        </div>
+        <Skeleton variant="text" className="w-36 h-2.5 hidden sm:block" />
       </div>
     </div>
   );

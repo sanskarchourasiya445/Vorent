@@ -30,8 +30,8 @@ export function VorentLandingPage({
   }, []);
 
   return (
-    <div className="min-h-screen w-full overflow-x-hidden bg-canvas text-ink flex flex-col font-sans antialiased selection:bg-accent selection:text-white">
-      {/* 1. Top Navigation Bar */}
+    <div className="min-h-screen w-full overflow-x-clip bg-canvas text-ink flex flex-col font-sans antialiased selection:bg-accent selection:text-white">
+      {/* 1. Top Navigation Bar - Sticky across full page scroll */}
       <LandingNavbar
         onLaunchConsole={handleLaunch}
         onOpenLogin={onOpenLogin}
@@ -39,7 +39,7 @@ export function VorentLandingPage({
       />
 
       {/* Main Page Flow */}
-      <main className="flex-1 w-full overflow-x-hidden">
+      <main className="flex-1 w-full overflow-x-clip">
         {/* 2. Hero Section with 3D Product Experience & Prominent CTAs */}
         <LandingHero
           onLaunchConsole={handleLaunch}

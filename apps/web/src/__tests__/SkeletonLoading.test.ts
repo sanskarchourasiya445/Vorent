@@ -19,7 +19,7 @@ describe("VORENT Premium Skeleton Loading UI Suite", () => {
       expect(html).toContain('role="status"');
       expect(html).toContain('aria-label="Loading content..."');
       expect(html).toContain("rounded-md");
-      expect(html).toContain("bg-surface-inset/80");
+      expect(html).toContain("bg-slate-200");
       expect(html).toContain("animate-skeleton-shimmer");
       expect(html).toContain("motion-safe:animate-pulse");
       expect(html).toContain("motion-reduce:animate-none");

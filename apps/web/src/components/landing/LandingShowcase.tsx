@@ -93,7 +93,7 @@ export function LandingShowcase({ onLaunchConsole }: LandingShowcaseProps) {
   const currentImage = resolvedTheme === "light" ? activeTab.lightImage : activeTab.darkImage;
 
   return (
-    <section id="showcase" className="py-16 sm:py-24 bg-canvas-subtle/50">
+    <section id="showcase" className="scroll-mt-16 py-16 sm:py-24 bg-canvas-subtle/50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3">

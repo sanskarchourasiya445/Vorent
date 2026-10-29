@@ -47,7 +47,7 @@ export function LandingFaq() {
   };
 
   return (
-    <section id="faq" className="py-16 sm:py-24 bg-canvas">
+    <section id="faq" className="scroll-mt-16 py-16 sm:py-24 bg-canvas">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
         {/* Section Header */}
         <div className="text-center space-y-3">

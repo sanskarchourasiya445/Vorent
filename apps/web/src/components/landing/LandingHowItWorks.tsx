@@ -51,7 +51,7 @@ export function LandingHowItWorks() {
   ];
 
   return (
-    <section id="how-it-works" className="py-16 sm:py-24 bg-canvas-subtle/40">
+    <section id="how-it-works" className="scroll-mt-16 py-16 sm:py-24 bg-canvas-subtle/40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3">

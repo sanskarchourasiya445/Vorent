@@ -43,6 +43,34 @@ import type { SavedVerificationRunSummary } from "../../types/persistence";
 
 export type DashboardItemState = "IDLE" | "LOADING" | "READY" | "EMPTY" | "UNAVAILABLE" | "ERROR";
 
+function withTimeout<T>(promise: Promise<T>, ms: number, fallbackValue: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(fallbackValue);
+      }
+    }, ms);
+
+    promise
+      .then((val) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(val);
+        }
+      })
+      .catch(() => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(fallbackValue);
+        }
+      });
+  });
+}
+
 export interface GovernanceDashboardPanelProps {
   onNavigateWorkstation: (workstationId: string) => void;
   initialApprovals?: ApprovalRecord[];
@@ -140,54 +168,73 @@ export function GovernanceDashboardPanel({
     setError(null);
 
     try {
+      // Execute all 7 queries concurrently with individual 8-second safety timeouts
+      const [
+        approvalsSettled,
+        ordersSettled,
+        alertsSettled,
+        resvSettled,
+        policiesSettled,
+        runsSettled,
+        findingsSettled,
+      ] = await Promise.allSettled([
+        withTimeout(fetchApprovals(), 8000, { state: "ERROR" as const, message: "Request timed out" } as any),
+        withTimeout(listPaymentOrders(), 8000, { orders: [], state: "ERROR" as const, isUnmounted: false } as any),
+        withTimeout(getReconciliationAlerts(), 8000, { unreconciledOrders: [], heldReservations: [], totalAlerts: 0, state: "ERROR" as const, isUnmounted: false } as any),
+        withTimeout(listSpendReservations(), 8000, { reservations: [], total: 0, state: "ERROR" as const, isUnmounted: false } as any),
+        withTimeout(fetchPolicySummaries(), 8000, { state: { state: "ERROR" as const }, isFallback: false } as any),
+        withTimeout(fetchSavedVerificationRuns(), 8000, { data: [], state: "ERROR" as const } as any),
+        withTimeout(fetchFindings(), 8000, { findings: [] } as any),
+      ]);
+
       // 1. Approvals & Spend
-      try {
-        const approvalsRes = await fetchApprovals();
+      if (approvalsSettled.status === "fulfilled") {
+        const approvalsRes = approvalsSettled.value;
         setApprovalsState(approvalsRes.state);
         if (approvalsRes.state === "READY") {
           setApprovals(approvalsRes.data);
         } else {
           setApprovals([]);
         }
-      } catch {
+      } else {
         setApprovals([]);
         setApprovalsState("ERROR");
       }
 
-      // 3. Payment Orders
-      try {
-        const ordersRes = await listPaymentOrders();
-        setPaymentOrders(ordersRes.orders);
+      // 2. Payment Orders
+      if (ordersSettled.status === "fulfilled") {
+        const ordersRes = ordersSettled.value;
+        setPaymentOrders(ordersRes.orders || []);
         setPaymentOrdersState(ordersRes.state);
         setOrdersEndpointUnmounted(Boolean(ordersRes.isUnmounted));
-      } catch {
+      } else {
         setPaymentOrders([]);
         setPaymentOrdersState("ERROR");
       }
 
-      // 4. Reconciliation Alerts
-      try {
-        const alertsRes = await getReconciliationAlerts();
+      // 3. Reconciliation Alerts
+      if (alertsSettled.status === "fulfilled") {
+        const alertsRes = alertsSettled.value;
         setReconciliationAlerts(alertsRes);
         setReconciliationAlertsState(alertsRes.state);
-      } catch {
+      } else {
         setReconciliationAlerts(null);
         setReconciliationAlertsState("ERROR");
       }
 
-      // 5. Spend Reservations
-      try {
-        const resvRes = await listSpendReservations();
-        setSpendReservations(resvRes.reservations);
+      // 4. Spend Reservations
+      if (resvSettled.status === "fulfilled") {
+        const resvRes = resvSettled.value;
+        setSpendReservations(resvRes.reservations || []);
         setReservationsState(resvRes.state);
-      } catch {
+      } else {
         setSpendReservations([]);
         setReservationsState("ERROR");
       }
 
-      // 6. Policy Summaries
-      try {
-        const policiesRes = await fetchPolicySummaries();
+      // 5. Policy Summaries
+      if (policiesSettled.status === "fulfilled") {
+        const policiesRes = policiesSettled.value;
         if (policiesRes.state.state === "READY") {
           setPolicies(policiesRes.state.data);
           setPoliciesState("READY");
@@ -199,31 +246,31 @@ export function GovernanceDashboardPanel({
           setPolicies([]);
           setPoliciesState(policiesRes.state.state);
         }
-      } catch {
+      } else {
         setPolicies([]);
         setPoliciesState("ERROR");
       }
 
-      // 7. Verification Runs
-      try {
-        const runsRes = await fetchSavedVerificationRuns();
+      // 6. Verification Runs
+      if (runsSettled.status === "fulfilled") {
+        const runsRes = runsSettled.value;
         setRunsState(runsRes.state);
         if (runsRes.state === "READY") {
           setRuns(runsRes.data);
         } else {
           setRuns([]);
         }
-      } catch {
+      } else {
         setRuns([]);
         setRunsState("ERROR");
       }
 
-      // 8. Findings
-      try {
-        const findingsRes = await fetchFindings();
-        setFindings(findingsRes.findings);
+      // 7. Findings
+      if (findingsSettled.status === "fulfilled") {
+        const findingsRes = findingsSettled.value;
+        setFindings(findingsRes.findings || []);
         setFindingsState("READY");
-      } catch {
+      } else {
         setFindings([]);
         setFindingsState("UNAVAILABLE");
       }
@@ -241,6 +288,13 @@ export function GovernanceDashboardPanel({
 
   useEffect(() => {
     void loadAllDashboardData();
+
+    // Absolute fallback safety timer: ensure skeletons never hang indefinitely
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 9000);
+
+    return () => clearTimeout(safetyTimer);
   }, [loadAllDashboardData]);
 
   // Derived Metrics & Calculations
@@ -719,7 +773,23 @@ export function GovernanceDashboardPanel({
             </div>
 
             <div className="p-5 space-y-4">
-              {runs.length === 0 && runsState !== "UNAVAILABLE" ? (
+              {runsState === "ERROR" ? (
+                <div className="py-6 px-4 text-center text-xs text-deny border border-deny/30 bg-deny/5 rounded-lg space-y-2">
+                  <div className="flex items-center justify-center space-x-2">
+                    <AlertCircle className="w-4 h-4 text-deny shrink-0" />
+                    <span className="font-semibold">Unable to retrieve verification runs.</span>
+                  </div>
+                  <p className="text-[11px] text-muted">A connection or database error occurred while fetching run history.</p>
+                  <button
+                    type="button"
+                    onClick={() => void loadAllDashboardData(true)}
+                    className="inline-flex items-center space-x-1 px-2.5 py-1 rounded text-xs font-semibold bg-surface border border-border text-ink hover:bg-surface-raised cursor-pointer"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Retry</span>
+                  </button>
+                </div>
+              ) : runs.length === 0 && runsState !== "UNAVAILABLE" ? (
                 <div className="py-6 text-center text-xs text-muted border border-dashed border-border bg-surface-inset rounded-lg">
                   No persisted test runs recorded yet. Run a bounded verification search in Verification Studio to evaluate policy invariants.
                 </div>
@@ -969,6 +1039,14 @@ export function GovernanceDashboardPanel({
                       <div>
                         <div className="text-lg font-bold font-mono text-deny">Sync Error</div>
                         <div className="text-xs text-deny font-sans">Retryable connection failure</div>
+                        <button
+                          type="button"
+                          onClick={() => void loadAllDashboardData(true)}
+                          className="text-xs text-primary underline hover:text-primary-hover font-semibold mt-1 inline-flex items-center space-x-1 cursor-pointer"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>Retry</span>
+                        </button>
                       </div>
                     ) : (
                       <>
@@ -1011,13 +1089,30 @@ export function GovernanceDashboardPanel({
                     Approvals
                   </span>
                   <div className="mt-2 min-h-[56px] flex flex-col justify-end">
-                    <div className="text-2xl font-bold font-mono text-ink tracking-tight tabular-nums flex items-baseline">
-                      <span>{activeApprovals.length}</span>
-                      <span className="text-xs text-muted font-normal ml-1.5 font-sans">active</span>
-                    </div>
-                    <div className="text-xs text-muted mt-1">
-                      {activeApprovals.length === 1 ? "1 checkpoint active" : `${activeApprovals.length} checkpoints active`}
-                    </div>
+                    {approvalsState === "ERROR" ? (
+                      <div>
+                        <div className="text-lg font-bold font-mono text-deny">Sync Error</div>
+                        <div className="text-xs text-deny font-sans">Unable to load checkpoints</div>
+                        <button
+                          type="button"
+                          onClick={() => void loadAllDashboardData(true)}
+                          className="text-xs text-primary underline hover:text-primary-hover font-semibold mt-1 inline-flex items-center space-x-1 cursor-pointer"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>Retry</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-2xl font-bold font-mono text-ink tracking-tight tabular-nums flex items-baseline">
+                          <span>{activeApprovals.length}</span>
+                          <span className="text-xs text-muted font-normal ml-1.5 font-sans">active</span>
+                        </div>
+                        <div className="text-xs text-muted mt-1">
+                          {activeApprovals.length === 1 ? "1 checkpoint active" : `${activeApprovals.length} checkpoints active`}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="border-t border-border pt-2 text-[11px] text-muted font-sans flex justify-between">
@@ -1041,7 +1136,15 @@ export function GovernanceDashboardPanel({
                     ) : paymentOrdersState === "ERROR" ? (
                       <div>
                         <div className="text-lg font-bold font-mono text-deny">Sync Error</div>
-                        <div className="text-xs text-deny font-sans">Check orders</div>
+                        <div className="text-xs text-deny font-sans">Check orders ledger</div>
+                        <button
+                          type="button"
+                          onClick={() => void loadAllDashboardData(true)}
+                          className="text-xs text-primary underline hover:text-primary-hover font-semibold mt-1 inline-flex items-center space-x-1 cursor-pointer"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>Retry</span>
+                        </button>
                       </div>
                     ) : (
                       <>
@@ -1095,7 +1198,23 @@ export function GovernanceDashboardPanel({
                   Standard reference presets active.
                 </div>
               )}
-              {policies.length === 0 && policiesState !== "UNAVAILABLE" ? (
+              {policiesState === "ERROR" ? (
+                <div className="py-6 px-4 text-center text-xs text-deny border border-deny/30 bg-deny/5 rounded-lg space-y-2">
+                  <div className="flex items-center justify-center space-x-2">
+                    <AlertCircle className="w-4 h-4 text-deny shrink-0" />
+                    <span className="font-semibold">Unable to load policy versions.</span>
+                  </div>
+                  <p className="text-[11px] text-muted">A connection or database error occurred while fetching policies.</p>
+                  <button
+                    type="button"
+                    onClick={() => void loadAllDashboardData(true)}
+                    className="inline-flex items-center space-x-1 px-2.5 py-1 rounded text-xs font-semibold bg-surface border border-border text-ink hover:bg-surface-raised cursor-pointer"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Retry</span>
+                  </button>
+                </div>
+              ) : policies.length === 0 && policiesState !== "UNAVAILABLE" ? (
                 <div className="py-6 text-center text-xs text-muted border border-dashed border-border bg-surface-inset rounded-lg">
                   No policies registered
                 </div>
@@ -1170,7 +1289,23 @@ export function GovernanceDashboardPanel({
         </div>
 
         <div className="overflow-x-auto">
-          {activeApprovals.length === 0 && paymentOrders.length === 0 && approvalsState !== "ERROR" ? (
+          {paymentOrdersState === "ERROR" ? (
+            <div className="p-8 text-center text-xs text-deny space-y-3">
+              <div className="flex items-center justify-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-deny" />
+                <span className="font-semibold">Failed to load transaction ledger.</span>
+              </div>
+              <p className="text-[11px] text-muted">Unable to connect to the payment orders endpoint.</p>
+              <button
+                type="button"
+                onClick={() => void loadAllDashboardData(true)}
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-primary hover:bg-primary-hover text-white transition-colors cursor-pointer shadow-2xs"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Retry Loading Transactions</span>
+              </button>
+            </div>
+          ) : activeApprovals.length === 0 && paymentOrders.length === 0 && approvalsState !== "ERROR" ? (
             <div className="p-8 text-center text-xs text-muted space-y-2">
               <p>No active approvals currently registered. Complete verification in Verification Studio and create a qualifying approval checkpoint.</p>
               <p className="text-[11px] text-muted">
